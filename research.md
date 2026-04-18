@@ -417,17 +417,65 @@ go-git does not address multi-agent staging races. It faithfully reproduces git'
 - Git SCM book coverage: https://git-scm.com/book/en/v2/Appendix-B:-Embedding-Git-in-your-Applications-go-git
 
 
-## Eliminated Projects
+## Rejected Candidates
 
-The following were researched and excluded:
+### Forking C Git
 
-- **libgit2** (C library): Mature, powers GitHub/Azure DevOps/GitLab, but it's a C library that faithfully reproduces git's index model. No CLI, no concurrency solution.
-- **JGit** (Java library): Most feature-complete reimplementation, powers Gerrit and Eclipse. But it's a Java library, no CLI, no concurrency solution.
-- **gitoxide (gix)** (Rust library): Pure Rust reimplementation, excellent engineering, but 87% one-person project (bus factor), CLI cannot commit/push/pull, and faithfully reproduces git's index model. No concurrency solution.
-- **Game of Trees** (C reimplementation for OpenBSD): Niche, written in C, different command syntax, no concurrency solution.
-- **Pijul** (Rust, patch-based VCS): Completely different model, not git-compatible at all.
-- **Radicle** (Rust, P2P collaboration): A collaboration layer on top of git, not a git replacement.
-- **git-branchless** (Rust, git extension): Adds undo/smartlog/revsets to git, but does not address staging races.
+The most direct approach -- fork git's C codebase and strip/modify what we don't like -- was rejected. Git is ~400k lines of C with decades of tightly intertwined internals (index, refs, pack files, hooks all cross-reference each other). Stripping features is surprisingly hard. Maintaining a fork means inheriting the entire security patch and protocol update burden, perpetually merging from upstream. No one has ever successfully forked C git and gained traction. Every successful effort has been a ground-up reimplementation.
+
+### libgit2 (C)
+
+- Repo: https://github.com/libgit2/libgit2
+- Started: 2008 by Shawn O. Pearce (also created JGit and Gerrit). Gained momentum when GitHub sponsored it ~2010.
+- Maintainer: Edward Thomson (primary for 10+ years, now at Vanta). Historically funded through GitHub/Microsoft employment.
+- Status: Mature, v1.9.x current, v2.0 planned. 10.4k stars.
+- What it is: In-process C library for Git operations. No CLI. Pluggable storage backends. Used by GitHub (merges PRs with it), Azure DevOps, GitLab (though actively deprecating it), Visual Studio, Cargo (via git2-rs).
+- **Why rejected**: Library only, no CLI. Written in C (memory safety concerns). Faithfully reproduces git's index/locking model -- does not address staging races or any concurrency problem. GitLab is actively moving away from it. Being gradually replaced by gitoxide in the Rust ecosystem.
+
+### JGit (Java)
+
+- Repo: https://github.com/eclipse-jgit/jgit
+- Started: 2006 by Shawn O. Pearce. Created for Eclipse IDE and Gerrit Code Review.
+- Maintainer: Matthias Sohn (SAP, project lead). Contributors from Google, GerritForge. Eclipse Foundation governance.
+- Status: Mature, v7.6.0 (March 2026). 678 commits/year, 23 contributors.
+- What it is: Pure Java library. The most feature-complete reimplementation of git (nearly full parity). Powers Gerrit (all Android development flows through it), Eclipse IDE, Jenkins, Bitbucket Server.
+- **Why rejected**: Library only, no CLI. Java runtime dependency is heavy for a CLI tool. Faithfully reproduces git's index model -- no concurrency solution. Missing SSH key commit signing, some config options, SVN bridge, bundles.
+
+### gitoxide / gix (Rust)
+
+- Repo: https://github.com/GitoxideLabs/gitoxide
+- Started: June 2018 by Sebastian Thiel (former 3D movie pipeline dev, ThoughtWorks contractor).
+- Maintainer: Essentially one person -- Thiel has 12,889 of ~14,845 commits (87%). Works on it at night; day job is contracting for GitButler. Funded by GitHub Sponsors, a $20k Meta grant, Rust Foundation grant, and GitHub Secure Open Source Fund.
+- Status: Active, 211k LOC across 65 crates, ~24.5 commits/week, 11.2k stars. Monthly retrospectives.
+- What it is: Pure Rust reimplementation of git (no C dependencies -- even zlib is pure Rust and beats C zlib-ng by 1%). Library-first; the CLI is explicitly "may forever be unstable." Can clone and fetch but cannot commit, push, pull, merge, or rebase.
+- Used by: Cargo (fetches use gitoxide), GitButler (backend), Jujutsu (git backend uses gix), Starship.
+- **Why rejected**: CLI cannot commit/push/pull -- not usable as a daily driver. Faithfully reproduces git's index/locking model -- no concurrency solution. Critical bus factor: if Thiel stops, the project is in serious trouble. Excellent engineering but solves a different problem (safe, fast, embeddable git library for Rust programs).
+
+### Game of Trees (C)
+
+- Website: https://gameoftrees.org
+- Started: OpenBSD project. Uses git repo format but its own codebase and command names (`got` instead of `git`).
+- Status: Active but niche (targets OpenBSD developers specifically). Latest release v0.121 (Jan 2026). Has a server daemon (`gotd`). ISC-licensed.
+- **Why rejected**: Written in C. Extremely niche (OpenBSD only). Different command syntax. No concurrency solution.
+
+### Pijul (Rust)
+
+- Website: https://pijul.org
+- What it is: A mathematically principled VCS based on commutative patch theory (patches can be applied in any order and produce the same result). Completely different model from git -- not snapshot-based but patch-based.
+- Status: Alpha. Small community. Has its own hosting ("The Nest").
+- **Why rejected**: Not git-compatible at all. Uses its own repository format. Can import from git but does not use `.git` repos. Adopting Pijul means abandoning the git ecosystem entirely.
+
+### Radicle (Rust)
+
+- Website: https://radicle.xyz
+- What it is: Peer-to-peer code collaboration stack built on Git. Adds decentralized identity, gossip protocol, and CRDTs for issues/reviews. v1.6.0 (Jan 2026).
+- **Why rejected**: Not a git replacement -- it is a collaboration/hosting layer on top of git. Does not change how staging, committing, or concurrency works. Solves a different problem (decentralized code hosting).
+
+### git-branchless (Rust)
+
+- Repo: https://github.com/arxanas/git-branchless
+- What it is: A git extension suite that adds smartlog, undo, revsets, and fast rebase to standard git. 4k stars. Alpha status.
+- **Why rejected**: Adds useful UX features to git but does not address staging races or concurrent agent safety. `git undo` could help recover from agent mistakes but that's reactive, not preventive. The author (Waleed Khan) is now a Jujutsu maintainer, which says something about where the ideas are converging.
 
 
 ## Conclusion
