@@ -27,6 +27,11 @@
 - Must support non-interactive / headless operation for agent consumption
 - Structured output (JSON) for agent parsing is preferred
 
+## Hooks
+
+- Pre-pre-push hooks: ability to run hooks before a connection to the remote is even established (e.g. validate, lint, or gate before any network I/O to GitHub)
+- Git's built-in `pre-push` hook fires after the remote connection is already open -- this is too late for some use cases
+
 ## Reliability
 
 - Every mutating operation should be undoable
