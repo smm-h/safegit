@@ -5,21 +5,21 @@ safegit is a Go-based wrapper around `git` that makes a single git repository sa
 This document is the architecture spec for v1. It assumes the locked-in decisions in the project README:
 
 - Build a thin wrapper, not a fork of git, jj, or GitButler.
-- Per-agent virtual indexes via `GIT_INDEX_FILE`.
+- Per-invocation tmp index files (rebuilt every safegit invocation from `HEAD`).
 - Object writes are content-addressed and parallel-safe; ref updates use per-ref locks with CAS retry.
 - Hunk-level granularity via `git apply --cached --index`.
-- Direct-`git` mutating ops are denied via three layers (Claude Code hook, `SAFEGIT_AUTHORIZED` env, installed git `pre-commit` hook).
+- Same-machine concurrency only (POSIX `flock(2)` semantics).
 - Stale lock recovery via PID liveness check.
 - Pre-pre-push hooks that run BEFORE any network I/O.
 - `--format json` available everywhere; default is human-readable.
 
-The seven sections that follow describe the data model, commit pipeline, hunk staging API, pre-pre-push hook contract, full CLI surface, failure modes, and concurrency test plan.
+The eight numbered sections that follow describe the data model, commit pipeline, hunk staging API, pre-pre-push hook contract, full CLI surface, failure modes, wip via refs, and the coordination layer. Section 9 covers the concurrency test plan.
 
 ---
 
 ## 1. Data Model
 
-All safegit-specific state lives under `.git/safegit/`. Nothing escapes that directory, so a `rm -rf .git/safegit` returns the repository to the equivalent of "vanilla git" (the `pre-commit` hook installed under `.git/hooks/` is the only exception and is removed by `safegit init --uninstall`).
+All safegit-specific state lives under `.git/safegit/`. Nothing escapes that directory, so a `rm -rf .git/safegit` returns the repository to the equivalent of "vanilla git". safegit does NOT install enforcement git hooks (see Section 4 for the rationale and the layered enforcement story).
 
 ### 1.1 Directory layout
 
@@ -27,92 +27,65 @@ All safegit-specific state lives under `.git/safegit/`. Nothing escapes that dir
 .git/
   safegit/
     config.json              global safegit config (schema version, defaults)
-    log                       append-only operation log (JSONL)
-    sessions.json             registry of active sessions (mtime-based GC hints)
-    agents/
-      <sid>/
-        index                 per-agent virtual index (binary, git-format)
-        env                   key=value env captured at session start
-        pid                   holder PID (text)
-        started               RFC3339 start timestamp (text)
-        meta.json             optional: agent label, model, parent_sid
-        cwd                   absolute path to working tree at session start
-    queue/
-      refs/
-        heads/<branch>.q      FIFO queue file for ref-lock waiters (one line per waiter: <sid> <pid> <ts>)
+    log                      append-only operation log (JSONL)
     locks/
       refs/
-        heads/<branch>.lock   active ref lock (PID + ts + op_kind)
-      objects.lock            optional coarse lock for pack writes (rare; usually unused)
-    hooks/
-      pre-pre-push            single-file hook (executable)
-      pre-pre-push.d/         directory of hooks, run in lexical order
+        heads/<branch>.lock  active ref lock (PID + ts + op_kind)
+      objects.lock           optional coarse lock for pack writes (rare; usually unused)
+    queue/
+      refs/
+        heads/<branch>.q     FIFO queue file for ref-lock waiters (one line per waiter: <pid> <ts>)
+    wip-locks/
+      <file-path-hash>       per-file lock for active wips (contents: <wip-id>)
     tmp/
-      <sid>/                  scratch for synthetic patches, intermediate trees
-.safegit/                      OPTIONAL repo-tracked hooks (checked into VCS)
+      <pid>-<random>/        per-invocation scratch (index file, synthetic patches)
+                             deleted when the invocation exits
   hooks/
-    pre-pre-push
-    pre-pre-push.d/
+    pre-pre-push             single-file hook (executable, optional)
+    pre-pre-push.d/          directory of hooks (run in lexical order, optional)
 ```
 
-`.git/safegit/hooks/` is local; `.safegit/hooks/` is repo-tracked and shared with teammates. Both are run, repo-tracked first, then local. This mirrors `core.hooksPath` semantics without breaking the regular `.git/hooks/` directory.
+There is no `.safegit/` repo-tracked directory. All hooks live in `.git/hooks/` only (see 4.1).
 
-### 1.2 Session lifecycle
+### 1.2 Per-invocation tmp index
 
-A "session" is one agent's working context. Sessions are explicit:
+There are no sessions and no session IDs. Each safegit invocation is a self-contained operation:
 
-- `safegit session start [--label LABEL] [--parent-sid SID]` creates `agents/<sid>/`, writes `pid`, `started`, `env` (the relevant whitelist of `CLAUDE_*`, `SAFEGIT_*`, and `GIT_*` vars), seeds `index` from the current `HEAD` tree, and prints the sid (and a shell snippet to export `SAFEGIT_SID=<sid>` if `--shell` is passed).
-- `safegit session end <sid>` removes `agents/<sid>/` and any stale queue entries.
-- `safegit session list [--format json]` enumerates live and dead sessions.
-- `safegit gc` collects dead sessions (PID gone, `started` older than `gc.maxSessionAge`).
+1. Create `.git/safegit/tmp/<pid>-<random>/` where `<random>` is a short hex suffix (4 bytes) chosen to avoid PID-reuse races within the same second.
+2. Seed the tmp index from `HEAD`:
 
-Implicit sessions: if `SAFEGIT_SID` is unset, safegit will auto-create an ephemeral session keyed off `(hostname, ppid, hash(cwd))`. Ephemeral sessions are GC'd aggressively (`gc.maxEphemeralAge`, default 1h after `pid` becomes dead).
+    ```
+    GIT_INDEX_FILE=.git/safegit/tmp/<pid>-<random>/index \
+      git --no-optional-locks read-tree HEAD
+    ```
 
-### 1.3 Session ID scheme
+3. Apply the requested staging operations against the tmp index (see Section 3).
+4. Build the tree, the commit, and update the ref (see Section 2).
+5. Delete `.git/safegit/tmp/<pid>-<random>/` on exit (success or failure) via `defer`.
 
-Candidate schemes (open question, see end of doc for the unresolved tradeoff):
+There is no incremental staging across safegit invocations. Each `safegit commit` takes a complete file list and produces one commit. There is no `safegit session start`, no `SAFEGIT_SID`, no agent registration, no session GC.
 
-| Scheme | Pros | Cons |
-|---|---|---|
-| Random UUIDv7 | Stable across reconnects, sortable by time | Agent must track and pass `SAFEGIT_SID` |
-| `pid-<PID>-<rand4>` | Easy to debug | PID reuse across long sessions |
-| `sha256(CLAUDE_CONFIG_DIR + ppid + start_ts)[:12]` | Auto-derivable, no state to pass | Collisions if shell is re-exec'd |
+If the process is killed mid-invocation, the tmp directory leaks. `safegit gc` removes any tmp directory whose PID is dead.
 
-v1 ships UUIDv7 as the canonical scheme; if a session-derivable hash is needed for auto-resume after a crash, we add it as a secondary index in `sessions.json`.
+### 1.3 Operation log schema
 
-### 1.4 Per-session vs global state
-
-| Path | Per-session | Global |
-|---|---|---|
-| `agents/<sid>/index` | yes | -- |
-| `agents/<sid>/env`, `pid`, `started` | yes | -- |
-| `tmp/<sid>/` | yes | -- |
-| `log` (append-only) | -- | yes |
-| `queue/refs/heads/<branch>.q` | -- | yes |
-| `locks/refs/heads/<branch>.lock` | -- | yes |
-| `config.json` | -- | yes |
-| `sessions.json` | -- | yes (registry of all sids) |
-
-### 1.5 Operation log schema
-
-`.git/safegit/log` is an append-only JSON-lines file. One line per mutating operation. It is the source of truth for `safegit undo` (post-v1) and `safegit doctor`.
+`.git/safegit/log` is an append-only JSON-lines file. One line per mutating operation. It is the source of truth for `safegit doctor` (and `safegit undo`, post-v1).
 
 ```json
-{"ts":"2026-04-26T11:39:42.123Z","sid":"01927e8a-...-a","op":"stage","file":"lib/foo.go","hunks":[1,3],"index_sha_before":"abc","index_sha_after":"def"}
-{"ts":"2026-04-26T11:39:43.001Z","sid":"01927e8a-...-a","op":"commit","ref":"refs/heads/main","tree":"<sha>","parent":"<sha>","new":"<sha>","attempts":1}
-{"ts":"2026-04-26T11:39:44.500Z","sid":"01927e8a-...-b","op":"commit","ref":"refs/heads/main","tree":"<sha>","parent":"<sha>","new":"<sha>","attempts":3,"cas_misses":2}
-{"ts":"2026-04-26T11:39:45.900Z","sid":"01927e8a-...-c","op":"push","ref":"refs/heads/main","local_sha":"<sha>","remote_sha":"<sha>","hooks_run":["pre-pre-push","pre-pre-push.d/lint"]}
+{"ts":"2026-04-26T11:39:42.123Z","pid":12345,"op":"commit","ref":"refs/heads/main","tree":"<sha>","parent":"<sha>","new":"<sha>","attempts":1}
+{"ts":"2026-04-26T11:39:43.001Z","pid":12346,"op":"commit","ref":"refs/heads/main","tree":"<sha>","parent":"<sha>","new":"<sha>","attempts":3,"cas_misses":2}
+{"ts":"2026-04-26T11:39:44.500Z","pid":12347,"op":"wip","ref":"refs/safegit/wip/a3f9e1c2","files":["src/foo.go","src/bar.go"]}
+{"ts":"2026-04-26T11:39:45.900Z","pid":12348,"op":"push","ref":"refs/heads/main","local_sha":"<sha>","remote_sha":"<sha>","hooks_run":["pre-pre-push","pre-pre-push.d/lint"]}
 ```
 
-Required fields: `ts`, `sid`, `op`. Other fields are op-specific. Writes use `O_APPEND` on Linux/macOS, which guarantees atomic append for writes <= `PIPE_BUF` (4096 bytes). Lines longer than 4096 bytes are rejected (the schema has no field large enough to risk this in v1; commit messages are not logged, only their SHA).
+Required fields: `ts`, `pid`, `op`. Other fields are op-specific. Writes use `O_APPEND` on Linux/macOS, which guarantees atomic append for writes <= `PIPE_BUF` (4096 bytes). Lines longer than 4096 bytes are rejected; commit messages are not logged, only their SHA.
 
-### 1.6 Lock file format
+### 1.4 Lock file format
 
 Lock files (`locks/refs/heads/<branch>.lock`, `locks/objects.lock`) are short text files written atomically via `tmpfile + rename(2)`:
 
 ```
 pid=12345
-sid=01927e8a-...-a
 ts=2026-04-26T11:39:42.123Z
 op=commit
 host=hostname.local
@@ -120,33 +93,39 @@ host=hostname.local
 
 `pid` and `host` are the keys for liveness. `op` is informational (for `safegit doctor` and operator inspection).
 
-### Open questions
+### 1.5 Wip lock file format
 
-- UUIDv7 vs deterministic-hash sid scheme.
-- Whether to namespace `.git/safegit/` differently when the repo is bare or worktreed (multiple worktrees share `.git/`).
+`wip-locks/<file-path-hash>` is a one-line text file containing the wip-id of the active wip that owns the file:
+
+```
+a3f9e1c2
+```
+
+`<file-path-hash>` is `sha256(<repo-relative-path>)[:16]`. See Section 7 for wip semantics.
 
 ---
 
 ## 2. Commit Pipeline
 
-The full sequence for `safegit commit -m "msg" [-- file1 file2 ...]`. The pipeline is deliberately split into two phases: a parallel-safe phase (object construction) and a serialized phase (ref update).
+The full sequence for `safegit commit -m "msg" -- file1 file2 ...`. The pipeline is split into a parallel-safe phase (object construction) and a serialized phase (ref update). A complete file list is required (no implicit "stage everything").
 
 ### 2.1 Phase A -- parallel-safe (no locks)
 
-1. **Resolve session.** Read `SAFEGIT_SID` from env, or auto-create per 1.2. Verify `agents/<sid>/` exists. Set `GIT_INDEX_FILE=$(.git/safegit/agents/<sid>/index)` for all subsequent git invocations.
-2. **Validate file arguments.** For each `<file>` (after `--`):
+1. **Initialize tmp index.** Per Section 1.2, create `.git/safegit/tmp/<pid>-<random>/index` and seed from `HEAD`. Set `GIT_INDEX_FILE` to that path for all subsequent git invocations in this process.
+2. **Validate file arguments.** For each `<file>` after `--`:
     - It must exist on disk OR be a known deletion (`--allow-empty` or explicit `--delete <file>`).
     - It must be inside the working tree (no `../` escape).
     - It must not be `.gitignore`'d unless `--force` is passed.
-3. **Stage files into virtual index.** For each file argument, run the staging logic from Section 3 against the virtual index. If no `--` arguments are passed, nothing is staged in this step (the virtual index's existing contents are used).
-4. **Build the tree.** Run:
+    - It must not be locked by an active wip held by another invocation (see Section 7.4).
+3. **Stage files into tmp index.** Apply the staging logic from Section 3 to each file.
+4. **Build the tree.**
 
     ```
-    GIT_INDEX_FILE=.git/safegit/agents/<sid>/index \
+    GIT_INDEX_FILE=.git/safegit/tmp/<pid>-<random>/index \
       git --no-optional-locks write-tree
     ```
 
-    This produces `<tree-sha>`. `write-tree` is content-addressed and parallel-safe -- multiple agents writing the same tree converge on the same SHA and writes to the object DB are idempotent.
+    `write-tree` is content-addressed and parallel-safe -- multiple invocations writing the same tree converge on the same SHA and writes to the object DB are idempotent.
 5. **Snapshot the parent.** Resolve the current tip of the target branch:
 
     ```
@@ -162,12 +141,12 @@ The full sequence for `safegit commit -m "msg" [-- file1 file2 ...]`. The pipeli
 
     Produces `<new-commit-sha>`. Also parallel-safe.
 
-At this point we have a valid commit object in the object DB but no ref points to it. If the agent dies right now, the commit is unreachable and will be GC'd by `git gc` eventually; nothing is broken.
+At this point we have a valid commit object in the object DB but no ref points to it. If the process dies right now, the commit is unreachable and will be GC'd by `git gc` eventually; nothing is broken.
 
 ### 2.2 Phase B -- serialized (per-ref lock + CAS)
 
 7. **Acquire ref lock.** Attempt to atomically create `locks/refs/heads/<branch>.lock` via `O_CREAT|O_EXCL`. On success, we hold the lock.
-8. **On lock contention,** enqueue our `(sid, pid, ts)` line to `queue/refs/heads/<branch>.q` (append, one line). Then `inotify`/`kqueue` watch the lock file for deletion. On macOS without kqueue support for the case, fall back to short polling (see "polling fallback" in 2.4). When awoken, attempt acquisition again. Stale-holder check: if the holder's `pid` is dead (per Section 1.6 + `kill -0` / `/proc` check), atomically replace the lock (via `tmpfile + rename(2)` overwrite, with an extra `flock` over the parent dir to avoid races between concurrent stale-replacers).
+8. **On lock contention,** enqueue our `(pid, ts)` line to `queue/refs/heads/<branch>.q` (append). Then `inotify`/`kqueue` watch the lock file for deletion. On platforms without filesystem notification, fall back to short polling (see 2.4). When awoken, attempt acquisition again. Stale-holder check: if the holder's `pid` is dead (per Section 1.4 + `kill -0` / `/proc` check), atomically replace the lock (via `tmpfile + rename(2)` overwrite, with an extra `flock` over the parent dir to avoid races between concurrent stale-replacers).
 9. **Re-resolve parent.** Once we hold the lock, re-read `refs/heads/<branch>`. If it changed since step 5, we have a CAS miss.
     - **If parent unchanged:** proceed to step 10.
     - **If parent changed:** release the lock, GOTO step 5 (rebuild the commit with the new parent). After 5 attempts (configurable: `commit.casMaxAttempts`, default 5), exit with code 7 ("could not converge on branch tip; another writer is making faster progress; retry manually").
@@ -179,16 +158,16 @@ At this point we have a valid commit object in the object DB but no ref points t
 
     `update-ref` itself takes the `<old-value>` argument so it performs an atomic CAS at the git level too. This is belt-and-suspenders: our lock prevents most contention, and `update-ref --old` catches any we missed.
 11. **Release the ref lock.** Atomic `unlink(2)` of the lock file. Pop our entry from the queue. Notify next waiter (writing to a sentinel pipe or just relying on inotify -- see 2.4).
-12. **Append to op log.** Write the `commit` JSONL line per Section 1.5.
-13. **Cleanup.** The virtual index is NOT cleared. It now reflects the just-committed tree; subsequent `safegit stage`/`safegit commit` operations on the same session can build on it. (See open question on persistence.)
+12. **Append to op log.** Write the `commit` JSONL line per Section 1.3.
+13. **Cleanup.** Delete `.git/safegit/tmp/<pid>-<random>/`.
 
 ### 2.3 Sequence summary
 
 | Step | Phase | Holds lock? | Touches global state? |
 |---|---|---|---|
-| 1. Resolve session | A | no | no |
-| 2. Validate args | A | no | no |
-| 3. Stage to virtual index | A | no | no (only `agents/<sid>/index`) |
+| 1. Init tmp index | A | no | no (only tmp dir) |
+| 2. Validate args | A | no | reads only (incl. wip-locks) |
+| 3. Stage to tmp index | A | no | no |
 | 4. `git write-tree` | A | no | yes (writes objects, idempotent) |
 | 5. Resolve parent ref | A | no | reads only |
 | 6. `git commit-tree` | A | no | yes (writes one commit object) |
@@ -198,7 +177,7 @@ At this point we have a valid commit object in the object DB but no ref points t
 | 10. `git update-ref --old` | B | held | yes (writes ref) |
 | 11. Release ref lock | B | releasing | yes (unlink + notify) |
 | 12. Append op log | B | not held | yes (append-only line) |
-| 13. Cleanup | B | not held | per-session only |
+| 13. Cleanup | B | not held | tmp dir only |
 
 ### 2.4 Wakeup mechanism
 
@@ -206,9 +185,9 @@ Waiters MUST be woken automatically (req: "no polling, no human intervention"). 
 
 - **Linux:** `inotify(7)` on the parent dir for `IN_DELETE` of `<branch>.lock`.
 - **macOS:** `kqueue(2)` with `EVFILT_VNODE` on the parent dir.
-- **Fallback (any platform, including misconfigured FUSE mounts):** exponential-backoff polling 10ms, 20ms, 50ms, 100ms, 200ms, 500ms, capped at 1s. The poll loop is bounded by `lock.acquireTimeout` (default 30s); past that we exit with code 8 ("ref lock acquisition timed out").
+- **Fallback:** exponential-backoff polling 10ms, 20ms, 50ms, 100ms, 200ms, 500ms, capped at 1s. The poll loop is bounded by `lock.acquireTimeout` (default 30s); past that we exit with code 8 ("ref lock acquisition timed out").
 
-The `inotify`/`kqueue` watcher is a goroutine per waiter. The Go implementation uses `github.com/fsnotify/fsnotify` (well-vetted, no CGo).
+The Go implementation uses `github.com/fsnotify/fsnotify` (well-vetted, no CGo).
 
 ### 2.5 Retry policy
 
@@ -220,11 +199,6 @@ The `inotify`/`kqueue` watcher is a goroutine per waiter. The Go implementation 
 | `git commit-tree` fails | no | 0 | exit code 10 |
 | `git update-ref` fails after lock held | yes | `commit.casMaxAttempts` (rare; usually means stale parent) | retry from step 5 |
 
-### Open questions
-
-- Whether to persist the virtual index across invocations (current spec: yes; alternative: snapshot and rebuild from `HEAD` each time, paying a `read-tree` cost per command).
-- Whether `safegit commit` without `--` should commit *all* pending changes in the virtual index (git semantics) or refuse and require explicit file list (safer but verbose).
-
 ---
 
 ## 3. Hunk Staging API
@@ -234,11 +208,11 @@ The `inotify`/`kqueue` watcher is a goroutine per waiter. The Go implementation 
 For `<file>`, the canonical hunk list comes from:
 
 ```
-git --no-optional-locks diff --no-color --no-ext-diff --no-renames \
-  -- <file>
+GIT_INDEX_FILE=.git/safegit/tmp/<pid>-<random>/index \
+  git --no-optional-locks diff --no-color --no-ext-diff --no-renames -- <file>
 ```
 
-against the working tree, where the "before" side is the content currently in the agent's virtual index (i.e. `git diff` with `GIT_INDEX_FILE=...`).
+against the working tree, where the "before" side is the content currently in the tmp index.
 
 Parse the output:
 
@@ -264,12 +238,13 @@ type Hunk struct {
 | `safegit stage <file>` | Whole file (all hunks) |
 | `safegit stage <file> --hunks 1,3,5` | Specific 1-based hunks |
 | `safegit stage <file> --hunks 2-4` | Range (inclusive) |
-| `safegit stage <file> --lines 10-25` | All hunks whose `NewStart..NewStart+NewCount-1` overlaps the range |
 | `safegit stage <file> --patch <patchfile>` | Apply arbitrary unified diff |
-| `safegit stage <file> --interactive` | Proxy to `git add --patch <file>` against the virtual index |
+| `safegit stage <file> --interactive` | Proxy to `git add --patch <file>` against the tmp index |
 | `safegit stage <file> --intent-to-add` | `git update-index --add --cacheinfo` for empty/new files |
-| `safegit unstage <file>` | Whole file (`git reset HEAD -- <file>` against virtual index) |
+| `safegit unstage <file>` | Whole file (`git reset HEAD -- <file>` against tmp index) |
 | `safegit unstage <file> --hunks ...` | Inverse hunk apply via `git apply --cached --reverse` |
+
+Hunk-level precision is the v1 floor. Line-range and sub-hunk staging are deferred (see Future Work).
 
 ### 3.3 Mechanism
 
@@ -284,11 +259,6 @@ For all hunk-selecting variants:
     - `--index` sanity-checks against the working tree.
 5. On `git apply` failure, retry with `--3way` (uses blob sha info from the patch's `index` line). On second failure, exit code 12 with the apply stderr surfaced.
 
-For `--lines L1-L2`:
-
-- Translate to hunks first by overlap predicate: a hunk is selected iff `[NewStart, NewStart+NewCount) ∩ [L1, L2+1) != ∅`.
-- If the selection partially covers a hunk, v1 stages the entire hunk and warns. (Sub-hunk granularity requires synthesizing a smaller patch; it is feasible but deferred -- see open questions.)
-
 For `--interactive`:
 
 - We exec `git add --patch <file>` with `GIT_INDEX_FILE` set, inheriting stdin/stdout/stderr. This is the only API that requires a TTY.
@@ -297,7 +267,6 @@ For `--interactive`:
 
 | Case | Behavior |
 |---|---|
-| Overlapping hunks via `--hunks` and `--lines` | Union selection; warn on duplicate selection. |
 | Hunk depends on earlier unselected hunk (line-number mismatch) | `git apply --recount` handles most cases; on failure, re-run with `--3way`; on second failure, exit 12 with `Hint: try staging earlier hunks first or use --patch`. |
 | Working tree changed since diff was taken | Re-extract hunks. If hunk count or content changed, abort with exit code 13 ("file changed under us; re-run") -- callers should retry. |
 | File is binary | Whole-file only; `--hunks` rejected with exit 14. |
@@ -307,18 +276,13 @@ For `--interactive`:
 
 ### 3.5 Inverse: unstage
 
-`safegit unstage <file> --hunks ...` builds the same synthetic patch and applies it with `--reverse`. The "before" for the diff is the agent's virtual index, the "after" is `HEAD`.
+`safegit unstage <file> --hunks ...` builds the same synthetic patch and applies it with `--reverse`. The "before" for the diff is the tmp index, the "after" is `HEAD`.
 
 ```
 git apply --cached --index --reverse --recount <synthetic-patch>
 ```
 
-Whole-file unstage is the simpler `git reset HEAD -- <file>` against the virtual index.
-
-### Open questions
-
-- Sub-hunk (line-range within a hunk) precision -- currently rounds up to whole hunk.
-- Whether `--lines` should be relative to the working tree (the "+" side) or to `HEAD` (the "-" side). Spec says "+" side; this is the agent-friendly choice but differs from `git blame -L`.
+Whole-file unstage is the simpler `git reset HEAD -- <file>` against the tmp index.
 
 ---
 
@@ -326,16 +290,22 @@ Whole-file unstage is the simpler `git reset HEAD -- <file>` against the virtual
 
 Git's built-in `pre-push` hook fires AFTER the network connection to the remote is open. For long-running validators (smoke tests, integration suites), this means the SSH connection times out before validation finishes. safegit owns a `pre-pre-push` phase that runs BEFORE any network I/O.
 
+### 4.0 No enforcement hooks
+
+safegit does NOT install git hooks that block raw `git commit` / `git push` invocations. Enforcement is at the Claude Code `settings.json` layer (Bash permission rules) and via convention. There is no `SAFEGIT_AUTHORIZED` env var. Agents that bypass safegit by running `git` directly are responsible for the consequences; `safegit doctor` will surface bypasses by detecting `HEAD` movements that have no corresponding op log entry.
+
+The only safegit-installed hook is `.git/hooks/pre-pre-push`, which is a wrapper that lets the user define long-running pre-push validators that run before the network connection opens. It is informational, not coercive.
+
 ### 4.1 Hook discovery
 
 Hooks are discovered in this order, all are run, the first non-zero exit aborts the push:
 
-1. `.safegit/hooks/pre-pre-push` (repo-tracked, single file)
-2. `.safegit/hooks/pre-pre-push.d/*` (repo-tracked, lexical order, `*` skips files starting with `.` or ending in `~`)
-3. `.git/safegit/hooks/pre-pre-push` (local, single file)
-4. `.git/safegit/hooks/pre-pre-push.d/*` (local, lexical order)
+1. `.git/hooks/pre-pre-push` (single file)
+2. `.git/hooks/pre-pre-push.d/*` (lexical order, `*` skips files starting with `.` or ending in `~`)
 
-A hook must be executable (`chmod +x`). Non-executable files in `.d/` directories are skipped with a warning (`safegit doctor` reports them).
+A hook must be executable (`chmod +x`). Non-executable files in `.d/` are skipped with a warning (`safegit doctor` reports them).
+
+Standard git hooks (post-commit, prepare-commit-msg, etc.) live in `.git/hooks/` as usual and run normally because safegit shells out to git.
 
 ### 4.2 Stdin contract
 
@@ -353,7 +323,6 @@ safegit sets the following env for hooks:
 
 | Var | Meaning |
 |---|---|
-| `SAFEGIT_SID` | the agent session sid |
 | `SAFEGIT_REMOTE_NAME` | name of the remote being pushed to (e.g. `origin`) |
 | `SAFEGIT_REMOTE_URL` | the URL we're about to dial |
 | `SAFEGIT_PHASE` | `pre-pre-push` |
@@ -371,9 +340,8 @@ safegit push [<remote>] [<refspec>...]
        run hook with stdin, captured stdout/stderr (streamed to user)
        enforce timeout: hooks.preprepush.timeoutSeconds (default 1800 = 30 min)
        if exit != 0: print stderr, abort, exit code 20
-  -> ONLY NOW: open SSH/HTTPS transport via `git push --no-verify <remote> <refspec>...`
-       (--no-verify because we still want git's internal pre-push to fire AFTER connection;
-        actually we want both: see 4.5)
+  -> ONLY NOW: open SSH/HTTPS transport via `git push <remote> <refspec>...`
+       (git's built-in pre-push still fires AFTER connection; see 4.5)
 ```
 
 ### 4.5 Compose with git's built-in pre-push
@@ -398,12 +366,7 @@ If both phases are needed, the user splits expensive checks (smoke tests) into `
 
 ### 4.7 Bypass
 
-`safegit push --no-pre-pre-push` skips this phase. For agents we recommend disallowing this flag via Claude Code settings hook (see Section 6 / project README).
-
-### Open questions
-
-- Whether `pre-pre-push.d/` files should be run in parallel (current spec: serial, lexical order).
-- Whether to expose a corresponding `pre-pre-fetch` hook (probably yes; deferred).
+`safegit push --no-pre-pre-push` skips this phase. For agents we recommend disallowing this flag via Claude Code settings.
 
 ---
 
@@ -414,12 +377,12 @@ Global flags applicable to every command:
 | Flag | Default | Meaning |
 |---|---|---|
 | `--format <human\|json>` | `human` | Output format. |
-| `--sid <SID>` | env `SAFEGIT_SID` | Agent session sid. |
 | `--config <path>` | `.git/safegit/config.json` | Override config path. |
 | `--quiet`, `-q` | -- | Suppress informational output. |
 | `--verbose`, `-v` | -- | Debug output to stderr. |
 | `--no-color` | auto | Disable ANSI color in human output. |
 | `--dry-run` | -- | Print what would happen, don't mutate. |
+| `--force` | -- | Bypass coordination layer / wip-lock checks (see Section 8). |
 
 Exit code conventions:
 
@@ -430,8 +393,8 @@ Exit code conventions:
 | 2 | Usage error (bad flags) |
 | 3 | Not in a git repo |
 | 4 | safegit not initialized |
-| 5 | No active session (and `--sid` not given) |
-| 6 | Permission denied (Claude Code hook denied operation) |
+| 5 | Coordination layer refusal (working tree dirty, see Section 8) |
+| 6 | Wip lock conflict (see Section 7) |
 | 7-19 | Pipeline-specific (commit/stage; see Section 2/3) |
 | 20-29 | Hook errors (see Section 4) |
 | 30-39 | Lock errors |
@@ -441,21 +404,17 @@ JSON output schema is uniform for every command: `{"ok": bool, "command": str, "
 
 ### 5.1 Lifecycle
 
-- **`safegit init`** -- bootstrap `.git/safegit/`, install `.git/hooks/pre-commit` enforcer, write default `config.json`. `--uninstall` reverses everything.
-    - JSON: `{"installed": true, "hookPath": ".git/hooks/pre-commit", "configPath": ".git/safegit/config.json"}`.
-- **`safegit session start [--label LABEL] [--parent-sid SID] [--shell]`** -- create a new session, print sid (or shell snippet).
-    - JSON: `{"sid": "...", "started": "<rfc3339>", "indexPath": "..."}`.
-- **`safegit session end <sid>`** -- terminate session, remove `agents/<sid>/`.
-- **`safegit session list [--all]`** -- list active sessions; `--all` includes recently dead ones.
-    - JSON: `{"sessions": [{"sid": "...", "pid": N, "alive": bool, "label": "...", "started": "..."}]}`.
+- **`safegit init`** -- bootstrap `.git/safegit/`, install `.git/hooks/pre-pre-push` wrapper, write default `config.json`. Refuses if `.gitmodules` exists or if `.gitattributes` contains an LFS filter (see 6.7). `--uninstall` reverses everything.
+    - JSON: `{"installed": true, "hookPath": ".git/hooks/pre-pre-push", "configPath": ".git/safegit/config.json"}`.
+
+There are no `safegit session` subcommands; sessions do not exist (see 1.2).
 
 ### 5.2 Inspection (read-only, proxy to git)
 
-These are thin wrappers that set `GIT_INDEX_FILE` to the agent's virtual index and forward to git. They never block on locks.
+These are thin wrappers that forward to git. They never block on locks.
 
-- **`safegit status`** -- `git status` against the virtual index.
-- **`safegit diff [<paths>...]`** -- working tree vs virtual index.
-- **`safegit diff --cached [<paths>...]`** -- virtual index vs `HEAD`.
+- **`safegit status`** -- `git status` (working tree vs `HEAD`).
+- **`safegit diff [<paths>...]`** -- working tree vs `HEAD`.
 - **`safegit log [<args>...]`** -- direct passthrough.
 - **`safegit show <rev>`** -- direct passthrough.
 
@@ -463,53 +422,63 @@ JSON: each wraps the git porcelain v2 output and translates to structured form (
 
 ### 5.3 Staging
 
-- **`safegit stage <file> [--hunks ...] [--lines ...] [--patch <p>] [--interactive] [--delete] [--intent-to-add] [--force]`** -- see Section 3.
-    - JSON: `{"file": "...", "hunksApplied": [1,3], "indexShaBefore": "...", "indexShaAfter": "..."}`.
-- **`safegit unstage <file> [--hunks ...]`** -- inverse.
+Staging is folded into `safegit commit` (the tmp index is built on the fly). The standalone `safegit stage` command exists for previewing and validating a stage operation against the working tree without committing -- it builds the tmp index, runs the apply, prints the resulting tree SHA, and deletes the tmp index. It is primarily a debugging / dry-run aid.
+
+- **`safegit stage <file> [--hunks ...] [--patch <p>] [--interactive] [--delete] [--intent-to-add] [--force]`** -- see Section 3.
+    - JSON: `{"file": "...", "hunksApplied": [1,3], "treeSha": "..."}`.
+- **`safegit unstage <file> [--hunks ...]`** -- inverse (operates on a tmp index seeded from a hypothetical state; mostly for symmetry).
 
 ### 5.4 Committing
 
-- **`safegit commit -m <msg> [-F <file>] [--allow-empty] [--branch <ref>] [-- <files>...]`** -- run the pipeline in Section 2.
+- **`safegit commit -m <msg> [-F <file>] [--allow-empty] [--branch <ref>] -- <files>...`** -- run the pipeline in Section 2. A complete file list after `--` is required.
     - JSON: `{"sha": "...", "ref": "...", "parent": "...", "tree": "...", "attempts": 1}`.
-- **`safegit amend [-m <msg>] [-- <files>...]`** -- amend the tip of the current branch. Implemented as: build new tree (with optional file changes), `commit-tree` with the parent of `HEAD`, lock-and-update-ref. Refuses to amend if the agent's `HEAD` differs from the branch tip (concurrency hazard).
-- **`safegit reword [<rev>] -m <msg>`** -- rewrite a commit message. v1 only allows rewording the tip of the current branch (no in-place history rewrite for non-tips).
+- **`safegit amend [-m <msg>] -- <files>...`** -- amend the tip of the current branch. Implemented as: build new tree (with optional file changes), `commit-tree` with the parent of `HEAD`, lock-and-update-ref. Refuses if the branch tip moved since the amend was prepared.
+- **`safegit reword [<rev>] -m <msg>`** -- rewrite a commit message. v1 only allows rewording the tip of the current branch.
 
-### 5.5 Branching
+### 5.5 Branching and tree-mutating ops
 
-- **`safegit branch [<name>] [--from <rev>]`** -- create a branch (ref-locked).
+These commands all pass through the coordination layer in Section 8. They refuse if the working tree is dirty (modified, deleted, untracked, or wip-locked files present) unless `--force` is passed.
+
+- **`safegit branch [<name>] [--from <rev>]`** -- create a branch (ref-locked). Does not touch working tree; coordination layer not invoked.
 - **`safegit branch --list [--format json]`**.
 - **`safegit branch --delete <name> [--force]`**.
-- **`safegit checkout <ref>`** -- switches the working tree AND the agent's virtual index. Acquires the per-session lock implicitly (other operations within the same session block while a checkout is in flight).
-- **`safegit merge <ref>`** -- v1: fast-forward only (`git merge --ff-only`). Three-way merge deferred (it requires a much heavier conflict-handling story; see open questions).
+- **`safegit checkout <ref>`** -- switches the working tree. Subject to coordination layer.
+- **`safegit merge <branch>`** -- three-way merge implemented as: acquire ref lock for HEAD's branch, invoke `git merge --no-commit <branch>` in a subprocess, capture conflict state, build commit object via `git commit-tree`, update ref via CAS. We do not implement merge ourselves; we shell out to git's merge-recursive. Subject to coordination layer.
+- **`safegit rebase <upstream>`** -- subprocess to `git rebase`. Subject to coordination layer.
+- **`safegit reset --hard <rev>`** -- subject to coordination layer.
+- **`safegit bisect <subcommand>`** -- subject to coordination layer for tree-moving subcommands.
 
 ### 5.6 Remote
 
 - **`safegit push [<remote>] [<refspec>...] [--no-pre-pre-push] [--force]`** -- runs Section 4 hooks, then `git push`.
     - JSON: `{"remote": "origin", "refs": [{"local": "...", "remote": "...", "status": "..."}], "hooksRun": [...]}`.
-- **`safegit pull [<remote>] [<branch>] [--ff-only]`** -- fetch + ff-only merge by default.
-- **`safegit fetch [<remote>] [<refspec>...]`** -- direct passthrough.
+- **`safegit pull [<remote>] [<branch>] [--ff-only]`** -- fetch + ff-only merge by default. Subject to coordination layer.
+- **`safegit fetch [<remote>] [<refspec>...]`** -- direct passthrough (no tree mutation).
 
-### 5.7 Hooks
+### 5.7 Wip
 
-- **`safegit hook install <name> --from <path>`** -- copy a hook into `.git/safegit/hooks/`, `chmod +x`.
+See Section 7 for semantics.
+
+- **`safegit wip <file>...`** -- snapshot the listed files to a wip ref, revert them in the working tree.
+- **`safegit unwip <wip-id>`** -- restore a wip back to the working tree.
+- **`safegit wip list [--format json]`** -- list active wips.
+
+### 5.8 Hooks
+
+- **`safegit hook install <name> --from <path>`** -- copy a hook into `.git/hooks/`, `chmod +x`.
 - **`safegit hook list [--format json]`** -- list discovered hooks per Section 4.1.
 - **`safegit hook run <name>`** -- invoke a hook manually for testing (synthesizes stdin).
 
-### 5.8 Recovery
+### 5.9 Recovery
 
 - **`safegit unlock <ref> [--force]`** -- force-release a stale ref lock. Without `--force`, refuses to release a lock whose holder is alive.
-- **`safegit gc [--dry-run] [--max-session-age <duration>]`** -- clean dead sessions, prune empty queue files, compact `log` (rotates at `log.maxSize`, default 100MB).
+- **`safegit gc [--dry-run]`** -- remove `tmp/<pid>-<rand>/` directories whose PID is dead, prune empty queue files, compact `log` (rotates at `log.maxSize`, default 100MB).
 
-### 5.9 Utility
+### 5.10 Utility
 
 - **`safegit version`** -- print version, build info, git version.
-- **`safegit doctor`** -- sanity-check repo state. Reports: orphan virtual indexes, stale locks (with holder PID), non-executable hook files, sessions with dead PIDs, bypasses logged in `log` (raw `git commit` invocations detected via missing log entries).
+- **`safegit doctor`** -- sanity-check repo state. Reports: orphan tmp directories, stale ref locks (with holder PID), non-executable hook files, NFS-mounted repo, presence of `.gitmodules` or LFS filters, `HEAD` movements without op log entries (raw-git bypass detection), wip locks whose ref no longer exists.
     - JSON: `{"healthy": bool, "issues": [{"severity": "warn"|"error", "message": "...", "fixHint": "..."}]}`.
-
-### Open questions
-
-- Whether to add a `safegit absorb`-style command (auto-distribute hunks into the right commit in a stack); deferred.
-- Whether `safegit checkout` should refuse to switch branches with a non-empty virtual index (probably yes, with `--force`).
 
 ---
 
@@ -517,23 +486,23 @@ JSON: each wraps the git porcelain v2 output and translates to structured form (
 
 For each, the design must specify both detection AND recovery. Recovery is automatic unless explicitly noted.
 
-### 6.1 Agent crashes mid-stage
+### 6.1 Process crashes mid-stage
 
-- **Symptom:** orphan virtual index at `agents/<sid>/index`, possibly partially-applied hunks.
-- **Detection:** `safegit doctor` and any `safegit gc` invocation check `agents/<sid>/pid` against `kill -0` / `/proc`. Dead PID + `started` older than `gc.maxSessionAge` (default 24h) = orphan.
-- **Recovery:** `safegit gc` removes the session directory. Object DB is unaffected (no orphan blobs from staging; staging only writes blobs for new tree contents and they're GC'd by `git gc` later if unreferenced). The op log retains the partial `stage` record.
+- **Symptom:** orphan tmp directory at `.git/safegit/tmp/<pid>-<rand>/`.
+- **Detection:** `safegit doctor` and any `safegit gc` invocation list tmp directories, parse the leading PID, and call `kill -0 pid`. Dead PID = orphan.
+- **Recovery:** `safegit gc` removes the tmp directory. Object DB is unaffected (no orphan blobs from staging; staging only writes blobs for new tree contents and they're GC'd by `git gc` later if unreferenced).
 
-### 6.2 Agent crashes mid-commit (lock held)
+### 6.2 Process crashes mid-commit (lock held)
 
 - **Symptom:** `locks/refs/heads/<branch>.lock` exists with a dead `pid`.
-- **Detection:** any commit acquisition attempt reads the lock, parses `pid` and `host`, calls `kill -0 pid` (Unix) or checks `/proc/<pid>` (Linux). If `host` differs from local `hostname`, treat as alive (cross-machine fence; see 6.9).
+- **Detection:** any commit acquisition attempt reads the lock, parses `pid` and `host`, calls `kill -0 pid` (Unix) or checks `/proc/<pid>` (Linux). If `host` differs from local `hostname`, treat as alive (cross-machine fence; see 6.6).
 - **Recovery:** atomic replace via `tmpfile + rename(2)`, with a parent-dir `flock(2)` to serialize concurrent stale-replacers. The new holder logs a `lock_recovered` op log entry.
 
-### 6.3 Two agents commit to same branch simultaneously
+### 6.3 Two invocations commit to same branch simultaneously
 
 - **Symptom:** both reach step 7 of Section 2 around the same time.
 - **Detection:** `O_CREAT|O_EXCL` lock acquisition fails for the second; second waits via inotify.
-- **Recovery:** lock orders them. After the first commits and releases, the second wakes, re-resolves parent (now the first agent's commit), detects CAS miss, rebuilds commit with new parent, then succeeds. End result: linear history, no corruption, both commits land.
+- **Recovery:** lock orders them. After the first commits and releases, the second wakes, re-resolves parent (now the first invocation's commit), detects CAS miss, rebuilds commit with new parent, then succeeds. End result: linear history, no corruption, both commits land.
 
 ### 6.4 Network failure mid-push
 
@@ -545,39 +514,26 @@ For each, the design must specify both detection AND recovery. Recovery is autom
 
 - **Symptom:** `git write-tree` or `git commit-tree` fails with `ENOSPC`.
 - **Detection:** non-zero exit + stderr scan for `ENOSPC` / "No space left".
-- **Recovery:** abort the operation with exit code 9 or 10. The object DB may have partial loose objects -- these are harmless (git `gc` cleans them). Virtual index is untouched (we hadn't modified it). No corruption. User must free disk and retry.
+- **Recovery:** abort the operation with exit code 9 or 10. The object DB may have partial loose objects -- these are harmless (git `gc` cleans them). No corruption. User must free disk and retry.
 
-### 6.6 Corrupted virtual index
+### 6.6 Cross-machine / NFS use is unsupported
 
-- **Symptom:** `git read-tree` or any plumbing op against the virtual index fails with "bad index file" / "index file corrupt".
-- **Detection:** `safegit doctor` runs `git ls-files --stage` against each `agents/<sid>/index` and catches errors.
-- **Recovery:** rebuild from `HEAD` tree:
+v1 supports same-machine concurrency only. Cross-machine concurrency on a shared filesystem (NFS, SSHFS, FUSE-over-network) is OUT OF SCOPE. Rationale: PID-based liveness is meaningless across hosts; `flock(2)` semantics on NFS are unreliable and silently break the safety guarantees.
 
-    ```
-    rm .git/safegit/agents/<sid>/index
-    GIT_INDEX_FILE=... git read-tree HEAD
-    ```
+- **Detection:** `safegit doctor` reads the device of `.git/` via `statfs(2)` and warns if the filesystem type is in a denylist (`nfs`, `nfs4`, `fuse.sshfs`, `cifs`, `smbfs`).
+- **Detection at runtime:** lock files include `host`. If a lock holder's `host` differs from local `hostname`, we conservatively treat the lock as alive and wait. After `lock.acquireTimeout`, exit code 8. The user must run `safegit unlock --force` on the holder's host or accept that cross-machine use is unsupported.
+- **Recovery:** documented as an explicit non-goal for v1.
 
-    The agent's pending unstaged work in the working tree is preserved (the working tree is untouched). Pending STAGED work is lost -- but staging was always reproducible from working-tree diffs, so the agent can re-stage. We log a `index_rebuilt` event and warn the user.
+### 6.7 Unsupported repo features
 
-### 6.7 Race between safegit and raw git
+`safegit init` refuses to initialize on repos that use features the v1 design does not handle:
 
-- **Symptom:** a user (or another tool) ran `git commit` directly without `SAFEGIT_AUTHORIZED=1`.
-- **Detection:** the installed `.git/hooks/pre-commit` enforcer aborts the commit with a clear message:
+| Condition | Error |
+|---|---|
+| `.gitmodules` present at repo root | "safegit v1 does not support submodules; remove .gitmodules or use raw git." |
+| `.gitattributes` contains a line matching `filter=lfs` | "safegit v1 does not support Git LFS." |
 
-    ```
-    safegit: bare 'git commit' is not allowed in this repo.
-    Use 'safegit commit ...' or set SAFEGIT_AUTHORIZED=1 to bypass.
-    ```
-
-    If the user explicitly bypasses with `SAFEGIT_AUTHORIZED=1 git commit`, safegit cannot prevent it; instead, on the next safegit invocation, `safegit doctor` notices that `HEAD` advanced without a corresponding entry in the op log and warns:
-
-    ```
-    WARN: HEAD moved from <sha> to <sha> with no safegit op log entry.
-    Possible bypass via 'git commit'.
-    ```
-
-- **Recovery:** none needed mechanically -- git semantics still hold. We just surface the bypass for transparency.
+If these features are added to the repo after `safegit init`, `safegit doctor` reports an error and refuses subsequent mutating operations until they are removed or the project upgrades to a version that supports them (see Future Work).
 
 ### 6.8 Pre-pre-push hook hangs
 
@@ -585,68 +541,248 @@ For each, the design must specify both detection AND recovery. Recovery is autom
 - **Detection:** Go context timeout fires.
 - **Recovery:** `SIGTERM`, 5s grace, `SIGKILL`. Push aborts with exit code 21. Op log records `hook_timeout`. No partial state -- we never opened the network connection.
 
-### 6.9 Multiple safegit instances: same machine vs across machines
+### 6.9 Raw-git bypass
 
-v1 supports same-machine concurrency only. Cross-machine concurrency on a shared filesystem (NFS, SSHFS) is OUT OF SCOPE. Rationale: PID-based liveness is meaningless across hosts; `flock(2)` semantics on NFS are unreliable.
+- **Symptom:** a user (or another tool) ran `git commit` directly. safegit does not install enforcement hooks (Section 4.0), so this is allowed by design.
+- **Detection:** on any safegit invocation, the op log's most recent ref-update entry is compared against the actual ref tip. If the tip has advanced without an entry, `safegit doctor` and a warning on the next mutating command surface the bypass:
 
-- **Detection:** lock files include `host`. If a lock holder's `host` differs from local `hostname` AND PID liveness can't be checked, we conservatively treat the lock as alive and wait. After `lock.acquireTimeout`, exit code 8. The user must run `safegit unlock --force` on the holder's host or accept that cross-machine use is unsupported.
-- **Recovery:** documented as an explicit non-goal for v1. `safegit doctor` detects cross-host state and warns.
+    ```
+    WARN: HEAD moved from <sha> to <sha> with no safegit op log entry.
+    Possible bypass via raw 'git commit'.
+    ```
 
-### Open questions
-
-- Whether disk-full mid-`update-ref` (rare; `update-ref` writes a tiny ref file) can leave a half-written ref. git's own atomic-rename for ref updates should prevent this; we should test on `tmpfs` with quotas.
-- Submodules and LFS interactions with the virtual index -- deferred to v2.
+- **Recovery:** none needed mechanically -- git semantics still hold. We just surface the bypass for transparency.
 
 ---
 
-## 7. Concurrency Tests
+## 7. Wip
+
+Wip ("work in progress") is safegit's tree-state isolation primitive. It replaces what `git stash` does for a single user: park dirty work somewhere safe so the working tree can be moved.
+
+Unlike `git stash`, wips are real commits on real refs (`refs/safegit/wip/<wip-id>`), so they survive process death, can be inspected with `git log`, and don't interfere with other agents' wips. Raw `git stash` is NOT blocked by safegit (see Section 4.0) but agents are advised against it.
+
+### 7.1 Creating a wip
+
+`safegit wip <file>...`
+
+1. Validate that none of the listed files are already locked by another active wip. If any are, exit code 6 with a list of locked files and their owning wip-ids.
+2. Generate `<wip-id>` = 8-char hex random.
+3. Build a tree where the listed files have working-tree content and all other files have HEAD content:
+
+    ```
+    GIT_INDEX_FILE=.git/safegit/tmp/<pid>-<rand>/index \
+      git read-tree HEAD
+    GIT_INDEX_FILE=... git update-index --add -- <listed files>
+    GIT_INDEX_FILE=... git write-tree
+    ```
+
+4. Create the wip commit:
+
+    ```
+    git commit-tree <wip-tree-sha> -p HEAD -m "safegit wip <id>
+files: file1, file2, ..."
+    ```
+
+    The commit message embeds the list of wip'd files (one per line after `files:`). This is the canonical record of which files belong to the wip.
+5. Create the ref atomically:
+
+    ```
+    git update-ref refs/safegit/wip/<wip-id> <wip-commit-sha>
+    ```
+
+6. Write per-file lock files: for each listed file, `.git/safegit/wip-locks/<sha256(path)[:16]>` containing `<wip-id>`.
+7. Revert the listed files in the working tree:
+
+    ```
+    git checkout HEAD -- <file1> <file2> ...
+    ```
+
+    Other files in the working tree are untouched.
+8. Append `wip` op log entry (Section 1.3).
+9. Return `<wip-id>` to the caller.
+
+### 7.2 Restoring a wip
+
+`safegit unwip <wip-id>`
+
+1. Verify `refs/safegit/wip/<wip-id>` exists.
+2. Read the file list from the wip commit message.
+3. Verify that the working-tree versions of those files match HEAD content (otherwise the user has scribbled on top of reverted-to-HEAD files; abort unless `--force`).
+4. Compute the diff between the wip ref and its parent, scoped to the recorded files:
+
+    ```
+    git diff <wip-id>^..<wip-id> -- <file1> <file2> ...
+    ```
+
+5. Apply the diff to the working tree:
+
+    ```
+    git apply <diff>
+    ```
+
+6. Delete the per-file lock files for the recorded files.
+7. Delete the wip ref:
+
+    ```
+    git update-ref -d refs/safegit/wip/<wip-id>
+    ```
+
+8. Append `unwip` op log entry.
+
+### 7.3 Listing wips
+
+`safegit wip list` enumerates `refs/safegit/wip/*`. For each, parses the file list out of the commit message and prints it. JSON: `{"wips": [{"id": "...", "files": [...], "createdAt": "..."}]}`.
+
+### 7.4 Wip-lock conflict policy
+
+If `safegit wip <files>` is invoked and ANY of the requested files appears in `.git/safegit/wip-locks/`, the operation aborts with exit code 6:
+
+```
+safegit: cannot wip; files locked by other wips:
+  src/foo.go  (wip a3f9e1c2)
+  src/bar.go  (wip f00dface)
+hint: 'safegit unwip a3f9e1c2' to release src/foo.go
+```
+
+Locks are released by `safegit unwip <wip-id>`, which deletes both the ref and all per-file lock files associated with that wip.
+
+`safegit commit -- <files>` similarly refuses if any of the staged files is wip-locked by another invocation.
+
+### 7.5 Recovery
+
+If a wip ref exists but its per-file lock files are missing (or vice versa), `safegit doctor` flags the inconsistency and offers `safegit gc --wip-locks` to remove orphan lock files (those whose `<wip-id>` no longer corresponds to a live ref).
+
+---
+
+## 8. Coordination Layer
+
+The coordination layer prevents tree-mutating operations from clobbering uncommitted work belonging to another concurrent invocation. It is the alternative to per-agent virtual working trees.
+
+### 8.1 Affected commands
+
+| Command | Reason |
+|---|---|
+| `safegit checkout <ref>` | Switches branches; can clobber working-tree edits. |
+| `safegit pull` | Fetch + merge; can clobber working-tree edits. |
+| `safegit rebase` | Replays commits; rewrites working tree. |
+| `safegit merge` | Three-way merge; may modify working tree. |
+| `safegit reset --hard` | Resets working tree to a ref. |
+| `safegit bisect <good|bad|reset>` | Moves the working tree across commits. |
+
+Read-only commands (`safegit status`, `safegit diff`, `safegit log`, `safegit fetch`) and pure ref-update commands (`safegit branch --create`, `safegit commit`) are NOT affected.
+
+### 8.2 Detection algorithm
+
+Before invoking the underlying git operation:
+
+```
+dirty := []string{}
+porcelain := exec("git status --porcelain --untracked-files=normal")
+for line in porcelain:
+    parse status code + path
+    if status != "  " (clean):
+        dirty.append(path)
+
+wip_locked := readdir(".git/safegit/wip-locks/")
+
+if len(dirty) > 0 or len(wip_locked) > 0:
+    refuse(dirty, wip_locked)
+```
+
+Refusal output:
+
+```
+safegit: working tree is not clean; refusing <op> to avoid clobbering uncommitted work.
+
+Modified files:
+  M src/foo.go
+  M src/bar.go
+?? scratch.txt
+
+Active wips:
+  refs/safegit/wip/a3f9e1c2  (src/baz.go)
+
+Suggestion:
+  safegit commit -m "<msg>" -- src/foo.go src/bar.go
+  safegit wip src/foo.go src/bar.go
+  Or pass --force to override (you may lose work).
+```
+
+Exit code 5.
+
+### 8.3 The "calling agent's stage" exception
+
+Because each safegit invocation rebuilds its tmp index from `HEAD` and there is no persistent stage, the coordination check has no need to whitelist files belonging to "this agent's pending stage." The rule is simply: working tree must be clean (or wip'd into a ref).
+
+This is what makes the design safe under concurrency: no agent can have hidden in-flight state that another agent might trample. Any in-flight state must be either committed or wip'd, both of which are visible to every other invocation.
+
+### 8.4 Bypass
+
+`--force` skips the dirty-tree check. Useful for recovery scenarios (e.g. you intentionally want `safegit reset --hard` to discard local edits). A warning is printed and an op log entry `coordination_bypassed` is recorded.
+
+### 8.5 Interaction with wip
+
+The "right" way to multitask within or across agents is:
+
+1. Agent A is editing `src/foo.go`, gets called away.
+2. `safegit wip src/foo.go` -> wip-id `a3f9e1c2`, working tree reverted.
+3. Agent B can now `safegit checkout other-branch` (clean tree, coordination passes).
+4. Later, Agent A returns: `safegit checkout original-branch && safegit unwip a3f9e1c2`.
+
+Without wip, Agent A would have had to commit a noisy WIP commit or convince Agent B to wait.
+
+---
+
+## 9. Concurrency Tests
 
 The design must be falsifiable. This section enumerates the test scenarios that prove or disprove the architecture. All tests are Go tests under `internal/test/concurrent_test.go` using `t.Parallel()`, goroutines, and a temp git repo per test (set up via `t.TempDir()` + `git init`).
 
-### 7.1 Test harness
+### 9.1 Test harness
 
 Helper: `newRepo(t *testing.T) *RepoFixture`
 
 - creates a temp dir
 - runs `git init` and `safegit init`
 - returns a fixture exposing:
-    - `fixture.NewSession(t) string` -- returns sid
-    - `fixture.RunSafegit(sid, args...) (stdout, stderr, exitcode)`
+    - `fixture.RunSafegit(args...) (stdout, stderr, exitcode)`
     - `fixture.HeadSHA(branch) string`
     - `fixture.LogEntries() []OpLogEntry`
 
 Helper: `parallel(n int, fn func(i int))` -- spawns n goroutines, calls `fn(i)`, waits via `sync.WaitGroup`. Used by every test.
 
-### 7.2 Test scenarios
+### 9.2 Test scenarios
 
 | # | Name | Setup | Action | Expected |
 |---|------|-------|--------|----------|
-| T1 | StageDifferentFiles | Repo with 10 tracked files | 10 sessions each `safegit stage file_i` in parallel | All 10 succeed; each session's virtual index contains only its own file staged; no `agents/<sid>/index` is corrupted; op log has 10 stage entries. |
-| T2 | CommitDifferentBranches | 10 branches | 10 sessions each commit to their own branch | All succeed; 10 new commits; each branch tip advances exactly once; no lock contention (all 10 acquire and release without queueing). |
-| T3 | CommitSameBranch | 1 branch, 10 sessions | 10 sessions commit to `main` | All 10 commits land linearly; `git log --oneline main` shows 10 new commits; CAS miss count >= 9 in op log; final tree on `main` reflects the 10th commit. |
-| T4 | KillMidCommit | 1 session starts a commit, blocked on a synthetic lock held by a sleeping process | `kill -9 <safegit pid>` after lock acquisition; verify lock holder PID is dead | Next `safegit commit` invocation detects dead PID, replaces lock, succeeds; op log records `lock_recovered`. |
-| T5 | ConcurrentStageAndCommitSameSession | 1 session | goroutine A: `safegit stage` in a loop; goroutine B: `safegit commit` in a loop | Documented as illegal: safegit MUST refuse the second op (file lock on `agents/<sid>/.busy`) with exit code 6 ("session busy"). Test asserts at least one refusal occurred. |
-| T6 | ConcurrentPush | 2 sessions both push `main` to the same remote | Both run `safegit push origin main` after each commits to `main` | First wins; second sees ref-moved (CAS at the remote: `non-fast-forward`); safegit re-fetches and either succeeds (after rebase prompt) or exits with code 41. v1: fail with 41. |
-| T7 | ConcurrentDifferentBranchPush | 2 sessions push to different branches concurrently | -- | Both succeed; no contention. |
-| T8 | StaleLockReplace | One session holds a lock; kill it; another waits | -- | Replacement happens within 100ms; no lock leak. |
-| T9 | InotifyWakeup | One session holds a lock for 500ms; another waits | -- | The waiter wakes within 50ms of release (verifies inotify path, not polling fallback). |
-| T10 | CrashRecovery | 100 sessions started, half SIGKILL'd, `safegit gc` run | -- | `safegit gc` removes exactly the dead sessions; live sessions untouched; op log intact. |
-| T11 | OpLogIntegrity | Run T3 (10 concurrent commits to same branch) under `strace` to confirm `O_APPEND` writes | -- | Op log has exactly 10 commit lines, no partial/interleaved lines, all parseable as JSON. |
-| T12 | HookTimeout | Configure `pre-pre-push` to `sleep 60`; set `hooks.preprepush.timeoutSeconds=2`; run push | -- | Push aborts within 8s with exit code 21. |
-| T13 | RawGitBypassDetection | `SAFEGIT_AUTHORIZED=1 git commit -am "bypass"`; then `safegit doctor` | -- | Doctor reports the bypass; exit code 0 with warnings array containing the bypass detection. |
-| T14 | DiskFullSimulated | Mount a small `tmpfs` at `.git/objects`; run `safegit commit` of a file >tmpfs size | -- | Exit code 9; no corruption; subsequent `safegit commit` after freeing space succeeds. |
+| T1 | StageDifferentFiles | Repo with 10 tracked files | 10 parallel `safegit commit -m m -- file_i` invocations | All 10 succeed; 10 commits land on `main`; CAS misses >= 9. |
+| T2 | CommitDifferentBranches | 10 branches | 10 invocations each commit to their own branch | All succeed; 10 new commits; each branch tip advances exactly once; no lock contention. |
+| T3 | CommitSameBranch | 1 branch | 10 invocations commit to `main` | All 10 commits land linearly; `git log --oneline main` shows 10 new commits; CAS miss count >= 9 in op log. |
+| T4 | KillMidCommit | 1 invocation acquires the ref lock on a sleeping helper | `kill -9 <safegit pid>` after lock acquisition; verify lock holder PID is dead | Next `safegit commit` invocation detects dead PID, replaces lock, succeeds; op log records `lock_recovered`. |
+| T5 | TmpDirGc | Spawn 10 invocations, kill 5 mid-commit, run `safegit gc` | -- | The 5 dead invocations' tmp dirs are deleted; the 5 live ones are untouched. |
+| T6 | ConcurrentPush | 2 invocations both push `main` to the same remote | Both run `safegit push origin main` after each commits to `main` | First wins; second sees `non-fast-forward`; safegit re-fetches and either succeeds (after rebase prompt) or exits with code 41. v1: fail with 41. |
+| T7 | ConcurrentDifferentBranchPush | 2 invocations push different branches concurrently | -- | Both succeed; no contention. |
+| T8 | StaleLockReplace | Create a lock file with a dead PID; another invocation waits | -- | Replacement happens within 100ms; no lock leak. |
+| T9 | InotifyWakeup | One invocation holds a lock for 500ms; another waits | -- | The waiter wakes within 50ms of release (verifies inotify path, not polling fallback). |
+| T10 | OpLogIntegrity | Run T3 (10 concurrent commits to same branch) under `strace` to confirm `O_APPEND` writes | -- | Op log has exactly 10 commit lines, no partial/interleaved lines, all parseable as JSON. |
+| T11 | HookTimeout | Configure `pre-pre-push` to `sleep 60`; set `hooks.preprepush.timeoutSeconds=2`; run push | -- | Push aborts within 8s with exit code 21. |
+| T12 | RawGitBypassDetection | `git commit -am "bypass"`; then `safegit doctor` | -- | Doctor reports the bypass; exit code 0 with warnings array containing the bypass detection. |
+| T13 | DiskFullSimulated | Mount a small `tmpfs` at `.git/objects`; run `safegit commit` of a file >tmpfs size | -- | Exit code 9; no corruption; subsequent `safegit commit` after freeing space succeeds. |
+| T14 | WipLockConflict | Invocation A wips `src/foo.go`; invocation B tries to wip `src/foo.go` | -- | B exits with code 6; A's wip ref intact. |
+| T15 | CheckoutRefusedDirty | Working tree has a modified file; invocation B runs `safegit checkout other-branch` | -- | B exits with code 5; ref unchanged; working tree unchanged. |
+| T16 | PullRefusedWithWip | Invocation A creates a wip on `file1`; invocation B runs `safegit pull` | -- | B exits with code 5 (wip locks count as dirty); pull does not run. |
+| T17 | CheckoutCleanProceeds | Working tree clean, no wips; `safegit checkout other-branch` | -- | Succeeds; HEAD moves; op log records `checkout`. |
 
-### 7.3 Running
+### 9.3 Running
 
 ```
 go test ./internal/test/... -race -count=10 -timeout=10m
 ```
 
-The `-race` flag catches data races in shared safegit state (the in-process state is small but non-zero -- config cache, etc.). `-count=10` reruns each test 10 times to flush out timing-dependent flakes.
+The `-race` flag catches data races in shared safegit state. `-count=10` reruns each test 10 times to flush out timing-dependent flakes.
 
 For T1, T3, T9 specifically, also run under `stress-ng --io 4 --vm 2 --timeout 60s` in CI to expose disk/memory pressure regressions.
 
-### 7.4 Continuous integration
+### 9.4 Continuous integration
 
 GitHub Actions matrix: ubuntu-latest, macos-latest, on Go 1.22, 1.23, 1.24. Each runs:
 
@@ -655,24 +791,27 @@ GitHub Actions matrix: ubuntu-latest, macos-latest, on Go 1.22, 1.23, 1.24. Each
 3. `go test ./internal/test/concurrent_test.go -race -count=20 -timeout=15m` (the brutal pass)
 4. `go build -o /tmp/safegit ./cmd/safegit && /tmp/safegit doctor` against a temp repo as a smoke test
 
-### Open questions
+---
 
-- Whether to also fuzz the JSON op log parser (`go test -fuzz`).
-- Whether to add property-based tests (e.g. with `gopter`) for the hunk-selection logic in Section 3.
+## Distribution
+
+safegit is shipped as a single static Go binary built with `CGO_ENABLED=0`. The binary embeds the `pre-pre-push` hook wrapper template. `safegit init` writes the wrapper to `.git/hooks/pre-pre-push` (this is the only hook safegit installs; there are no enforcement hooks per Section 4.0).
+
+Build matrix: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64. Released as GitHub Release artifacts; no package-manager presence in v1.
 
 ---
 
-## Appendix: Open questions, consolidated
+## Appendix: Future Work
 
-These are surfaced for discussion before implementation. Each affects the data model or CLI surface in non-trivial ways.
+These items are explicitly punted to v2 (or later) and are NOT part of v1 scope. They are listed here so the v1 design's sharp edges have a documented escape hatch.
 
-- **Session ID scheme.** UUIDv7 (current spec) vs PID-based vs `sha256(CLAUDE_CONFIG_DIR + ppid + start_ts)[:12]`. Trade is between ease-of-debug and auto-resume after a shell exec.
-- **Virtual index persistence.** Persist across invocations (current spec) or rebuild from `HEAD` each time? Persistence is faster but introduces orphan-state failure modes.
-- **`git stash` semantics.** Do we need a per-agent stash? The virtual index already isolates work-in-progress; an explicit stash command might still help for "park this for later, work on something else" workflows.
-- **Submodules.** Support in v1 or defer? They complicate the virtual index (each submodule has its own index).
-- **LFS.** Support in v1 or defer? `git lfs` filters need to run during `git apply --cached`, which works in principle but needs testing.
-- **Distribution shape.** Single static Go binary that self-installs hooks (current preference) vs a binary + a separate hooks installer script. Single binary keeps install-time fragility low but means the binary must include hook templates.
-- **Reflog semantics for agent-private refs.** If we add per-agent refs (e.g. `refs/safegit/agents/<sid>/HEAD`), do they get a reflog? Probably yes, but only as long as the session lives.
-- **Three-way merge.** Whether v1 includes `safegit merge` with three-way merge or only fast-forward. Three-way merge requires a conflict-handling story safegit currently lacks (the design hand-waves it: "conflicts surface as data" per the requirements doc, but the mechanism is undefined).
-- **Sub-hunk staging precision.** Currently rounds `--lines L1-L2` up to the enclosing hunk(s). True sub-hunk precision requires synthesizing a smaller patch; deferred.
-- **Cross-machine support.** Explicitly out of scope for v1. Should we add `lock.allowCrossHost = false` as a config (default) and document the upgrade path for future versions?
+- **Line-level stage precision.** v1 stages whole hunks. `safegit stage <file> --lines L1-L2` would translate a working-tree line range into the overlapping hunk(s); v2 may add this.
+- **Sub-hunk staging.** True sub-hunk precision (stage some lines of a hunk, leave others) requires synthesizing a smaller patch via line-level diff. Deferred.
+- **Cross-machine support.** NFS, distributed coordinator, cross-host PID liveness. v1 is same-machine only and `safegit doctor` warns on NFS.
+- **Submodules.** Each submodule has its own index and HEAD; the coordination layer would need per-submodule extensions. v1 refuses to init on a repo with `.gitmodules`.
+- **Git LFS.** LFS smudge/clean filters need to run during `git apply --cached`; works in principle but needs testing. v1 refuses to init on a repo with an LFS filter line.
+- **Per-agent virtual working tree.** GitButler-style workspace isolation (each agent sees its own view of the working tree). Would obviate the coordination layer's "must be clean" rule. Requires either FUSE or a custom file-overlay; significant complexity.
+- **Persistent virtual indexes.** Incremental staging across invocations (`safegit stage` then later `safegit commit`). v1 rebuilds the index every invocation for simplicity.
+- **`SAFEGIT_AUTHORIZED` env var + git hook enforcement.** v1 relies on Claude Code `settings.json` permission rules and discipline. If discipline-only proves insufficient in practice, a v2 may add an installed `pre-commit` hook that aborts unless `SAFEGIT_AUTHORIZED=1` is set.
+- **`safegit absorb`.** Auto-distribute hunks into the right commit in a stack (jj-style). Deferred.
+- **`pre-pre-fetch` hook.** Symmetric to `pre-pre-push` for fetch operations. Probably yes, deferred.
