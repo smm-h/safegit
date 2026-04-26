@@ -17,6 +17,20 @@ The eight numbered sections that follow describe the data model, commit pipeline
 
 ---
 
+## Decision Record
+
+This section records WHY safegit exists in its current shape, rather than re-deriving it.
+
+- **Why not Jujutsu (jj)**: jj eliminates the `.git/index` race architecturally (no index), but does not provide per-agent commit isolation -- multiple agents still share the working-copy commit `@` and must use `jj split` to separate their work. Adoption requires every agent and human to learn `jj` commands. jj's conflict format is binary in the git tree, unreadable by standard git tooling. Adopting jj imposes a new mental model and breaks teammate-side tools for a partial solution to our problem.
+
+- **Why not GitButler (`but`)**: GitButler solves multi-agent isolation via virtual branches with native MCP and Claude Code hook support -- practically the closest fit. Rejected because: Fair Source license (becomes MIT after 2 years) introduces commercial roadmap risk, the virtual-branch state in `.git/gitbutler/` adds a parallel mental model, and we'd be a downstream consumer of someone else's evolving product rather than owning the surface.
+
+- **Why build a thin Go wrapper instead**: a wrapper around git plumbing (write-tree, commit-tree, update-ref, apply --cached) gives ~80% of the safety properties of jj/GitButler at ~5% of their complexity, while keeping every existing git tool, CI pipeline, code-review system, and teammate workflow intact. We control the roadmap. Standard git commits go out on the wire. Failure mode if safegit breaks: drop to raw git, lose isolation, but the repo remains valid.
+
+- **Why Go**: static single binary, native concurrency primitives (mutex, channels, goroutines for ref-lock queue), clean subprocess and JSON handling, no runtime dependency. Bash hits scaling limits past ~400 LOC. Python adds runtime dep and slow startup. Rust is overkill for a wrapper of this size.
+
+---
+
 ## 1. Data Model
 
 All safegit-specific state lives under `.git/safegit/`. Nothing escapes that directory, so a `rm -rf .git/safegit` returns the repository to the equivalent of "vanilla git". safegit does NOT install enforcement git hooks (see Section 4 for the rationale and the layered enforcement story).
