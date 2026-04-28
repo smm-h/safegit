@@ -17,10 +17,12 @@ import (
 	"github.com/smm-h/safegit/internal/oplog"
 	"github.com/smm-h/safegit/internal/repo"
 	"github.com/smm-h/safegit/internal/stage"
+	"github.com/smm-h/safegit/internal/wip"
 )
 
 // Exit codes for commit-specific errors.
 const (
+	ExitWipLocked     = 6
 	ExitCASExhausted  = 7
 	ExitWriteTree     = 9
 	ExitCommitTree    = 10
@@ -109,6 +111,24 @@ func (p *Pipeline) Execute(ctx context.Context, req CommitRequest) (*CommitResul
 	absFiles, err := p.resolveFiles(repoRoot, filePaths, req.Force)
 	if err != nil {
 		return nil, err
+	}
+
+	// Check for wip-locked files
+	var lockedMsgs []string
+	for _, fp := range filePaths {
+		locked, wipID, lErr := wip.IsLocked(p.SafegitDir, fp)
+		if lErr != nil {
+			continue
+		}
+		if locked {
+			lockedMsgs = append(lockedMsgs, fmt.Sprintf("%s (wip %s)", fp, wipID))
+		}
+	}
+	if len(lockedMsgs) > 0 {
+		return nil, &CommitError{
+			Code:    ExitWipLocked,
+			Message: fmt.Sprintf("refusing to commit wip-locked files: %s", strings.Join(lockedMsgs, ", ")),
+		}
 	}
 
 	maxAttempts := p.Config.Commit.CASMaxAttempts
