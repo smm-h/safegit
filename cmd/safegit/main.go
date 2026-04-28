@@ -15,6 +15,7 @@ import (
 	"github.com/smm-h/safegit/internal/index"
 	"github.com/smm-h/safegit/internal/lock"
 	"github.com/smm-h/safegit/internal/repo"
+	"github.com/smm-h/safegit/internal/stage"
 )
 
 // Set via -ldflags "-X main.version=..." at build time.
@@ -67,6 +68,10 @@ func main() {
 		runInit(flags, cmdArgs)
 	case "commit":
 		runCommit(flags, cmdArgs)
+	case "stage":
+		runStage(flags, cmdArgs)
+	case "unstage":
+		runUnstage(flags, cmdArgs)
 	case "doctor":
 		runDoctor(flags)
 	case "gc":
@@ -178,6 +183,8 @@ func usageText() string {
 Commands:
   init        Initialize .git/safegit/ directory structure
   commit      Stage and commit files atomically (per-invocation index)
+  stage       Preview hunk-level staging (creates tmp index, prints result, cleans up)
+  unstage     Preview hunk-level unstaging (creates tmp index, prints result, cleans up)
   status      Show per-agent working tree status
   push        Push with pre-pre-push hooks and CAS retry
   wip         Save/restore work-in-progress snapshots
@@ -320,6 +327,30 @@ func runCommit(flags globalFlags, args []string) {
 
 	msg := strings.Join(messages, "\n")
 
+	// Parse file:hunks syntax (e.g. "file.txt:1,3" or "file.txt:2-4")
+	fileSpecs := make([]commit.FileSpec, 0, len(files))
+	for _, f := range files {
+		spec := commit.FileSpec{}
+		if colonIdx := strings.LastIndex(f, ":"); colonIdx > 0 {
+			// Check if what's after the colon looks like a hunk spec (digits, commas, dashes)
+			suffix := f[colonIdx+1:]
+			if isHunkSpec(suffix) {
+				hunks, err := stage.ParseHunkSpec(suffix)
+				if err != nil {
+					commitDie(flags, 2, fmt.Sprintf("invalid hunk spec in %q: %v", f, err))
+				}
+				spec.Path = f[:colonIdx]
+				spec.Hunks = hunks
+			} else {
+				// Colon is part of the filename (e.g. Windows path or something)
+				spec.Path = f
+			}
+		} else {
+			spec.Path = f
+		}
+		fileSpecs = append(fileSpecs, spec)
+	}
+
 	sgDir := repo.SafegitDir(gitDir)
 	cfg, err := repo.LoadConfig(gitDir)
 	if err != nil {
@@ -329,7 +360,7 @@ func runCommit(flags globalFlags, args []string) {
 	p := &commit.Pipeline{SafegitDir: sgDir, Config: *cfg}
 	result, err := p.Execute(context.Background(), commit.CommitRequest{
 		Message:    msg,
-		Files:      files,
+		FileSpecs:  fileSpecs,
 		Branch:     branch,
 		AllowEmpty: allowEmpty,
 		Force:      flags.force,
@@ -358,6 +389,224 @@ func runCommit(flags globalFlags, args []string) {
 		}
 		fmt.Println()
 	}
+}
+
+func runStage(flags globalFlags, args []string) {
+	gitDir := mustGitDir(flags)
+	if err := repo.EnsureInitialized(gitDir); err != nil {
+		stageDie(flags, 1, err.Error())
+	}
+
+	// Parse stage-specific flags
+	var file string
+	var hunksSpec string
+	var deleteMode bool
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--hunks":
+			if i+1 >= len(args) {
+				stageDie(flags, 2, "--hunks requires an argument")
+			}
+			i++
+			hunksSpec = args[i]
+		case "--delete":
+			deleteMode = true
+		default:
+			if strings.HasPrefix(args[i], "--") {
+				stageDie(flags, 2, fmt.Sprintf("unknown flag: %s", args[i]))
+			}
+			if file != "" {
+				stageDie(flags, 2, "only one file allowed per stage command")
+			}
+			file = args[i]
+		}
+	}
+
+	if file == "" {
+		stageDie(flags, 2, "file argument required")
+	}
+
+	sgDir := repo.SafegitDir(gitDir)
+
+	// Create a tmp index for preview
+	tmpIdx, err := index.New(sgDir)
+	if err != nil {
+		stageDie(flags, 1, fmt.Sprintf("creating tmp index: %v", err))
+	}
+	defer tmpIdx.Cleanup()
+
+	if deleteMode {
+		// Stage a deletion
+		if err := git.RmCached(tmpIdx.IndexPath, file); err != nil {
+			stageDie(flags, 1, fmt.Sprintf("staging deletion: %v", err))
+		}
+	} else if hunksSpec != "" {
+		// Parse hunk indices
+		hunkIndices, err := stage.ParseHunkSpec(hunksSpec)
+		if err != nil {
+			stageDie(flags, 2, fmt.Sprintf("invalid hunks spec: %v", err))
+		}
+		if err := stage.StageHunks(tmpIdx.IndexPath, file, hunkIndices); err != nil {
+			stageDie(flags, 1, fmt.Sprintf("staging hunks: %v", err))
+		}
+	} else {
+		// Stage whole file
+		if err := stage.StageFile(tmpIdx.IndexPath, file); err != nil {
+			stageDie(flags, 1, fmt.Sprintf("staging file: %v", err))
+		}
+	}
+
+	// Write tree to get the SHA
+	treeSHA, err := git.WriteTree(tmpIdx.IndexPath)
+	if err != nil {
+		stageDie(flags, 1, fmt.Sprintf("write-tree: %v", err))
+	}
+
+	// Determine how many hunks exist and which were applied
+	totalHunks := 0
+	var appliedHunks []int
+	if !deleteMode {
+		_, hunks, _ := stage.ExtractHunks(tmpIdx.IndexPath, file)
+		if hunksSpec != "" {
+			// Before staging we had N hunks; after staging some, the remaining diff shows the rest
+			appliedHunks, _ = stage.ParseHunkSpec(hunksSpec)
+			// Total hunks is the original count (applied + remaining)
+			totalHunks = len(hunks) + len(appliedHunks)
+		} else {
+			// Whole file staged -- count original hunks from a fresh index
+			tmpIdx2, err := index.New(sgDir)
+			if err == nil {
+				_, origHunks, _ := stage.ExtractHunks(tmpIdx2.IndexPath, file)
+				totalHunks = len(origHunks)
+				appliedHunks = make([]int, totalHunks)
+				for i := range appliedHunks {
+					appliedHunks[i] = i + 1
+				}
+				tmpIdx2.Cleanup()
+			}
+		}
+	}
+
+	if flags.format == formatJSON {
+		data := map[string]interface{}{
+			"file":         file,
+			"hunksApplied": appliedHunks,
+			"treeSha":      treeSHA,
+			"totalHunks":   totalHunks,
+		}
+		if deleteMode {
+			data["deleted"] = true
+		}
+		emitJSON("stage", data, nil, nil)
+	} else if !flags.quiet {
+		if deleteMode {
+			fmt.Printf("staged deletion: %s\n", file)
+		} else if hunksSpec != "" {
+			fmt.Printf("staged hunks %v of %s (%d/%d hunks)\n", appliedHunks, file, len(appliedHunks), totalHunks)
+		} else {
+			fmt.Printf("staged all hunks of %s (%d hunks)\n", file, totalHunks)
+		}
+		fmt.Printf("tree: %s\n", treeSHA)
+		fmt.Println("(preview only -- tmp index cleaned up)")
+	}
+}
+
+func runUnstage(flags globalFlags, args []string) {
+	gitDir := mustGitDir(flags)
+	if err := repo.EnsureInitialized(gitDir); err != nil {
+		stageDie(flags, 1, err.Error())
+	}
+
+	var file string
+	var hunksSpec string
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--hunks":
+			if i+1 >= len(args) {
+				stageDie(flags, 2, "--hunks requires an argument")
+			}
+			i++
+			hunksSpec = args[i]
+		default:
+			if strings.HasPrefix(args[i], "--") {
+				stageDie(flags, 2, fmt.Sprintf("unknown flag: %s", args[i]))
+			}
+			if file != "" {
+				stageDie(flags, 2, "only one file allowed per unstage command")
+			}
+			file = args[i]
+		}
+	}
+
+	if file == "" {
+		stageDie(flags, 2, "file argument required")
+	}
+
+	sgDir := repo.SafegitDir(gitDir)
+
+	// Create a tmp index, stage the file first, then unstage
+	tmpIdx, err := index.New(sgDir)
+	if err != nil {
+		stageDie(flags, 1, fmt.Sprintf("creating tmp index: %v", err))
+	}
+	defer tmpIdx.Cleanup()
+
+	// First stage the whole file so we have something to unstage from
+	if err := stage.StageFile(tmpIdx.IndexPath, file); err != nil {
+		stageDie(flags, 1, fmt.Sprintf("staging file for unstage preview: %v", err))
+	}
+
+	if hunksSpec != "" {
+		hunkIndices, err := stage.ParseHunkSpec(hunksSpec)
+		if err != nil {
+			stageDie(flags, 2, fmt.Sprintf("invalid hunks spec: %v", err))
+		}
+		if err := stage.UnstageHunks(tmpIdx.IndexPath, file, hunkIndices); err != nil {
+			stageDie(flags, 1, fmt.Sprintf("unstaging hunks: %v", err))
+		}
+	} else {
+		if err := stage.UnstageFile(tmpIdx.IndexPath, file); err != nil {
+			stageDie(flags, 1, fmt.Sprintf("unstaging file: %v", err))
+		}
+	}
+
+	treeSHA, err := git.WriteTree(tmpIdx.IndexPath)
+	if err != nil {
+		stageDie(flags, 1, fmt.Sprintf("write-tree: %v", err))
+	}
+
+	if flags.format == formatJSON {
+		data := map[string]interface{}{
+			"file":    file,
+			"treeSha": treeSHA,
+		}
+		if hunksSpec != "" {
+			indices, _ := stage.ParseHunkSpec(hunksSpec)
+			data["hunksUnstaged"] = indices
+		}
+		emitJSON("unstage", data, nil, nil)
+	} else if !flags.quiet {
+		if hunksSpec != "" {
+			indices, _ := stage.ParseHunkSpec(hunksSpec)
+			fmt.Printf("unstaged hunks %v of %s\n", indices, file)
+		} else {
+			fmt.Printf("unstaged %s (reset to HEAD)\n", file)
+		}
+		fmt.Printf("tree: %s\n", treeSHA)
+		fmt.Println("(preview only -- tmp index cleaned up)")
+	}
+}
+
+// stageDie prints an error and exits for stage/unstage subcommands.
+func stageDie(flags globalFlags, code int, msg string) {
+	if flags.format == formatJSON {
+		emitJSON("stage", nil, &jsonError{Code: code, Message: msg}, nil)
+	} else {
+		fmt.Fprintf(os.Stderr, "error: %s\n", msg)
+	}
+	os.Exit(code)
 }
 
 // commitDie prints an error and exits for the commit subcommand.
@@ -516,6 +765,19 @@ func runGC(flags globalFlags) {
 	} else if !flags.quiet {
 		fmt.Printf("removed %d orphan tmp dir(s)\n", removed)
 	}
+}
+
+// isHunkSpec returns true if s looks like a hunk specifier (digits, commas, dashes only).
+func isHunkSpec(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c != ',' && c != '-' && (c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 // emitJSON writes a JSON envelope to stdout.
