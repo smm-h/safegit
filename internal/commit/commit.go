@@ -16,6 +16,7 @@ import (
 	"github.com/smm-h/safegit/internal/lock"
 	"github.com/smm-h/safegit/internal/oplog"
 	"github.com/smm-h/safegit/internal/repo"
+	"github.com/smm-h/safegit/internal/stage"
 )
 
 // Exit codes for commit-specific errors.
@@ -43,11 +44,18 @@ type Pipeline struct {
 	PhaseADone func()
 }
 
+// FileSpec describes a file with optional hunk selection for staging.
+type FileSpec struct {
+	Path  string
+	Hunks []int // nil = whole file, non-nil = selected hunk indices (1-based)
+}
+
 // CommitRequest holds all inputs for a single commit operation.
 type CommitRequest struct {
 	Message    string
-	Files      []string
-	Branch     string // empty = current branch
+	Files      []string   // plain file paths (whole-file staging)
+	FileSpecs  []FileSpec // files with optional hunk selection (takes priority over Files)
+	Branch     string     // empty = current branch
 	AllowEmpty bool
 	Force      bool // skip gitignore check
 	DryRun     bool
@@ -82,8 +90,23 @@ func (p *Pipeline) Execute(ctx context.Context, req CommitRequest) (*CommitResul
 		ref = "refs/heads/" + ref
 	}
 
+	// Resolve FileSpecs from Files if FileSpecs not set
+	fileSpecs := req.FileSpecs
+	if len(fileSpecs) == 0 {
+		fileSpecs = make([]FileSpec, len(req.Files))
+		for i, f := range req.Files {
+			fileSpecs[i] = FileSpec{Path: f}
+		}
+	}
+
+	// Extract plain paths for validation
+	filePaths := make([]string, len(fileSpecs))
+	for i, fs := range fileSpecs {
+		filePaths[i] = fs.Path
+	}
+
 	// Validate and normalize file paths before entering the retry loop
-	absFiles, err := p.resolveFiles(repoRoot, req.Files, req.Force)
+	absFiles, err := p.resolveFiles(repoRoot, filePaths, req.Force)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +117,7 @@ func (p *Pipeline) Execute(ctx context.Context, req CommitRequest) (*CommitResul
 	}
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		result, retry, err := p.tryCommit(ctx, ref, repoRoot, absFiles, req, attempt)
+		result, retry, err := p.tryCommit(ctx, ref, repoRoot, absFiles, fileSpecs, req, attempt)
 		if err != nil {
 			return nil, err
 		}
@@ -117,6 +140,7 @@ func (p *Pipeline) tryCommit(
 	ctx context.Context,
 	ref, repoRoot string,
 	absFiles []string,
+	fileSpecs []FileSpec,
 	req CommitRequest,
 	attempt int,
 ) (*CommitResult, bool, error) {
@@ -130,10 +154,19 @@ func (p *Pipeline) tryCommit(
 	}
 	defer tmpIdx.Cleanup()
 
-	// Step 3: Stage files into tmp index
-	for _, absPath := range absFiles {
-		if err := p.stageFile(tmpIdx.IndexPath, absPath); err != nil {
-			return nil, false, fmt.Errorf("staging %s: %w", absPath, err)
+	// Step 3: Stage files into tmp index (with optional hunk selection)
+	for i, absPath := range absFiles {
+		hunks := fileSpecs[i].Hunks
+		if hunks != nil {
+			// Hunk-level staging
+			if err := stage.StageHunks(tmpIdx.IndexPath, absPath, hunks); err != nil {
+				return nil, false, fmt.Errorf("staging hunks of %s: %w", absPath, err)
+			}
+		} else {
+			// Whole-file staging
+			if err := p.stageFile(tmpIdx.IndexPath, absPath); err != nil {
+				return nil, false, fmt.Errorf("staging %s: %w", absPath, err)
+			}
 		}
 	}
 
