@@ -1227,6 +1227,56 @@ func runGC(flags globalFlags) {
 	}
 
 	sgDir := repo.SafegitDir(gitDir)
+	cfg, _ := repo.LoadConfig(gitDir)
+
+	if flags.dryRun {
+		// Dry run: report what would be cleaned
+		orphanDirs, err := index.GarbageCollectDryRun(sgDir)
+		if err != nil {
+			if flags.format == formatJSON {
+				emitJSON("gc", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
+			} else {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			}
+			os.Exit(1)
+		}
+
+		orphanWipLocks, _ := wip.OrphanLocks(sgDir)
+
+		logSizeMB := float64(0)
+		logSize, _ := oplog.LogSize(sgDir)
+		if logSize > 0 {
+			logSizeMB = float64(logSize) / (1024 * 1024)
+		}
+		maxMB := 100
+		if cfg != nil && cfg.Log.MaxSizeMB > 0 {
+			maxMB = cfg.Log.MaxSizeMB
+		}
+		wouldRotate := logSize >= int64(maxMB)*1024*1024
+
+		if flags.format == formatJSON {
+			emitJSON("gc", map[string]interface{}{
+				"dryRun":          true,
+				"orphanDirs":      len(orphanDirs),
+				"orphanWipLocks":  len(orphanWipLocks),
+				"logSizeMB":       logSizeMB,
+				"wouldRotateLog":  wouldRotate,
+			}, nil, nil)
+		} else if !flags.quiet {
+			fmt.Printf("would remove %d orphan tmp dir(s)\n", len(orphanDirs))
+			if len(orphanWipLocks) > 0 {
+				fmt.Printf("would remove %d orphan wip-lock(s)\n", len(orphanWipLocks))
+			}
+			fmt.Printf("log size: %.1f MB (max: %d MB)", logSizeMB, maxMB)
+			if wouldRotate {
+				fmt.Print(" -- would rotate")
+			}
+			fmt.Println()
+		}
+		return
+	}
+
+	// Actual GC
 	removed, err := index.GarbageCollect(sgDir)
 	if err != nil {
 		if flags.format == formatJSON {
@@ -1237,7 +1287,7 @@ func runGC(flags globalFlags) {
 		os.Exit(1)
 	}
 
-	// Also clean orphan wip-locks
+	// Clean orphan wip-locks
 	wipCleaned, wipErr := wip.CleanOrphanLocks(sgDir)
 	if wipErr != nil {
 		if flags.format == formatJSON {
@@ -1248,12 +1298,30 @@ func runGC(flags globalFlags) {
 		os.Exit(1)
 	}
 
+	// Log rotation
+	maxMB := 100
+	if cfg != nil && cfg.Log.MaxSizeMB > 0 {
+		maxMB = cfg.Log.MaxSizeMB
+	}
+	rotated, rotErr := oplog.Rotate(sgDir, maxMB)
+	if rotErr != nil && !flags.quiet {
+		fmt.Fprintf(os.Stderr, "warning: log rotation failed: %v\n", rotErr)
+	}
+
 	if flags.format == formatJSON {
-		emitJSON("gc", map[string]int{"removed": removed, "wipLocksRemoved": wipCleaned}, nil, nil)
+		data := map[string]interface{}{
+			"removed":         removed,
+			"wipLocksRemoved": wipCleaned,
+			"logRotated":      rotated,
+		}
+		emitJSON("gc", data, nil, nil)
 	} else if !flags.quiet {
 		fmt.Printf("removed %d orphan tmp dir(s)\n", removed)
 		if wipCleaned > 0 {
 			fmt.Printf("removed %d orphan wip-lock(s)\n", wipCleaned)
+		}
+		if rotated {
+			fmt.Println("log rotated (old log saved as log.1)")
 		}
 	}
 }

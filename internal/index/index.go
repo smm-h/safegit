@@ -94,6 +94,35 @@ func GarbageCollect(safegitDir string) (removed int, err error) {
 	return removed, err
 }
 
+// GarbageCollectDryRun reports orphan tmp directories without removing them.
+// Returns the directory names that would be cleaned.
+func GarbageCollectDryRun(safegitDir string) ([]string, error) {
+	tmpBase := filepath.Join(safegitDir, "tmp")
+
+	entries, err := os.ReadDir(tmpBase)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading tmp dir: %w", err)
+	}
+
+	var names []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid, ok := parsePIDFromDirName(entry.Name())
+		if !ok {
+			continue
+		}
+		if !processAlive(pid) {
+			names = append(names, entry.Name())
+		}
+	}
+	return names, nil
+}
+
 // parsePIDFromDirName extracts the PID from a directory name of format "<pid>-<random>".
 func parsePIDFromDirName(name string) (int, bool) {
 	parts := strings.SplitN(name, "-", 2)
