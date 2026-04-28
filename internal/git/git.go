@@ -40,6 +40,30 @@ func RunWithEnv(ctx context.Context, env []string, args ...string) (stdout, stde
 	return
 }
 
+// RunWithEnvStdin executes a git command with environment variables and stdin data.
+func RunWithEnvStdin(ctx context.Context, env []string, stdin []byte, args ...string) (stdout, stderr string, err error) {
+	fullArgs := append([]string{"--no-optional-locks"}, args...)
+	cmd := exec.CommandContext(ctx, "git", fullArgs...)
+
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	cmd.Stdin = bytes.NewReader(stdin)
+
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+
+	err = cmd.Run()
+	stdout = outBuf.String()
+	stderr = errBuf.String()
+
+	if err != nil {
+		err = fmt.Errorf("git %s: %w\nstderr: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr))
+	}
+	return
+}
+
 // RepoRoot returns the absolute path to the repository root.
 func RepoRoot() (string, error) {
 	ctx := context.Background()
