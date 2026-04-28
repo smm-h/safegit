@@ -213,10 +213,17 @@ Commands:
   commit      Stage and commit files atomically (per-invocation index)
   stage       Preview hunk-level staging (creates tmp index, prints result, cleans up)
   unstage     Preview hunk-level unstaging (creates tmp index, prints result, cleans up)
-  status      Show per-agent working tree status
-  push        Push with pre-pre-push hooks and CAS retry
   wip         Save/restore work-in-progress snapshots
-  log         Query the operation log
+  checkout    Checkout a ref (guarded: checks for uncommitted work)
+  pull        Fetch + merge (guarded, default --ff-only)
+  merge       Merge a branch (guarded)
+  rebase      Rebase onto upstream (guarded)
+  reset       Reset (guarded for --hard)
+  branch      List, create, or delete branches
+  status      Show working tree status (git passthrough)
+  diff        Show diffs (git passthrough)
+  log         Show commit log (git passthrough)
+  show        Show objects (git passthrough)
   doctor      Health checks (initialized? orphan dirs? stale locks?)
   gc          Garbage-collect dead tmp index directories
   version     Print version and build info
@@ -228,7 +235,7 @@ Global flags:
   --verbose, -v         Verbose output
   --no-color            Disable colored output
   --dry-run, -n         Show what would be done without doing it
-  --force, -f           Skip safety checks
+  --force, -f           Skip safety checks (bypass coordination guard)
 `
 }
 
