@@ -116,6 +116,8 @@ func main() {
 		os.Exit(runFetch(cmdArgs))
 	case "hook":
 		os.Exit(runHook(flags, cmdArgs))
+	case "config":
+		os.Exit(runConfig(flags, cmdArgs))
 	case "unlock":
 		os.Exit(runUnlock(flags, cmdArgs))
 	case "branch":
@@ -243,6 +245,7 @@ Commands:
   diff        Show diffs (git passthrough)
   log         Show commit log (git passthrough)
   show        Show objects (git passthrough)
+  config      Show or set configuration values
   unlock      Release a stale ref lock (--force to override live holder)
   doctor      Health checks (initialized? orphan dirs? stale locks?)
   gc          Garbage-collect dead tmp index directories and rotate logs
@@ -1639,6 +1642,96 @@ func runPassthrough(gitCmd string, args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func runConfig(flags globalFlags, args []string) int {
+	gitDir := mustGitDir(flags)
+	if err := repo.EnsureInitialized(gitDir); err != nil {
+		if flags.format == formatJSON {
+			emitJSON("config", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
+		} else {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		}
+		return 1
+	}
+
+	cfg, err := repo.LoadConfig(gitDir)
+	if err != nil {
+		if flags.format == formatJSON {
+			emitJSON("config", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
+		} else {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		}
+		return 1
+	}
+
+	switch len(args) {
+	case 0:
+		// Show all config
+		if flags.format == formatJSON {
+			emitJSON("config", cfg, nil, nil)
+		} else {
+			for _, key := range repo.ValidConfigKeys() {
+				val, _ := repo.GetConfigValue(cfg, key)
+				fmt.Printf("%s = %v\n", key, val)
+			}
+		}
+		return 0
+
+	case 1:
+		// Get a specific key
+		key := args[0]
+		val, err := repo.GetConfigValue(cfg, key)
+		if err != nil {
+			if flags.format == formatJSON {
+				emitJSON("config", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
+			} else {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			}
+			return 1
+		}
+		if flags.format == formatJSON {
+			emitJSON("config", map[string]interface{}{key: val}, nil, nil)
+		} else {
+			fmt.Printf("%v\n", val)
+		}
+		return 0
+
+	case 2:
+		// Set a key
+		key, value := args[0], args[1]
+		if err := repo.SetConfigValue(cfg, key, value); err != nil {
+			if flags.format == formatJSON {
+				emitJSON("config", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
+			} else {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			}
+			return 1
+		}
+		if err := repo.SaveConfig(gitDir, cfg); err != nil {
+			if flags.format == formatJSON {
+				emitJSON("config", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
+			} else {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			}
+			return 1
+		}
+		if flags.format == formatJSON {
+			emitJSON("config", map[string]interface{}{key: value}, nil, nil)
+		} else if !flags.quiet {
+			fmt.Printf("%s = %s\n", key, value)
+		}
+		return 0
+
+	default:
+		msg := "usage: safegit config [<key> [<value>]]"
+		if flags.format == formatJSON {
+			emitJSON("config", nil, &jsonError{Code: 2, Message: msg}, nil)
+		} else {
+			fmt.Fprintln(os.Stderr, msg)
+		}
+		return 2
+	}
 }
 
 func runUnlock(flags globalFlags, args []string) int {

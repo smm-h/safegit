@@ -143,3 +143,78 @@ func LoadConfig(gitDir string) (*Config, error) {
 	}
 	return &cfg, nil
 }
+
+// SaveConfig writes config back to config.json.
+func SaveConfig(gitDir string, cfg *Config) error {
+	configPath := filepath.Join(SafegitDir(gitDir), "config.json")
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling config: %w", err)
+	}
+	if err := os.WriteFile(configPath, append(data, '\n'), 0644); err != nil {
+		return fmt.Errorf("writing config.json: %w", err)
+	}
+	return nil
+}
+
+// GetConfigValue returns the value for a dot-separated config key.
+func GetConfigValue(cfg *Config, key string) (interface{}, error) {
+	switch key {
+	case "commit.casMaxAttempts":
+		return cfg.Commit.CASMaxAttempts, nil
+	case "lock.acquireTimeoutSeconds":
+		return cfg.Lock.AcquireTimeoutSeconds, nil
+	case "hooks.preprepush.timeoutSeconds":
+		return cfg.Hooks.PrePrePush.TimeoutSeconds, nil
+	case "push.retryAttempts":
+		return cfg.Push.RetryAttempts, nil
+	case "log.maxSizeMB":
+		return cfg.Log.MaxSizeMB, nil
+	default:
+		return nil, fmt.Errorf("unknown config key: %s", key)
+	}
+}
+
+// SetConfigValue sets a dot-separated config key to the given string value.
+func SetConfigValue(cfg *Config, key, value string) error {
+	intVal, err := parseInt(value)
+	if err != nil {
+		return fmt.Errorf("invalid value %q for %s: must be an integer", value, key)
+	}
+	if intVal <= 0 {
+		return fmt.Errorf("invalid value %q for %s: must be positive", value, key)
+	}
+
+	switch key {
+	case "commit.casMaxAttempts":
+		cfg.Commit.CASMaxAttempts = intVal
+	case "lock.acquireTimeoutSeconds":
+		cfg.Lock.AcquireTimeoutSeconds = intVal
+	case "hooks.preprepush.timeoutSeconds":
+		cfg.Hooks.PrePrePush.TimeoutSeconds = intVal
+	case "push.retryAttempts":
+		cfg.Push.RetryAttempts = intVal
+	case "log.maxSizeMB":
+		cfg.Log.MaxSizeMB = intVal
+	default:
+		return fmt.Errorf("unknown config key: %s", key)
+	}
+	return nil
+}
+
+// ValidConfigKeys returns the list of supported config keys.
+func ValidConfigKeys() []string {
+	return []string{
+		"commit.casMaxAttempts",
+		"lock.acquireTimeoutSeconds",
+		"hooks.preprepush.timeoutSeconds",
+		"push.retryAttempts",
+		"log.maxSizeMB",
+	}
+}
+
+func parseInt(s string) (int, error) {
+	var v int
+	_, err := fmt.Sscanf(s, "%d", &v)
+	return v, err
+}
