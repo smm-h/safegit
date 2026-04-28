@@ -194,6 +194,41 @@ func TestDeletedFile(t *testing.T) {
 	treeLacksFile(t, result.SHA, "seed.txt")
 }
 
+func TestDeleteSafegitCommittedFile(t *testing.T) {
+	// Regression test: a file committed via safegit (not regular git) must be
+	// deletable via safegit. IsTracked must check HEAD, not the main index.
+	dir, _, sgDir := initTestRepo(t)
+	chdir(t, dir)
+
+	// Step 1: Create and commit a file via safegit
+	filePath := filepath.Join(dir, "ephemeral.txt")
+	if err := os.WriteFile(filePath, []byte("here today\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	p := newPipeline(sgDir)
+	addResult, err := p.Execute(context.Background(), CommitRequest{
+		Message: "add ephemeral",
+		Files:   []string{"ephemeral.txt"},
+	})
+	if err != nil {
+		t.Fatalf("add commit: %v", err)
+	}
+	treeHasFile(t, addResult.SHA, "ephemeral.txt")
+
+	// Step 2: Delete the file from disk and commit the deletion via safegit
+	if err := os.Remove(filePath); err != nil {
+		t.Fatal(err)
+	}
+	delResult, err := p.Execute(context.Background(), CommitRequest{
+		Message: "delete ephemeral",
+		Files:   []string{"ephemeral.txt"},
+	})
+	if err != nil {
+		t.Fatalf("delete commit: %v", err)
+	}
+	treeLacksFile(t, delResult.SHA, "ephemeral.txt")
+}
+
 func TestCASRetry(t *testing.T) {
 	dir, _, sgDir := initTestRepo(t)
 	chdir(t, dir)
