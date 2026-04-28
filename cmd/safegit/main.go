@@ -86,6 +86,11 @@ func parseGlobalFlags(args []string) (globalFlags, []string) {
 	var rest []string
 
 	for i := 0; i < len(args); i++ {
+		// "--" is the file separator for commit; pass it and everything after through.
+		if args[i] == "--" {
+			rest = append(rest, args[i:]...)
+			break
+		}
 		switch args[i] {
 		case "--format":
 			if i+1 < len(args) {
@@ -114,9 +119,8 @@ func parseGlobalFlags(args []string) (globalFlags, []string) {
 		case "--force", "-f":
 			f.force = true
 		default:
-			// First non-flag arg starts the command; pass everything through.
-			rest = append(rest, args[i:]...)
-			return f, rest
+			// Not a global flag -- pass through (subcommand name or subcommand flag).
+			rest = append(rest, args[i])
 		}
 	}
 	return f, rest
