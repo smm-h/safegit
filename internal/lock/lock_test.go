@@ -1,0 +1,197 @@
+package lock
+
+import (
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+)
+
+func setupSafegitDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	sgDir := filepath.Join(dir, "safegit")
+	os.MkdirAll(filepath.Join(sgDir, "locks", "refs", "heads"), 0755)
+	return sgDir
+}
+
+func TestAcquireAndRelease(t *testing.T) {
+	sgDir := setupSafegitDir(t)
+
+	lock, err := Acquire(sgDir, "refs/heads/main", "commit", 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Lock file should exist
+	if _, err := os.Stat(lock.LockPath); os.IsNotExist(err) {
+		t.Fatal("lock file should exist")
+	}
+
+	// Release should remove it
+	if err := lock.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(lock.LockPath); !os.IsNotExist(err) {
+		t.Error("lock file should be removed after Release")
+	}
+}
+
+func TestAcquireConflict(t *testing.T) {
+	sgDir := setupSafegitDir(t)
+
+	lock1, err := Acquire(sgDir, "refs/heads/main", "commit", 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock1.Release()
+
+	// Second acquire should time out quickly
+	_, err = Acquire(sgDir, "refs/heads/main", "commit", 50*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected timeout error on conflicting acquire")
+	}
+}
+
+func TestStaleLockReclaimed(t *testing.T) {
+	sgDir := setupSafegitDir(t)
+	ref := "refs/heads/main"
+
+	// Manually create a lock file with a dead PID
+	lp := lockPath(sgDir, ref)
+	os.MkdirAll(filepath.Dir(lp), 0755)
+	err := os.WriteFile(lp, []byte("pid=999999999\nts=2026-01-01T00:00:00Z\nop=commit\nhost=test\n"), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Acquire should reclaim the stale lock
+	lock, err := Acquire(sgDir, ref, "commit", 5*time.Second)
+	if err != nil {
+		t.Fatalf("should reclaim stale lock: %v", err)
+	}
+	defer lock.Release()
+}
+
+func TestIsStale(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a lock file with a dead PID
+	deadLock := filepath.Join(dir, "dead.lock")
+	os.WriteFile(deadLock, []byte("pid=999999999\nts=2026-01-01T00:00:00Z\nop=test\nhost=test\n"), 0644)
+
+	stale, err := IsStale(deadLock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stale {
+		t.Error("lock with dead PID should be stale")
+	}
+
+	// Create a lock file with our own PID (alive)
+	aliveLock := filepath.Join(dir, "alive.lock")
+	os.WriteFile(aliveLock, []byte("pid=1\nts=2026-01-01T00:00:00Z\nop=test\nhost=test\n"), 0644)
+
+	stale, err = IsStale(aliveLock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale {
+		t.Error("lock with PID 1 should not be stale")
+	}
+}
+
+func TestForceRelease(t *testing.T) {
+	sgDir := setupSafegitDir(t)
+	ref := "refs/heads/main"
+
+	// Force release when no lock exists should error
+	err := ForceRelease(sgDir, ref)
+	if err == nil {
+		t.Fatal("expected error when no lock held")
+	}
+
+	// Create and force-release
+	lock, err := Acquire(sgDir, ref, "commit", 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = ForceRelease(sgDir, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The lock struct still has the path, but the file is gone
+	if _, err := os.Stat(lock.LockPath); !os.IsNotExist(err) {
+		t.Error("lock file should be removed after ForceRelease")
+	}
+}
+
+func TestConcurrentAcquire(t *testing.T) {
+	sgDir := setupSafegitDir(t)
+	ref := "refs/heads/main"
+
+	const goroutines = 10
+	var wg sync.WaitGroup
+	acquired := make(chan int, goroutines)
+
+	// Launch goroutines that all try to acquire the same lock
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			lock, err := Acquire(sgDir, ref, "commit", 2*time.Second)
+			if err != nil {
+				return // timeout is expected for most goroutines
+			}
+			acquired <- id
+			// Hold the lock briefly
+			time.Sleep(10 * time.Millisecond)
+			lock.Release()
+		}(i)
+	}
+
+	wg.Wait()
+	close(acquired)
+
+	// At least one goroutine should have acquired the lock
+	count := 0
+	for range acquired {
+		count++
+	}
+	if count == 0 {
+		t.Error("at least one goroutine should have acquired the lock")
+	}
+}
+
+func TestLockPath(t *testing.T) {
+	got := lockPath("/repo/.git/safegit", "refs/heads/main")
+	want := filepath.Join("/repo/.git/safegit", "locks", "refs", "heads", "main.lock")
+	if got != want {
+		t.Errorf("lockPath = %q, want %q", got, want)
+	}
+}
+
+func TestParsePID(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "test.lock")
+
+	os.WriteFile(f, []byte("pid=42\nts=2026-01-01T00:00:00Z\nop=test\nhost=test\n"), 0644)
+	pid, err := parsePID(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pid != 42 {
+		t.Errorf("parsePID = %d, want 42", pid)
+	}
+
+	// Missing pid line
+	noPID := filepath.Join(dir, "nopid.lock")
+	os.WriteFile(noPID, []byte("ts=2026-01-01T00:00:00Z\n"), 0644)
+	_, err = parsePID(noPID)
+	if err == nil {
+		t.Error("expected error when no pid= line")
+	}
+}
