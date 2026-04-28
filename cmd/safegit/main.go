@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/smm-h/safegit/internal/commit"
 	"github.com/smm-h/safegit/internal/git"
@@ -16,6 +17,7 @@ import (
 	"github.com/smm-h/safegit/internal/lock"
 	"github.com/smm-h/safegit/internal/repo"
 	"github.com/smm-h/safegit/internal/stage"
+	"github.com/smm-h/safegit/internal/wip"
 )
 
 // Set via -ldflags "-X main.version=..." at build time.
@@ -72,6 +74,10 @@ func main() {
 		runStage(flags, cmdArgs)
 	case "unstage":
 		runUnstage(flags, cmdArgs)
+	case "wip":
+		runWip(flags, cmdArgs)
+	case "unwip":
+		runUnwip(flags, cmdArgs)
 	case "doctor":
 		runDoctor(flags)
 	case "gc":
@@ -632,6 +638,93 @@ func firstLine(s string) string {
 	return s
 }
 
+func runWip(flags globalFlags, args []string) {
+	gitDir := mustGitDir(flags)
+	if err := repo.EnsureInitialized(gitDir); err != nil {
+		wipDie(flags, 1, err.Error())
+	}
+	sgDir := repo.SafegitDir(gitDir)
+
+	// "wip list" subcommand
+	if len(args) > 0 && args[0] == "list" {
+		wips, err := wip.List(sgDir)
+		if err != nil {
+			wipDie(flags, 1, err.Error())
+		}
+		if flags.format == formatJSON {
+			emitJSON("wip list", map[string]interface{}{"wips": wips}, nil, nil)
+		} else if !flags.quiet {
+			if len(wips) == 0 {
+				fmt.Println("no active wips")
+			} else {
+				for _, w := range wips {
+					fmt.Printf("%s  %s  [%s]\n", w.ID, strings.Join(w.Files, ", "), w.CreatedAt.Format(time.RFC3339))
+				}
+			}
+		}
+		return
+	}
+
+	// "wip <file1> [<file2> ...]" -- create a wip
+	if len(args) == 0 {
+		wipDie(flags, 2, "usage: safegit wip <file1> [<file2> ...] | safegit wip list")
+	}
+
+	result, err := wip.Create(sgDir, args)
+	if err != nil {
+		wipDie(flags, 1, err.Error())
+	}
+
+	if flags.format == formatJSON {
+		data := map[string]interface{}{
+			"id":    result.ID,
+			"files": result.Files,
+			"ref":   result.Ref,
+		}
+		emitJSON("wip", data, nil, nil)
+	} else if !flags.quiet {
+		fmt.Printf("wip %s created (%d file(s) saved)\n", result.ID, len(result.Files))
+	}
+}
+
+func runUnwip(flags globalFlags, args []string) {
+	gitDir := mustGitDir(flags)
+	if err := repo.EnsureInitialized(gitDir); err != nil {
+		wipDie(flags, 1, err.Error())
+	}
+	sgDir := repo.SafegitDir(gitDir)
+
+	if len(args) == 0 {
+		wipDie(flags, 2, "usage: safegit unwip <wip-id> [--force]")
+	}
+
+	wipID := args[0]
+	restored, err := wip.Restore(sgDir, wipID, flags.force)
+	if err != nil {
+		wipDie(flags, 1, err.Error())
+	}
+
+	if flags.format == formatJSON {
+		data := map[string]interface{}{
+			"id":       wipID,
+			"restored": restored,
+		}
+		emitJSON("unwip", data, nil, nil)
+	} else if !flags.quiet {
+		fmt.Printf("wip %s restored (%d file(s))\n", wipID, len(restored))
+	}
+}
+
+// wipDie prints an error and exits for wip/unwip subcommands.
+func wipDie(flags globalFlags, code int, msg string) {
+	if flags.format == formatJSON {
+		emitJSON("wip", nil, &jsonError{Code: code, Message: msg}, nil)
+	} else {
+		fmt.Fprintf(os.Stderr, "error: %s\n", msg)
+	}
+	os.Exit(code)
+}
+
 func runDoctor(flags globalFlags) {
 	gitDir := mustGitDir(flags)
 
@@ -695,7 +788,23 @@ func runDoctor(flags globalFlags) {
 		}
 	}
 
-	// Check 4: Config readable
+	// Check 4: Orphan wip-locks
+	if repo.IsInitialized(gitDir) {
+		orphans, err := wip.OrphanLocks(sgDir)
+		if err != nil {
+			checks = append(checks, checkResult{Name: "wip_locks", Status: "warn", Detail: err.Error()})
+		} else if len(orphans) > 0 {
+			checks = append(checks, checkResult{
+				Name:   "wip_locks",
+				Status: "warn",
+				Detail: fmt.Sprintf("%d orphan wip-lock(s) found (run 'safegit gc' to clean)", len(orphans)),
+			})
+		} else {
+			checks = append(checks, checkResult{Name: "wip_locks", Status: "ok"})
+		}
+	}
+
+	// Check 5: Config readable
 	if repo.IsInitialized(gitDir) {
 		cfg, err := repo.LoadConfig(gitDir)
 		if err != nil {
@@ -760,10 +869,24 @@ func runGC(flags globalFlags) {
 		os.Exit(1)
 	}
 
+	// Also clean orphan wip-locks
+	wipCleaned, wipErr := wip.CleanOrphanLocks(sgDir)
+	if wipErr != nil {
+		if flags.format == formatJSON {
+			emitJSON("gc", nil, &jsonError{Code: 1, Message: wipErr.Error()}, nil)
+		} else {
+			fmt.Fprintf(os.Stderr, "error cleaning wip locks: %v\n", wipErr)
+		}
+		os.Exit(1)
+	}
+
 	if flags.format == formatJSON {
-		emitJSON("gc", map[string]int{"removed": removed}, nil, nil)
+		emitJSON("gc", map[string]int{"removed": removed, "wipLocksRemoved": wipCleaned}, nil, nil)
 	} else if !flags.quiet {
 		fmt.Printf("removed %d orphan tmp dir(s)\n", removed)
+		if wipCleaned > 0 {
+			fmt.Printf("removed %d orphan wip-lock(s)\n", wipCleaned)
+		}
 	}
 }
 
