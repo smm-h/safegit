@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/smm-h/safegit/internal/commit"
 	"github.com/smm-h/safegit/internal/git"
 	"github.com/smm-h/safegit/internal/index"
 	"github.com/smm-h/safegit/internal/lock"
@@ -63,6 +65,8 @@ func main() {
 	switch cmd {
 	case "init":
 		runInit(flags, cmdArgs)
+	case "commit":
+		runCommit(flags, cmdArgs)
 	case "doctor":
 		runDoctor(flags)
 	case "gc":
@@ -255,6 +259,124 @@ func runInit(flags globalFlags, args []string) {
 	} else if !flags.quiet {
 		fmt.Printf("initialized safegit at %s\n", sgDir)
 	}
+}
+
+func runCommit(flags globalFlags, args []string) {
+	gitDir := mustGitDir(flags)
+	if err := repo.EnsureInitialized(gitDir); err != nil {
+		if flags.format == formatJSON {
+			emitJSON("commit", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
+		} else {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		}
+		os.Exit(1)
+	}
+
+	// Parse commit-specific flags
+	var messages []string
+	var branch string
+	var allowEmpty bool
+	var files []string
+	pastSeparator := false
+
+	for i := 0; i < len(args); i++ {
+		if pastSeparator {
+			files = append(files, args[i])
+			continue
+		}
+		switch args[i] {
+		case "--":
+			pastSeparator = true
+		case "-m":
+			if i+1 >= len(args) {
+				commitDie(flags, 2, "-m requires an argument")
+			}
+			i++
+			messages = append(messages, args[i])
+		case "--branch":
+			if i+1 >= len(args) {
+				commitDie(flags, 2, "--branch requires an argument")
+			}
+			i++
+			branch = args[i]
+		case "--allow-empty":
+			allowEmpty = true
+		default:
+			// Might be a flag value starting with -- that we don't recognise
+			commitDie(flags, 2, fmt.Sprintf("unknown flag: %s", args[i]))
+		}
+	}
+
+	if len(messages) == 0 {
+		commitDie(flags, 2, "commit message required (-m)")
+	}
+	if len(files) == 0 {
+		commitDie(flags, 2, "no files specified (use -- file1 file2 ...)")
+	}
+
+	msg := strings.Join(messages, "\n")
+
+	sgDir := repo.SafegitDir(gitDir)
+	cfg, err := repo.LoadConfig(gitDir)
+	if err != nil {
+		commitDie(flags, 1, fmt.Sprintf("loading config: %v", err))
+	}
+
+	p := &commit.Pipeline{SafegitDir: sgDir, Config: *cfg}
+	result, err := p.Execute(context.Background(), commit.CommitRequest{
+		Message:    msg,
+		Files:      files,
+		Branch:     branch,
+		AllowEmpty: allowEmpty,
+		Force:      flags.force,
+		DryRun:     flags.dryRun,
+	})
+	if err != nil {
+		code := 1
+		if ce, ok := err.(*commit.CommitError); ok {
+			code = ce.Code
+		}
+		if flags.format == formatJSON {
+			emitJSON("commit", nil, &jsonError{Code: code, Message: err.Error()}, nil)
+		} else {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		}
+		os.Exit(code)
+	}
+
+	if flags.format == formatJSON {
+		emitJSON("commit", result, nil, nil)
+	} else if !flags.quiet {
+		fmt.Printf("[%s %s] %s\n", refShortName(result.Ref), result.SHA[:8], firstLine(msg))
+		fmt.Printf(" %d file(s) committed", len(files))
+		if result.Attempts > 1 {
+			fmt.Printf(" (%d CAS retries)", result.Attempts-1)
+		}
+		fmt.Println()
+	}
+}
+
+// commitDie prints an error and exits for the commit subcommand.
+func commitDie(flags globalFlags, code int, msg string) {
+	if flags.format == formatJSON {
+		emitJSON("commit", nil, &jsonError{Code: code, Message: msg}, nil)
+	} else {
+		fmt.Fprintf(os.Stderr, "error: %s\n", msg)
+	}
+	os.Exit(code)
+}
+
+// refShortName strips the refs/heads/ prefix from a ref for display.
+func refShortName(ref string) string {
+	return strings.TrimPrefix(ref, "refs/heads/")
+}
+
+// firstLine returns the first line of a multi-line string.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 func runDoctor(flags globalFlags) {
