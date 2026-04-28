@@ -116,6 +116,8 @@ func main() {
 		os.Exit(runFetch(cmdArgs))
 	case "hook":
 		os.Exit(runHook(flags, cmdArgs))
+	case "unlock":
+		os.Exit(runUnlock(flags, cmdArgs))
 	case "branch":
 		os.Exit(runBranch(flags, cmdArgs))
 	case "help", "--help", "-h":
@@ -241,8 +243,9 @@ Commands:
   diff        Show diffs (git passthrough)
   log         Show commit log (git passthrough)
   show        Show objects (git passthrough)
+  unlock      Release a stale ref lock (--force to override live holder)
   doctor      Health checks (initialized? orphan dirs? stale locks?)
-  gc          Garbage-collect dead tmp index directories
+  gc          Garbage-collect dead tmp index directories and rotate logs
   version     Print version and build info
   help        Print this help
 
@@ -1566,6 +1569,87 @@ func runPassthrough(gitCmd string, args []string) int {
 			return exitErr.ExitCode()
 		}
 		return 1
+	}
+	return 0
+}
+
+func runUnlock(flags globalFlags, args []string) int {
+	gitDir := mustGitDir(flags)
+	if err := repo.EnsureInitialized(gitDir); err != nil {
+		if flags.format == formatJSON {
+			emitJSON("unlock", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
+		} else {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		}
+		return 1
+	}
+
+	if len(args) == 0 {
+		msg := "usage: safegit unlock <ref> [--force]"
+		if flags.format == formatJSON {
+			emitJSON("unlock", nil, &jsonError{Code: 2, Message: msg}, nil)
+		} else {
+			fmt.Fprintln(os.Stderr, msg)
+		}
+		return 2
+	}
+
+	ref := args[0]
+	if !strings.HasPrefix(ref, "refs/") {
+		ref = "refs/heads/" + ref
+	}
+
+	sgDir := repo.SafegitDir(gitDir)
+
+	// Check if lock exists
+	lp := filepath.Join(sgDir, "locks", ref+".lock")
+	if _, err := os.Stat(lp); os.IsNotExist(err) {
+		msg := fmt.Sprintf("no lock held on %s", ref)
+		if flags.format == formatJSON {
+			emitJSON("unlock", nil, &jsonError{Code: 1, Message: msg}, nil)
+		} else {
+			fmt.Fprintf(os.Stderr, "error: %s\n", msg)
+		}
+		return 1
+	}
+
+	// Unless --force, refuse if holder is alive
+	if !flags.force {
+		stale, err := lock.IsStale(lp)
+		if err != nil {
+			msg := fmt.Sprintf("cannot check lock status: %v", err)
+			if flags.format == formatJSON {
+				emitJSON("unlock", nil, &jsonError{Code: 1, Message: msg}, nil)
+			} else {
+				fmt.Fprintf(os.Stderr, "error: %s\n", msg)
+			}
+			return 1
+		}
+		if !stale {
+			msg := fmt.Sprintf("lock on %s is held by a live process; use --force to override", ref)
+			if flags.format == formatJSON {
+				emitJSON("unlock", nil, &jsonError{Code: 1, Message: msg}, nil)
+			} else {
+				fmt.Fprintf(os.Stderr, "error: %s\n", msg)
+			}
+			return 1
+		}
+	}
+
+	// Release the lock
+	if err := lock.ForceRelease(sgDir, ref); err != nil {
+		if flags.format == formatJSON {
+			emitJSON("unlock", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
+		} else {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		}
+		return 1
+	}
+
+	if flags.format == formatJSON {
+		emitJSON("unlock", map[string]string{"ref": ref, "action": "released"}, nil, nil)
+	} else if !flags.quiet {
+		fmt.Printf("lock on %s released\n", refShortName(ref))
 	}
 	return 0
 }
