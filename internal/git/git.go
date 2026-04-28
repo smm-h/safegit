@@ -198,3 +198,13 @@ func IsIgnored(filePath string) (bool, error) {
 	}
 	return true, nil
 }
+
+// CommitMessage returns the full commit message of the given revision.
+func CommitMessage(rev string) (string, error) {
+	ctx := context.Background()
+	out, _, err := Run(ctx, "log", "-1", "--format=%B", rev)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(out, "\n"), nil
+}

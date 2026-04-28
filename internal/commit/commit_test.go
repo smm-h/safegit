@@ -377,6 +377,166 @@ func TestDryRun(t *testing.T) {
 	}
 }
 
+func TestAmend(t *testing.T) {
+	dir, _, sgDir := initTestRepo(t)
+	chdir(t, dir)
+
+	// Create initial commit with file via safegit
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("v1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	p := newPipeline(sgDir)
+	firstResult, err := p.Execute(context.Background(), CommitRequest{
+		Message: "first commit",
+		Files:   []string{"file.txt"},
+	})
+	if err != nil {
+		t.Fatalf("first commit: %v", err)
+	}
+
+	// Now amend: add a new file and change message
+	if err := os.WriteFile(filepath.Join(dir, "extra.txt"), []byte("extra\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	amendResult, err := p.Amend(context.Background(), AmendRequest{
+		Message:   "amended commit",
+		FileSpecs: []FileSpec{{Path: "extra.txt"}},
+	})
+	if err != nil {
+		t.Fatalf("Amend: %v", err)
+	}
+
+	// Parent should be the same as the original commit's parent
+	if amendResult.Parent != firstResult.Parent {
+		t.Errorf("parent changed: got %s, want %s", amendResult.Parent, firstResult.Parent)
+	}
+
+	// OldSHA should be the first commit
+	if amendResult.OldSHA != firstResult.SHA {
+		t.Errorf("OldSHA = %s, want %s", amendResult.OldSHA, firstResult.SHA)
+	}
+
+	// New commit should have both files in tree
+	treeHasFile(t, amendResult.SHA, "file.txt")
+	treeHasFile(t, amendResult.SHA, "extra.txt")
+
+	// Verify message changed
+	ctx := context.Background()
+	out, _, err := git.Run(ctx, "log", "-1", "--format=%s", amendResult.SHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != "amended commit" {
+		t.Errorf("message = %q, want %q", strings.TrimSpace(out), "amended commit")
+	}
+
+	// Ref should point to new SHA
+	commitLandsOnBranch(t, "refs/heads/main", amendResult.SHA)
+}
+
+func TestAmendKeepMessage(t *testing.T) {
+	dir, _, sgDir := initTestRepo(t)
+	chdir(t, dir)
+
+	// Create initial commit
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("v1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	p := newPipeline(sgDir)
+	_, err := p.Execute(context.Background(), CommitRequest{
+		Message: "original message",
+		Files:   []string{"file.txt"},
+	})
+	if err != nil {
+		t.Fatalf("first commit: %v", err)
+	}
+
+	// Amend without -m: message should be preserved
+	if err := os.WriteFile(filepath.Join(dir, "extra.txt"), []byte("extra\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	amendResult, err := p.Amend(context.Background(), AmendRequest{
+		FileSpecs: []FileSpec{{Path: "extra.txt"}},
+	})
+	if err != nil {
+		t.Fatalf("Amend: %v", err)
+	}
+
+	// Verify message is preserved
+	ctx := context.Background()
+	out, _, err := git.Run(ctx, "log", "-1", "--format=%s", amendResult.SHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != "original message" {
+		t.Errorf("message = %q, want %q", strings.TrimSpace(out), "original message")
+	}
+
+	// New file should be in tree
+	treeHasFile(t, amendResult.SHA, "extra.txt")
+	// Original file should still be in tree
+	treeHasFile(t, amendResult.SHA, "file.txt")
+}
+
+func TestReword(t *testing.T) {
+	dir, _, sgDir := initTestRepo(t)
+	chdir(t, dir)
+
+	// Create a commit
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("data\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	p := newPipeline(sgDir)
+	firstResult, err := p.Execute(context.Background(), CommitRequest{
+		Message: "old message",
+		Files:   []string{"file.txt"},
+	})
+	if err != nil {
+		t.Fatalf("first commit: %v", err)
+	}
+
+	// Reword
+	rewordResult, err := p.Reword(context.Background(), RewordRequest{
+		Message: "new message",
+	})
+	if err != nil {
+		t.Fatalf("Reword: %v", err)
+	}
+
+	// Tree should be unchanged
+	if rewordResult.Tree != firstResult.Tree {
+		t.Errorf("tree changed: got %s, want %s", rewordResult.Tree, firstResult.Tree)
+	}
+
+	// Parent should be unchanged
+	if rewordResult.Parent != firstResult.Parent {
+		t.Errorf("parent changed: got %s, want %s", rewordResult.Parent, firstResult.Parent)
+	}
+
+	// OldSHA should be the first commit
+	if rewordResult.OldSHA != firstResult.SHA {
+		t.Errorf("OldSHA = %s, want %s", rewordResult.OldSHA, firstResult.SHA)
+	}
+
+	// Verify message changed
+	ctx := context.Background()
+	out, _, err := git.Run(ctx, "log", "-1", "--format=%s", rewordResult.SHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != "new message" {
+		t.Errorf("message = %q, want %q", strings.TrimSpace(out), "new message")
+	}
+
+	// File should still be in tree
+	treeHasFile(t, rewordResult.SHA, "file.txt")
+
+	// Ref should point to new SHA
+	commitLandsOnBranch(t, "refs/heads/main", rewordResult.SHA)
+}
+
 func TestCommitRefusesWipLocked(t *testing.T) {
 	dir, _, sgDir := initTestRepo(t)
 	chdir(t, dir)

@@ -73,6 +73,10 @@ func main() {
 		runInit(flags, cmdArgs)
 	case "commit":
 		runCommit(flags, cmdArgs)
+	case "amend":
+		runAmend(flags, cmdArgs)
+	case "reword":
+		runReword(flags, cmdArgs)
 	case "stage":
 		runStage(flags, cmdArgs)
 	case "unstage":
@@ -218,6 +222,8 @@ func usageText() string {
 Commands:
   init        Initialize .git/safegit/ directory structure
   commit      Stage and commit files atomically (per-invocation index)
+  amend       Amend the tip commit with new files (CAS-safe)
+  reword      Rewrite the tip commit message (CAS-safe)
   stage       Preview hunk-level staging (creates tmp index, prints result, cleans up)
   unstage     Preview hunk-level unstaging (creates tmp index, prints result, cleans up)
   wip         Save/restore work-in-progress snapshots
@@ -443,6 +449,198 @@ func runCommit(flags globalFlags, args []string) {
 		}
 		fmt.Println()
 	}
+}
+
+func runAmend(flags globalFlags, args []string) {
+	gitDir := mustGitDir(flags)
+	if err := repo.EnsureInitialized(gitDir); err != nil {
+		if flags.format == formatJSON {
+			emitJSON("amend", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
+		} else {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		}
+		os.Exit(1)
+	}
+
+	// Parse amend-specific flags
+	var messages []string
+	var files []string
+	pastSeparator := false
+
+	for i := 0; i < len(args); i++ {
+		if pastSeparator {
+			files = append(files, args[i])
+			continue
+		}
+		switch args[i] {
+		case "--":
+			pastSeparator = true
+		case "-m":
+			if i+1 >= len(args) {
+				amendDie(flags, 2, "-m requires an argument")
+			}
+			i++
+			messages = append(messages, args[i])
+		default:
+			amendDie(flags, 2, fmt.Sprintf("unknown flag: %s", args[i]))
+		}
+	}
+
+	if len(files) == 0 {
+		amendDie(flags, 2, "no files specified (use -- file1 file2 ...)")
+	}
+
+	var msg string
+	if len(messages) > 0 {
+		msg = strings.Join(messages, "\n")
+	}
+
+	// Parse file:hunks syntax
+	fileSpecs := make([]commit.FileSpec, 0, len(files))
+	for _, f := range files {
+		spec := commit.FileSpec{}
+		if colonIdx := strings.LastIndex(f, ":"); colonIdx > 0 {
+			suffix := f[colonIdx+1:]
+			if isHunkSpec(suffix) {
+				hunks, err := stage.ParseHunkSpec(suffix)
+				if err != nil {
+					amendDie(flags, 2, fmt.Sprintf("invalid hunk spec in %q: %v", f, err))
+				}
+				spec.Path = f[:colonIdx]
+				spec.Hunks = hunks
+			} else {
+				spec.Path = f
+			}
+		} else {
+			spec.Path = f
+		}
+		fileSpecs = append(fileSpecs, spec)
+	}
+
+	sgDir := repo.SafegitDir(gitDir)
+	cfg, err := repo.LoadConfig(gitDir)
+	if err != nil {
+		amendDie(flags, 1, fmt.Sprintf("loading config: %v", err))
+	}
+
+	p := &commit.Pipeline{SafegitDir: sgDir, Config: *cfg}
+	result, err := p.Amend(context.Background(), commit.AmendRequest{
+		Message:   msg,
+		FileSpecs: fileSpecs,
+		Force:     flags.force,
+		DryRun:    flags.dryRun,
+	})
+	if err != nil {
+		code := 1
+		if ce, ok := err.(*commit.CommitError); ok {
+			code = ce.Code
+		}
+		if flags.format == formatJSON {
+			emitJSON("amend", nil, &jsonError{Code: code, Message: err.Error()}, nil)
+		} else {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		}
+		os.Exit(code)
+	}
+
+	if flags.format == formatJSON {
+		emitJSON("amend", result, nil, nil)
+	} else if !flags.quiet {
+		msgDisplay := msg
+		if msgDisplay == "" {
+			msgDisplay = "(message preserved)"
+		}
+		fmt.Printf("[%s %s] %s\n", refShortName(result.Ref), result.SHA[:8], firstLine(msgDisplay))
+		fmt.Printf(" amended (was %s)", result.OldSHA[:8])
+		if result.Attempts > 1 {
+			fmt.Printf(" (%d CAS retries)", result.Attempts-1)
+		}
+		fmt.Println()
+	}
+}
+
+func runReword(flags globalFlags, args []string) {
+	gitDir := mustGitDir(flags)
+	if err := repo.EnsureInitialized(gitDir); err != nil {
+		if flags.format == formatJSON {
+			emitJSON("reword", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
+		} else {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		}
+		os.Exit(1)
+	}
+
+	// Parse reword flags
+	var messages []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-m":
+			if i+1 >= len(args) {
+				rewordDie(flags, 2, "-m requires an argument")
+			}
+			i++
+			messages = append(messages, args[i])
+		default:
+			rewordDie(flags, 2, fmt.Sprintf("unknown flag: %s", args[i]))
+		}
+	}
+
+	if len(messages) == 0 {
+		rewordDie(flags, 2, "commit message required (-m)")
+	}
+
+	msg := strings.Join(messages, "\n")
+
+	sgDir := repo.SafegitDir(gitDir)
+	cfg, err := repo.LoadConfig(gitDir)
+	if err != nil {
+		rewordDie(flags, 1, fmt.Sprintf("loading config: %v", err))
+	}
+
+	p := &commit.Pipeline{SafegitDir: sgDir, Config: *cfg}
+	result, err := p.Reword(context.Background(), commit.RewordRequest{
+		Message: msg,
+		DryRun:  flags.dryRun,
+	})
+	if err != nil {
+		code := 1
+		if ce, ok := err.(*commit.CommitError); ok {
+			code = ce.Code
+		}
+		if flags.format == formatJSON {
+			emitJSON("reword", nil, &jsonError{Code: code, Message: err.Error()}, nil)
+		} else {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		}
+		os.Exit(code)
+	}
+
+	if flags.format == formatJSON {
+		emitJSON("reword", result, nil, nil)
+	} else if !flags.quiet {
+		fmt.Printf("[%s %s] %s\n", refShortName(result.Ref), result.SHA[:8], firstLine(msg))
+		fmt.Printf(" reworded (was %s)\n", result.OldSHA[:8])
+	}
+}
+
+// amendDie prints an error and exits for the amend subcommand.
+func amendDie(flags globalFlags, code int, msg string) {
+	if flags.format == formatJSON {
+		emitJSON("amend", nil, &jsonError{Code: code, Message: msg}, nil)
+	} else {
+		fmt.Fprintf(os.Stderr, "error: %s\n", msg)
+	}
+	os.Exit(code)
+}
+
+// rewordDie prints an error and exits for the reword subcommand.
+func rewordDie(flags globalFlags, code int, msg string) {
+	if flags.format == formatJSON {
+		emitJSON("reword", nil, &jsonError{Code: code, Message: msg}, nil)
+	} else {
+		fmt.Fprintf(os.Stderr, "error: %s\n", msg)
+	}
+	os.Exit(code)
 }
 
 func runStage(flags globalFlags, args []string) {
