@@ -110,6 +110,56 @@ func Read(safegitDir string) ([]Entry, error) {
 	return entries, nil
 }
 
+// LogSize returns the size of the log file in bytes. Returns 0 if not found.
+func LogSize(safegitDir string) (int64, error) {
+	lp := logPath(safegitDir)
+	info, err := os.Stat(lp)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return info.Size(), nil
+}
+
+// Rotate renames the current log to log.1 (overwriting any existing log.1)
+// and creates a fresh empty log file. Returns true if rotation happened.
+func Rotate(safegitDir string, maxSizeMB int) (bool, error) {
+	if maxSizeMB <= 0 {
+		maxSizeMB = 100
+	}
+
+	lp := logPath(safegitDir)
+	info, err := os.Stat(lp)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	maxBytes := int64(maxSizeMB) * 1024 * 1024
+	if info.Size() < maxBytes {
+		return false, nil
+	}
+
+	// Rotate: log -> log.1
+	rotatedPath := lp + ".1"
+	if err := os.Rename(lp, rotatedPath); err != nil {
+		return false, fmt.Errorf("rotating log: %w", err)
+	}
+
+	// Create fresh log
+	f, err := os.OpenFile(lp, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return false, fmt.Errorf("creating new log after rotation: %w", err)
+	}
+	f.Close()
+
+	return true, nil
+}
+
 // LastRefUpdate finds the most recent entry for a given ref with op "commit" or "amend".
 // Returns nil if no matching entry is found.
 func LastRefUpdate(safegitDir, ref string) (*Entry, error) {
