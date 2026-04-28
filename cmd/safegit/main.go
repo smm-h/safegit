@@ -14,6 +14,7 @@ import (
 	"github.com/smm-h/safegit/internal/commit"
 	"github.com/smm-h/safegit/internal/coord"
 	"github.com/smm-h/safegit/internal/git"
+	"github.com/smm-h/safegit/internal/hooks"
 	"github.com/smm-h/safegit/internal/index"
 	"github.com/smm-h/safegit/internal/lock"
 	"github.com/smm-h/safegit/internal/oplog"
@@ -104,6 +105,12 @@ func main() {
 		os.Exit(runPassthrough("log", cmdArgs))
 	case "show":
 		os.Exit(runPassthrough("show", cmdArgs))
+	case "push":
+		os.Exit(runPush(flags, cmdArgs))
+	case "fetch":
+		os.Exit(runFetch(cmdArgs))
+	case "hook":
+		os.Exit(runHook(flags, cmdArgs))
 	case "branch":
 		os.Exit(runBranch(flags, cmdArgs))
 	case "help", "--help", "-h":
@@ -219,6 +226,9 @@ Commands:
   merge       Merge a branch (guarded)
   rebase      Rebase onto upstream (guarded)
   reset       Reset (guarded for --hard)
+  push        Push with pre-pre-push hooks and retry logic
+  fetch       Fetch from remote (git passthrough)
+  hook        Manage pre-pre-push hooks (list, run, install)
   branch      List, create, or delete branches
   status      Show working tree status (git passthrough)
   diff        Show diffs (git passthrough)
@@ -299,11 +309,20 @@ func runInit(flags globalFlags, args []string) {
 		os.Exit(1)
 	}
 
+	// Install placeholder pre-pre-push hook if not present
+	var warnings []string
+	if err := hooks.InstallPlaceholder(gitDir); err != nil {
+		warnings = append(warnings, fmt.Sprintf("could not install placeholder hook: %v", err))
+	}
+
 	sgDir := repo.SafegitDir(gitDir)
 	if flags.format == formatJSON {
-		emitJSON("init", map[string]string{"safegit_dir": sgDir}, nil, nil)
+		emitJSON("init", map[string]string{"safegit_dir": sgDir}, nil, warnings)
 	} else if !flags.quiet {
 		fmt.Printf("initialized safegit at %s\n", sgDir)
+		for _, w := range warnings {
+			fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+		}
 	}
 }
 
