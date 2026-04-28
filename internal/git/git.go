@@ -126,3 +126,41 @@ func UpdateRef(ref, newSHA, oldSHA string) error {
 	_, _, err := Run(ctx, args...)
 	return err
 }
+
+// AddFile stages a file into a custom index.
+func AddFile(indexPath, filePath string) error {
+	ctx := context.Background()
+	env := []string{"GIT_INDEX_FILE=" + indexPath}
+	_, _, err := RunWithEnv(ctx, env, "add", "--", filePath)
+	return err
+}
+
+// RmCached removes a file from a custom index without touching the working tree.
+func RmCached(indexPath, filePath string) error {
+	ctx := context.Background()
+	env := []string{"GIT_INDEX_FILE=" + indexPath}
+	_, _, err := RunWithEnv(ctx, env, "rm", "--cached", "--", filePath)
+	return err
+}
+
+// IsTracked checks whether a file is tracked by git (present in HEAD).
+func IsTracked(filePath string) (bool, error) {
+	ctx := context.Background()
+	_, _, err := Run(ctx, "ls-files", "--error-unmatch", "--", filePath)
+	if err != nil {
+		// Exit code 1 means not tracked
+		return false, nil
+	}
+	return true, nil
+}
+
+// IsIgnored checks whether a file matches a gitignore rule.
+func IsIgnored(filePath string) (bool, error) {
+	ctx := context.Background()
+	_, _, err := Run(ctx, "check-ignore", "-q", "--", filePath)
+	if err != nil {
+		// Exit code 1 means not ignored; exit code 128 means path error
+		return false, nil
+	}
+	return true, nil
+}
