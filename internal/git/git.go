@@ -143,12 +143,14 @@ func RmCached(indexPath, filePath string) error {
 	return err
 }
 
-// IsTracked checks whether a file is tracked by git (present in HEAD).
+// IsTracked checks whether a file is tracked by git (present in HEAD tree).
+// Uses cat-file instead of ls-files because safegit never writes to the main
+// index -- files committed via safegit exist in HEAD but not in .git/index.
 func IsTracked(filePath string) (bool, error) {
 	ctx := context.Background()
-	_, _, err := Run(ctx, "ls-files", "--error-unmatch", "--", filePath)
+	_, _, err := Run(ctx, "cat-file", "-e", "HEAD:"+filePath)
 	if err != nil {
-		// Exit code 1 means not tracked
+		// Non-zero exit means the object doesn't exist in HEAD
 		return false, nil
 	}
 	return true, nil
