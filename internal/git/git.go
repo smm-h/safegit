@@ -156,6 +156,14 @@ func IsTracked(filePath string) (bool, error) {
 	return true, nil
 }
 
+// SyncMainIndex updates the main .git/index to match the given treeish.
+// This makes git status/diff reflect the committed state after safegit commits.
+func SyncMainIndex(treeish string) error {
+	ctx := context.Background()
+	_, _, err := Run(ctx, "read-tree", treeish)
+	return err
+}
+
 // IsIgnored checks whether a file matches a gitignore rule.
 func IsIgnored(filePath string) (bool, error) {
 	ctx := context.Background()

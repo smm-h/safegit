@@ -210,9 +210,15 @@ func (p *Pipeline) tryCommit(
 		return nil, false, fmt.Errorf("update-ref CAS failed: %w", err)
 	}
 
-	// Step 10: Lock released by defer
+	// Step 10: Sync main index to match HEAD so git status/diff work correctly.
+	// Non-fatal: the commit already landed, so a read-tree failure is just a warning.
+	if err := git.SyncMainIndex("HEAD"); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
+	}
 
-	// Step 11: Append op log
+	// Step 11: Lock released by defer
+
+	// Step 12: Append op log
 	_ = oplog.Append(p.SafegitDir, oplog.Entry{
 		Op: "commit",
 		Extra: map[string]interface{}{
