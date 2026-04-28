@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/smm-h/safegit/internal/commit"
@@ -1066,6 +1067,124 @@ func runDoctor(flags globalFlags) {
 		}
 	}
 
+	// Check 6: Raw git bypass detection -- compare oplog's last ref-update against actual tip
+	if repo.IsInitialized(gitDir) {
+		ref, refErr := git.HeadRef()
+		if refErr == nil && ref != "" {
+			lastEntry, entryErr := oplog.LastRefUpdate(sgDir, ref)
+			if entryErr == nil && lastEntry != nil {
+				if sha, ok := lastEntry.Extra["sha"].(string); ok {
+					tipSHA, tipErr := git.RevParse(ref)
+					if tipErr == nil && tipSHA != sha {
+						checks = append(checks, checkResult{
+							Name:   "bypass_detect",
+							Status: "warn",
+							Detail: fmt.Sprintf("tip of %s (%s) diverged from last oplog entry (%s); raw git may have been used", refShortName(ref), tipSHA[:8], sha[:8]),
+						})
+					} else if tipErr == nil {
+						checks = append(checks, checkResult{Name: "bypass_detect", Status: "ok"})
+					}
+				}
+			} else if entryErr == nil {
+				// No oplog entries for this ref -- skip check
+				checks = append(checks, checkResult{Name: "bypass_detect", Status: "ok", Detail: "no oplog entries for current ref"})
+			}
+		}
+	}
+
+	// Check 7: NFS/network filesystem detection
+	{
+		var buf syscall.Statfs_t
+		if err := syscall.Statfs(gitDir, &buf); err != nil {
+			checks = append(checks, checkResult{Name: "filesystem", Status: "warn", Detail: fmt.Sprintf("statfs failed: %v", err)})
+		} else {
+			// Known network filesystem magic numbers (Linux)
+			const (
+				nfsMagic  int64 = 0x6969
+				cifsMagic int64 = 0xFF534D42
+				smbMagic  int64 = 0x517B
+				fuseMagic int64 = 0x65735546
+			)
+			fsType := int64(buf.Type)
+			var fsName string
+			switch fsType {
+			case nfsMagic:
+				fsName = "NFS"
+			case cifsMagic:
+				fsName = "CIFS/SMB"
+			case smbMagic:
+				fsName = "SMB"
+			case fuseMagic:
+				fsName = "FUSE (possibly SSHFS)"
+			}
+			if fsName != "" {
+				checks = append(checks, checkResult{
+					Name:   "filesystem",
+					Status: "warn",
+					Detail: fmt.Sprintf("network filesystem detected: %s (lock atomicity not guaranteed)", fsName),
+				})
+			} else {
+				checks = append(checks, checkResult{Name: "filesystem", Status: "ok"})
+			}
+		}
+	}
+
+	// Check 8: Non-executable hooks in pre-pre-push.d/
+	if repo.IsInitialized(gitDir) {
+		hookDir := filepath.Join(gitDir, "hooks", "pre-pre-push.d")
+		entries, readErr := os.ReadDir(hookDir)
+		if readErr == nil {
+			var nonExec []string
+			for _, e := range entries {
+				if e.IsDir() || strings.HasPrefix(e.Name(), ".") || strings.HasSuffix(e.Name(), "~") {
+					continue
+				}
+				info, sErr := e.Info()
+				if sErr != nil {
+					continue
+				}
+				if info.Mode()&0111 == 0 {
+					nonExec = append(nonExec, e.Name())
+				}
+			}
+			if len(nonExec) > 0 {
+				checks = append(checks, checkResult{
+					Name:   "hook_perms",
+					Status: "warn",
+					Detail: fmt.Sprintf("%d non-executable hook(s) in pre-pre-push.d/: %s", len(nonExec), strings.Join(nonExec, ", ")),
+				})
+			} else {
+				checks = append(checks, checkResult{Name: "hook_perms", Status: "ok"})
+			}
+		}
+	}
+
+	// Check 9: Unsupported features (.gitmodules, LFS)
+	{
+		repoRoot, rootErr := git.RepoRoot()
+		if rootErr == nil {
+			var unsupported []string
+			if _, err := os.Stat(filepath.Join(repoRoot, ".gitmodules")); err == nil {
+				unsupported = append(unsupported, ".gitmodules detected (submodules not supported)")
+			}
+			attrsPath := filepath.Join(repoRoot, ".gitattributes")
+			if data, err := os.ReadFile(attrsPath); err == nil {
+				if strings.Contains(string(data), "filter=lfs") {
+					unsupported = append(unsupported, ".gitattributes has filter=lfs (LFS not supported)")
+				}
+			}
+			if len(unsupported) > 0 {
+				checks = append(checks, checkResult{
+					Name:   "unsupported",
+					Status: "warn",
+					Detail: strings.Join(unsupported, "; "),
+				})
+			} else {
+				checks = append(checks, checkResult{Name: "unsupported", Status: "ok"})
+			}
+		}
+	}
+
 	if flags.format == formatJSON {
 		emitJSON("doctor", checks, nil, nil)
 		return
@@ -1523,6 +1642,7 @@ func runBranch(flags globalFlags, args []string) int {
 	}
 	return 0
 }
+
 
 // emitJSON writes a JSON envelope to stdout.
 func emitJSON(command string, data interface{}, errVal *jsonError, warnings []string) {
