@@ -112,8 +112,11 @@ func (p *Pipeline) tryAmend(
 		message = msg
 	}
 
-	// --- Phase A: create tmp index from HEAD and stage new files ---
-	tmpIdx, err := index.New(p.SafegitDir)
+	// --- Phase A: create tmp index from the resolved HEAD and stage new files ---
+	// Use headSHA (resolved above) instead of "HEAD" to avoid a TOCTOU race:
+	// if HEAD moves between RevParse and index creation, the tree would be
+	// based on a different commit than headSHA, silently dropping files.
+	tmpIdx, err := index.New(p.SafegitDir, headSHA)
 	if err != nil {
 		return nil, false, fmt.Errorf("creating tmp index: %w", err)
 	}

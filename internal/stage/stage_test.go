@@ -79,7 +79,7 @@ func TestExtractHunks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tmpIdx, err := index.New(sgDir)
+	tmpIdx, err := index.New(sgDir, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestStageWholeFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tmpIdx, err := index.New(sgDir)
+	tmpIdx, err := index.New(sgDir, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestStageSpecificHunks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tmpIdx, err := index.New(sgDir)
+	tmpIdx, err := index.New(sgDir, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestUnstageFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tmpIdx, err := index.New(sgDir)
+	tmpIdx, err := index.New(sgDir, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +346,7 @@ func TestBinaryFileReject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tmpIdx, err := index.New(sgDir)
+	tmpIdx, err := index.New(sgDir, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}

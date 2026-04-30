@@ -689,7 +689,7 @@ func runStage(flags globalFlags, args []string) {
 	sgDir := repo.SafegitDir(gitDir)
 
 	// Create a tmp index for preview
-	tmpIdx, err := index.New(sgDir)
+	tmpIdx, err := index.New(sgDir, "HEAD")
 	if err != nil {
 		stageDie(flags, 1, fmt.Sprintf("creating tmp index: %v", err))
 	}
@@ -734,7 +734,7 @@ func runStage(flags globalFlags, args []string) {
 			totalHunks = len(hunks) + len(appliedHunks)
 		} else {
 			// Whole file staged -- count original hunks from a fresh index
-			tmpIdx2, err := index.New(sgDir)
+			tmpIdx2, err := index.New(sgDir, "HEAD")
 			if err == nil {
 				_, origHunks, _ := stage.ExtractHunks(tmpIdx2.IndexPath, file)
 				totalHunks = len(origHunks)
@@ -806,7 +806,7 @@ func runUnstage(flags globalFlags, args []string) {
 	sgDir := repo.SafegitDir(gitDir)
 
 	// Create a tmp index, stage the file first, then unstage
-	tmpIdx, err := index.New(sgDir)
+	tmpIdx, err := index.New(sgDir, "HEAD")
 	if err != nil {
 		stageDie(flags, 1, fmt.Sprintf("creating tmp index: %v", err))
 	}

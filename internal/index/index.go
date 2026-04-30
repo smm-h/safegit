@@ -22,9 +22,9 @@ type TmpIndex struct {
 	IndexPath string // Dir + "/index"
 }
 
-// New creates a temporary index directory and seeds the index from HEAD.
+// New creates a temporary index directory and seeds the index from the given treeish.
 // The directory name is <pid>-<random> where random is 4 bytes hex.
-func New(safegitDir string) (*TmpIndex, error) {
+func New(safegitDir string, treeish string) (*TmpIndex, error) {
 	tmpBase := filepath.Join(safegitDir, "tmp")
 
 	// Generate 4 random bytes -> 8 hex chars
@@ -43,11 +43,11 @@ func New(safegitDir string) (*TmpIndex, error) {
 
 	indexPath := filepath.Join(dir, "index")
 
-	// Seed from HEAD via git read-tree
-	if err := git.ReadTree(indexPath, "HEAD"); err != nil {
+	// Seed from the given treeish via git read-tree
+	if err := git.ReadTree(indexPath, treeish); err != nil {
 		// Clean up on failure
 		os.RemoveAll(dir)
-		return nil, fmt.Errorf("seeding index from HEAD: %w", err)
+		return nil, fmt.Errorf("seeding index from %s: %w", treeish, err)
 	}
 
 	return &TmpIndex{Dir: dir, IndexPath: indexPath}, nil
