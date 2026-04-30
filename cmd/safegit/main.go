@@ -891,7 +891,7 @@ func runDoctor(flags globalFlags) {
 		if refErr == nil && ref != "" {
 			lastEntry, entryErr := oplog.LastRefUpdate(sgDir, ref)
 			if entryErr == nil && lastEntry != nil {
-				if sha, ok := lastEntry.Extra["sha"].(string); ok {
+				if sha := oplog.TipSHA(lastEntry.Extra); sha != "" {
 					tipSHA, tipErr := git.RevParse(ref)
 					if tipErr == nil && tipSHA != sha {
 						checks = append(checks, checkResult{
