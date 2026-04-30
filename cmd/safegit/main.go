@@ -1139,6 +1139,17 @@ func coordGuard(flags globalFlags, sgDir, operation string) int {
 		}
 		return 5
 	}
+	if dirty != nil {
+		// --force bypass: log that coordination guard was skipped
+		_ = oplog.Append(sgDir, oplog.Entry{
+			Op: "coordination_bypassed",
+			Extra: map[string]interface{}{
+				"operation": operation,
+				"modified":  len(dirty.ModifiedFiles),
+				"wipLocks":  len(dirty.WipLocks),
+			},
+		})
+	}
 	return 0
 }
 
