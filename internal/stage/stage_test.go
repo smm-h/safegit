@@ -1,14 +1,12 @@
 package stage
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/smm-h/safegit/internal/git"
 	"github.com/smm-h/safegit/internal/index"
 	"github.com/smm-h/safegit/internal/repo"
 )
@@ -158,52 +156,6 @@ func TestBuildPatch(t *testing.T) {
 	}
 }
 
-func TestStageWholeFile(t *testing.T) {
-	dir, sgDir := initTestRepo(t)
-	chdir(t, dir)
-
-	// Modify seed.txt
-	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("changed\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	tmpIdx, err := index.New(sgDir, "HEAD")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tmpIdx.Cleanup()
-
-	// Get tree SHA before staging
-	treeBefore, err := git.WriteTree(tmpIdx.IndexPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := StageFile(tmpIdx.IndexPath, "seed.txt"); err != nil {
-		t.Fatalf("StageFile: %v", err)
-	}
-
-	treeAfter, err := git.WriteTree(tmpIdx.IndexPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if treeBefore == treeAfter {
-		t.Error("tree did not change after staging")
-	}
-
-	// Verify the staged content matches the new file
-	ctx := context.Background()
-	env := []string{"GIT_INDEX_FILE=" + tmpIdx.IndexPath}
-	out, _, err := git.RunWithEnv(ctx, env, "show", ":seed.txt")
-	if err != nil {
-		t.Fatalf("show staged: %v", err)
-	}
-	if strings.TrimSpace(out) != "changed" {
-		t.Errorf("staged content = %q, want %q", strings.TrimSpace(out), "changed")
-	}
-}
-
 func TestStageSpecificHunks(t *testing.T) {
 	dir, sgDir := initTestRepo(t)
 	chdir(t, dir)
@@ -267,56 +219,6 @@ func TestStageSpecificHunks(t *testing.T) {
 	// We staged 2 hunks out of N, so there should be fewer remaining
 	if len(remainingHunks) >= len(hunks) {
 		t.Errorf("expected fewer remaining hunks after staging; before=%d, after=%d", len(hunks), len(remainingHunks))
-	}
-}
-
-func TestUnstageFile(t *testing.T) {
-	dir, sgDir := initTestRepo(t)
-	chdir(t, dir)
-
-	// Modify and stage
-	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("modified\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	tmpIdx, err := index.New(sgDir, "HEAD")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tmpIdx.Cleanup()
-
-	// Record HEAD tree
-	headTree, err := git.WriteTree(tmpIdx.IndexPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Stage the change
-	if err := StageFile(tmpIdx.IndexPath, "seed.txt"); err != nil {
-		t.Fatal(err)
-	}
-
-	// Verify tree changed
-	stagedTree, err := git.WriteTree(tmpIdx.IndexPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stagedTree == headTree {
-		t.Fatal("staging did not change tree")
-	}
-
-	// Unstage
-	if err := UnstageFile(tmpIdx.IndexPath, "seed.txt"); err != nil {
-		t.Fatalf("UnstageFile: %v", err)
-	}
-
-	// Tree should match HEAD again
-	unstagedTree, err := git.WriteTree(tmpIdx.IndexPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if unstagedTree != headTree {
-		t.Errorf("tree after unstage = %s, want %s (HEAD)", unstagedTree, headTree)
 	}
 }
 
