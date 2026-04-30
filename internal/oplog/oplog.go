@@ -171,7 +171,7 @@ func LastRefUpdate(safegitDir, ref string) (*Entry, error) {
 	// Walk backwards to find the most recent match
 	for i := len(entries) - 1; i >= 0; i-- {
 		e := entries[i]
-		if e.Op != "commit" && e.Op != "amend" {
+		if e.Op != "commit" && e.Op != "amend" && e.Op != "reword" {
 			continue
 		}
 		if e.Extra == nil {
