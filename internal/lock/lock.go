@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/smm-h/safegit/internal/oplog"
 )
 
 // RefLock represents an acquired lock on a git ref.
@@ -74,8 +76,16 @@ func Acquire(safegitDir, ref, op string, timeout time.Duration) (*RefLock, error
 		// Lock file exists -- check if it's stale
 		stale, staleErr := IsStale(lp)
 		if staleErr == nil && stale {
-			// Owner is dead; remove and retry immediately
+			// Capture stale holder's PID before removing the lock file
+			stalePid, _ := parsePID(lp)
 			os.Remove(lp)
+			_ = oplog.Append(safegitDir, oplog.Entry{
+				Op: "lock_recovered",
+				Extra: map[string]interface{}{
+					"ref":      ref,
+					"stalePid": stalePid,
+				},
+			})
 			continue
 		}
 
