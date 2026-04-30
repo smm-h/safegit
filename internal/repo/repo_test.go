@@ -34,7 +34,6 @@ func TestInitAndIsInitialized(t *testing.T) {
 	sgDir := SafegitDir(gitDir)
 	expectedDirs := []string{
 		filepath.Join(sgDir, "locks", "refs", "heads"),
-		filepath.Join(sgDir, "queue", "refs", "heads"),
 		filepath.Join(sgDir, "wip-locks"),
 		filepath.Join(sgDir, "tmp"),
 	}
