@@ -828,3 +828,206 @@ func TestStressOpLog(t *testing.T) {
 		t.Errorf("expected %d commit entries in oplog, got %d", N, commitEntries)
 	}
 }
+
+func TestStatusJSON(t *testing.T) {
+	dir := newRepo(t)
+
+	// Modify a tracked file and create an untracked file
+	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("modified\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("new\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, _, code := runSafegit(t, dir, "--format", "json", "status")
+	if code != 0 {
+		t.Fatalf("status failed (code %d)", code)
+	}
+
+	r := parseJSON(t, stdout)
+	if !r.OK {
+		t.Fatalf("status returned ok=false: %s", stdout)
+	}
+
+	var data struct {
+		Branch  string `json:"branch"`
+		SHA     string `json:"sha"`
+		Entries []struct {
+			Path   string `json:"path"`
+			Status string `json:"status"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(r.Data, &data); err != nil {
+		t.Fatalf("parsing status data: %v", err)
+	}
+
+	if data.Branch != "main" {
+		t.Errorf("branch = %q, want 'main'", data.Branch)
+	}
+	if len(data.SHA) != 40 {
+		t.Errorf("sha = %q, want 40-char hex", data.SHA)
+	}
+
+	// Should have at least 2 entries (modified seed.txt + untracked.txt)
+	if len(data.Entries) < 2 {
+		t.Errorf("expected at least 2 entries, got %d", len(data.Entries))
+	}
+
+	// Check that seed.txt is reported as modified
+	found := false
+	for _, e := range data.Entries {
+		if e.Path == "seed.txt" && e.Status == "modified" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("seed.txt not found as 'modified' in status entries")
+	}
+
+	// Check that untracked.txt is reported
+	found = false
+	for _, e := range data.Entries {
+		if e.Path == "untracked.txt" && e.Status == "untracked" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("untracked.txt not found as 'untracked' in status entries")
+	}
+}
+
+func TestDiffJSON(t *testing.T) {
+	dir := newRepo(t)
+
+	// Modify seed.txt
+	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("modified content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, _, code := runSafegit(t, dir, "--format", "json", "diff")
+	if code != 0 {
+		t.Fatalf("diff failed (code %d)", code)
+	}
+
+	r := parseJSON(t, stdout)
+	if !r.OK {
+		t.Fatalf("diff returned ok=false: %s", stdout)
+	}
+
+	var data struct {
+		Files []struct {
+			Path  string `json:"path"`
+			Hunks []struct {
+				Header string   `json:"header"`
+				Lines  []string `json:"lines"`
+			} `json:"hunks"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(r.Data, &data); err != nil {
+		t.Fatalf("parsing diff data: %v", err)
+	}
+
+	if len(data.Files) != 1 {
+		t.Fatalf("expected 1 file in diff, got %d", len(data.Files))
+	}
+	if data.Files[0].Path != "seed.txt" {
+		t.Errorf("file path = %q, want 'seed.txt'", data.Files[0].Path)
+	}
+	if len(data.Files[0].Hunks) == 0 {
+		t.Error("expected at least 1 hunk")
+	}
+}
+
+func TestLogJSON(t *testing.T) {
+	dir := newRepo(t)
+
+	// Make a safegit commit so we have 2 commits (initial + this one)
+	if err := os.WriteFile(filepath.Join(dir, "log.txt"), []byte("log\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runSafegit(t, dir, "commit", "-m", "test log entry", "--", "log.txt")
+
+	stdout, _, code := runSafegit(t, dir, "--format", "json", "log", "-2")
+	if code != 0 {
+		t.Fatalf("log failed (code %d)", code)
+	}
+
+	r := parseJSON(t, stdout)
+	if !r.OK {
+		t.Fatalf("log returned ok=false: %s", stdout)
+	}
+
+	var data struct {
+		Entries []struct {
+			SHA     string `json:"sha"`
+			Author  string `json:"author"`
+			Date    string `json:"date"`
+			Message string `json:"message"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(r.Data, &data); err != nil {
+		t.Fatalf("parsing log data: %v", err)
+	}
+
+	if len(data.Entries) != 2 {
+		t.Fatalf("expected 2 log entries, got %d", len(data.Entries))
+	}
+
+	// First entry (most recent) should be our commit
+	if data.Entries[0].Message != "test log entry" {
+		t.Errorf("first entry message = %q, want 'test log entry'", data.Entries[0].Message)
+	}
+	if len(data.Entries[0].SHA) != 40 {
+		t.Errorf("SHA = %q, want 40-char hex", data.Entries[0].SHA)
+	}
+	if data.Entries[0].Author == "" {
+		t.Error("author is empty")
+	}
+	if data.Entries[0].Date == "" {
+		t.Error("date is empty")
+	}
+}
+
+func TestShowJSON(t *testing.T) {
+	dir := newRepo(t)
+
+	// Make a commit with a known file
+	if err := os.WriteFile(filepath.Join(dir, "show.txt"), []byte("show\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runSafegit(t, dir, "commit", "-m", "show test commit", "--", "show.txt")
+
+	stdout, _, code := runSafegit(t, dir, "--format", "json", "show", "HEAD")
+	if code != 0 {
+		t.Fatalf("show failed (code %d)", code)
+	}
+
+	r := parseJSON(t, stdout)
+	if !r.OK {
+		t.Fatalf("show returned ok=false: %s", stdout)
+	}
+
+	var data struct {
+		SHA     string `json:"sha"`
+		Author  string `json:"author"`
+		Date    string `json:"date"`
+		Message string `json:"message"`
+		Files   []struct {
+			Path string `json:"path"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(r.Data, &data); err != nil {
+		t.Fatalf("parsing show data: %v", err)
+	}
+
+	if data.Message != "show test commit" {
+		t.Errorf("message = %q, want 'show test commit'", data.Message)
+	}
+	if len(data.SHA) != 40 {
+		t.Errorf("SHA = %q, want 40-char hex", data.SHA)
+	}
+	if len(data.Files) == 0 {
+		t.Error("expected at least 1 file in show output")
+	}
+}
