@@ -1,0 +1,90 @@
+# safegit
+
+Go CLI wrapper around git for safe concurrent multi-agent use.
+
+## The problem
+
+When multiple AI agent sessions share a single git repository, they race on
+`.git/index`. Two agents staging files at the same time produce mixed commits
+-- files from one agent leak into another's commit, or writes are silently
+lost. Standard git has no built-in isolation for this scenario.
+
+## The solution
+
+safegit wraps git plumbing commands behind a two-phase commit pipeline that
+keeps every invocation isolated. Per-invocation temporary index files prevent
+staging races. Ref updates use per-ref locks with compare-and-swap (CAS) retry,
+so concurrent commits to the same branch serialize correctly. An append-only
+operation log records every mutation. The output is standard git commits --
+teammates, CI, and code review tools see nothing unusual.
+
+## Install
+
+From source (requires Go 1.24+):
+
+```
+go install github.com/smm-h/safegit/cmd/safegit@latest
+```
+
+Pre-built binaries are available on
+[GitHub Releases](https://github.com/smm-h/safegit/releases) via goreleaser.
+
+## Quick start
+
+```
+cd your-repo
+safegit init
+safegit commit -m "add feature X" -- src/foo.go src/bar.go
+safegit push
+```
+
+## Key commands
+
+| Command   | Description |
+|-----------|-------------|
+| `init`    | Create `.git/safegit/` directory structure |
+| `commit`  | Stage files and commit atomically using a per-invocation index |
+| `amend`   | Amend the tip commit with new files (CAS-safe) |
+| `reword`  | Rewrite the tip commit message (CAS-safe) |
+| `wip`     | Save work-in-progress snapshots to refs |
+| `unwip`   | Restore a previously saved wip snapshot |
+| `push`    | Push with pre-pre-push hooks and retry logic |
+| `doctor`  | Health checks: initialization, stale locks, orphan dirs, bypass detection |
+| `gc`      | Garbage-collect dead tmp directories and rotate logs |
+| `config`  | Show or set configuration values |
+| `unlock`  | Release a stale ref lock |
+
+Read-only git commands (`status`, `diff`, `log`, `show`) and tree-mutating
+commands (`checkout`, `pull`, `merge`, `rebase`, `reset`) are passed through to
+git, with coordination guards on the mutating ones.
+
+## How it works
+
+The commit pipeline has two phases. Phase A (parallel-safe) creates a temporary
+index, stages the requested files into it, and builds the tree object -- all
+without touching the shared `.git/index`. Phase B acquires a per-ref lock,
+reads the current tip, creates the commit with that parent, and updates the ref
+using CAS. If the ref moved between read and write, Phase B retries from the
+new tip (re-parenting the commit) up to a configurable number of attempts.
+
+See [design.md](design.md) for the full architecture specification.
+
+## Configuration
+
+Run `safegit config` to view all settings, or `safegit config <key> <value>`
+to change one.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `commit.casMaxAttempts` | 5 | Max CAS retry attempts for ref updates |
+| `lock.acquireTimeoutSeconds` | 30 | Timeout waiting for a per-ref lock |
+| `hooks.preprepush.timeoutSeconds` | 1800 | Timeout for pre-pre-push hook execution |
+| `push.retryAttempts` | 3 | Number of push retry attempts |
+| `log.maxSizeMB` | 100 | Max operation log size before rotation |
+
+Configuration is stored in `.git/safegit/config.json`. Remove the entire
+`.git/safegit/` directory to return to vanilla git.
+
+## License
+
+MIT
