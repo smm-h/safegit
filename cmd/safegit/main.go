@@ -1483,7 +1483,7 @@ func runBisect(flags globalFlags, args []string) int {
 	sgDir := repo.SafegitDir(gitDir)
 
 	// Guard tree-moving subcommands (good, bad, reset, start with a rev)
-	needsGuard := len(args) == 0
+	needsGuard := false
 	if len(args) > 0 {
 		switch args[0] {
 		case "good", "bad", "old", "new", "reset", "start":
