@@ -42,7 +42,7 @@ func TestNew(t *testing.T) {
 	defer os.Chdir(oldDir)
 	os.Chdir(filepath.Dir(gitDir))
 
-	idx, err := New(sgDir)
+	idx, err := New(sgDir, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestCleanup(t *testing.T) {
 	defer os.Chdir(oldDir)
 	os.Chdir(filepath.Dir(gitDir))
 
-	idx, err := New(sgDir)
+	idx, err := New(sgDir, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}

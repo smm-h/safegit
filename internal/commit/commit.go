@@ -167,8 +167,18 @@ func (p *Pipeline) tryCommit(
 
 	// --- Phase A: parallel-safe (no locks) ---
 
-	// Step 1: Create per-invocation tmp index seeded from HEAD
-	tmpIdx, err := index.New(p.SafegitDir)
+	// Resolve parent FIRST so tree and parent are always consistent.
+	// If we resolved the parent after building the tree, another agent's
+	// commit landing between index creation and RevParse would cause us
+	// to create a commit whose tree is based on the old HEAD but whose
+	// parent is the new HEAD -- silently dropping the other agent's files.
+	parentSHA, err := git.RevParse(ref)
+	if err != nil {
+		return nil, false, fmt.Errorf("resolving parent %s: %w", ref, err)
+	}
+
+	// Step 1: Create per-invocation tmp index seeded from the resolved parent
+	tmpIdx, err := index.New(p.SafegitDir, parentSHA)
 	if err != nil {
 		return nil, false, fmt.Errorf("creating tmp index: %w", err)
 	}
@@ -194,12 +204,6 @@ func (p *Pipeline) tryCommit(
 	treeSHA, err := git.WriteTree(tmpIdx.IndexPath)
 	if err != nil {
 		return nil, false, &CommitError{Code: ExitWriteTree, Message: fmt.Sprintf("write-tree failed: %v", err)}
-	}
-
-	// Step 5: Snapshot parent
-	parentSHA, err := git.RevParse(ref)
-	if err != nil {
-		return nil, false, fmt.Errorf("resolving parent %s: %w", ref, err)
 	}
 
 	// Check for empty commit (tree unchanged)
