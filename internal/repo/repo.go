@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Config holds safegit configuration persisted in config.json.
@@ -77,11 +78,17 @@ func Init(gitDir string, force bool) error {
 		return fmt.Errorf("safegit already initialized at %s (use --force to reinitialize)", sgDir)
 	}
 
+	// Refuse on unsupported repo features (unless --force)
+	if !force {
+		if err := checkUnsupportedFeatures(gitDir); err != nil {
+			return err
+		}
+	}
+
 	// Create directory structure
 	dirs := []string{
 		sgDir,
 		filepath.Join(sgDir, "locks", "refs", "heads"),
-		filepath.Join(sgDir, "queue", "refs", "heads"),
 		filepath.Join(sgDir, "wip-locks"),
 		filepath.Join(sgDir, "tmp"),
 	}
@@ -217,4 +224,22 @@ func parseInt(s string) (int, error) {
 	var v int
 	_, err := fmt.Sscanf(s, "%d", &v)
 	return v, err
+}
+
+// checkUnsupportedFeatures refuses init on repos with submodules or LFS.
+func checkUnsupportedFeatures(gitDir string) error {
+	repoRoot := filepath.Dir(gitDir)
+
+	if _, err := os.Stat(filepath.Join(repoRoot, ".gitmodules")); err == nil {
+		return fmt.Errorf("safegit does not support submodules (.gitmodules detected); use --force to override")
+	}
+
+	attrsPath := filepath.Join(repoRoot, ".gitattributes")
+	if data, err := os.ReadFile(attrsPath); err == nil {
+		if strings.Contains(string(data), "filter=lfs") {
+			return fmt.Errorf("safegit does not support Git LFS (filter=lfs in .gitattributes); use --force to override")
+		}
+	}
+
+	return nil
 }
