@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/smm-h/safegit/internal/git"
+	"github.com/smm-h/safegit/internal/stage"
 )
 
 // --- status ---
@@ -158,66 +159,74 @@ type diffHunk struct {
 	Lines  []string `json:"lines"`  // body lines
 }
 
-// parseDiffOutput parses unified diff output into structured diffFile slices.
+// parseDiffOutput parses multi-file unified diff output into structured diffFile slices.
+// It splits the raw output on "diff --git" boundaries and delegates single-file
+// parsing to stage.ParseDiff to avoid duplicating hunk-parsing logic.
 func parseDiffOutput(raw string) []diffFile {
 	var files []diffFile
-	lines := strings.Split(raw, "\n")
-	var cur *diffFile
-	var curHunk *diffHunk
 
-	for _, line := range lines {
-		switch {
-		case strings.HasPrefix(line, "diff --git "):
-			// Flush current hunk/file
-			if curHunk != nil && cur != nil {
-				cur.Hunks = append(cur.Hunks, *curHunk)
-				curHunk = nil
-			}
-			if cur != nil {
-				files = append(files, *cur)
-			}
-			cur = &diffFile{Hunks: []diffHunk{}}
-			// Parse "diff --git a/path b/path"
-			parts := strings.SplitN(line, " ", 4)
-			if len(parts) == 4 {
-				cur.Path = strings.TrimPrefix(parts[3], "b/")
-				old := strings.TrimPrefix(parts[2], "a/")
-				if old != cur.Path {
-					cur.OldPath = old
-				}
-			}
+	// Split on "diff --git" boundaries. Each chunk (except possibly the first
+	// empty one) is a single file's diff block.
+	chunks := splitDiffChunks(raw)
 
-		case strings.HasPrefix(line, "--- "):
-			// skip; path already captured from diff --git line
+	for _, chunk := range chunks {
+		// Extract path info from the first line ("diff --git a/... b/...")
+		firstNewline := strings.IndexByte(chunk, '\n')
+		firstLine := chunk
+		if firstNewline >= 0 {
+			firstLine = chunk[:firstNewline]
+		}
 
-		case strings.HasPrefix(line, "+++ "):
-			// For renames or new files, the +++ line may be more accurate
-			if cur != nil && cur.Path == "" {
-				cur.Path = strings.TrimPrefix(line[4:], "b/")
-			}
-
-		case strings.HasPrefix(line, "@@ "):
-			// New hunk
-			if curHunk != nil && cur != nil {
-				cur.Hunks = append(cur.Hunks, *curHunk)
-			}
-			curHunk = &diffHunk{Header: line}
-
-		default:
-			if curHunk != nil {
-				curHunk.Lines = append(curHunk.Lines, line)
+		df := diffFile{Hunks: []diffHunk{}}
+		parts := strings.SplitN(firstLine, " ", 4)
+		if len(parts) == 4 {
+			df.Path = strings.TrimPrefix(parts[3], "b/")
+			old := strings.TrimPrefix(parts[2], "a/")
+			if old != df.Path {
+				df.OldPath = old
 			}
 		}
-	}
 
-	// Flush remaining
-	if curHunk != nil && cur != nil {
-		cur.Hunks = append(cur.Hunks, *curHunk)
-	}
-	if cur != nil {
-		files = append(files, *cur)
+		// Delegate hunk parsing to the shared implementation
+		_, hunks := stage.ParseDiff(chunk)
+		for _, h := range hunks {
+			df.Hunks = append(df.Hunks, diffHunk{
+				Header: h.Header,
+				Lines:  h.Body,
+			})
+		}
+
+		files = append(files, df)
 	}
 	return files
+}
+
+// splitDiffChunks splits multi-file diff output into per-file chunks.
+// Each returned string starts with "diff --git".
+func splitDiffChunks(raw string) []string {
+	const prefix = "diff --git "
+	var chunks []string
+	rest := raw
+	for {
+		// Find the next "diff --git" after the start
+		idx := strings.Index(rest[1:], prefix)
+		if idx < 0 {
+			// No more boundaries; the rest is the last chunk
+			chunks = append(chunks, rest)
+			break
+		}
+		idx++ // adjust for the 1-char offset
+		chunks = append(chunks, rest[:idx])
+		rest = rest[idx:]
+	}
+	// Only return chunks that actually start with the prefix
+	var result []string
+	for _, c := range chunks {
+		if strings.HasPrefix(c, prefix) {
+			result = append(result, c)
+		}
+	}
+	return result
 }
 
 func runDiff(flags globalFlags, args []string) int {
@@ -309,6 +318,31 @@ func runShow(flags globalFlags, args []string) int {
 	}
 
 	ctx := context.Background()
+
+	// Determine the revision to inspect (default HEAD).
+	rev := "HEAD"
+	if len(args) > 0 {
+		// The first non-flag argument is the revision.
+		for _, a := range args {
+			if !strings.HasPrefix(a, "-") {
+				rev = a
+				break
+			}
+		}
+	}
+
+	// Guard: JSON output only makes sense for commit objects.
+	// Trees, blobs, and tags produce output that doesn't match our format.
+	objType, _, typeErr := git.Run(ctx, "cat-file", "-t", rev)
+	if typeErr != nil {
+		emitJSON("show", nil, &jsonError{Code: 1, Message: fmt.Sprintf("cannot determine object type for %q", rev)}, nil)
+		return 1
+	}
+	objType = strings.TrimSpace(objType)
+	if objType != "commit" {
+		emitJSON("show", nil, &jsonError{Code: 1, Message: "JSON output only supported for commit objects"}, nil)
+		return 1
+	}
 
 	// Use a unique delimiter to split commit metadata from diff output.
 	// The %x00 after %B marks end of metadata section.

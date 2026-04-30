@@ -49,12 +49,13 @@ func ExtractHunks(indexPath, file string) (header []string, hunks []Hunk, err er
 		return nil, nil, errors.New("binary file: hunk staging not supported")
 	}
 
-	header, hunks = parseDiff(out)
+	header, hunks = ParseDiff(out)
 	return header, hunks, nil
 }
 
-// parseDiff splits unified diff output into header lines and hunks.
-func parseDiff(raw string) (header []string, hunks []Hunk) {
+// ParseDiff splits unified diff output into header lines and hunks.
+// It handles a single file's diff block (one "diff --git" header + hunks).
+func ParseDiff(raw string) (header []string, hunks []Hunk) {
 	lines := strings.Split(raw, "\n")
 	// Remove trailing empty line from split
 	if len(lines) > 0 && lines[len(lines)-1] == "" {
