@@ -392,7 +392,6 @@ func pushDie(flags globalFlags, code int, msg string) {
 	} else {
 		fmt.Fprintf(os.Stderr, "error: %s\n", msg)
 	}
-	os.Exit(code)
 }
 
 // MarshalJSON for HookResult to format Duration as a string.
