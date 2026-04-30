@@ -98,6 +98,8 @@ func main() {
 		os.Exit(runRebase(flags, cmdArgs))
 	case "reset":
 		os.Exit(runReset(flags, cmdArgs))
+	case "bisect":
+		os.Exit(runBisect(flags, cmdArgs))
 	case "status":
 		os.Exit(runPassthrough("status", cmdArgs))
 	case "diff":
@@ -231,6 +233,7 @@ Commands:
   merge       Merge a branch (guarded)
   rebase      Rebase onto upstream (guarded)
   reset       Reset (guarded for --hard)
+  bisect      Bisect (guarded: checks for uncommitted work)
   push        Push with pre-pre-push hooks and retry logic
   fetch       Fetch from remote (git passthrough)
   hook        Manage pre-pre-push hooks (list, run, install)
@@ -1409,6 +1412,52 @@ func runReset(flags globalFlags, args []string) int {
 
 	_ = oplog.Append(sgDir, oplog.Entry{
 		Op: "reset",
+		Extra: map[string]interface{}{
+			"args": strings.Join(args, " "),
+		},
+	})
+	return 0
+}
+
+func runBisect(flags globalFlags, args []string) int {
+	gitDir := mustGitDir(flags)
+	if err := repo.EnsureInitialized(gitDir); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 4
+	}
+	sgDir := repo.SafegitDir(gitDir)
+
+	// Guard tree-moving subcommands (good, bad, reset, start with a rev)
+	needsGuard := len(args) == 0
+	if len(args) > 0 {
+		switch args[0] {
+		case "good", "bad", "old", "new", "reset", "start":
+			needsGuard = true
+		}
+	}
+
+	if needsGuard {
+		if code := coordGuard(flags, sgDir, "bisect"); code != 0 {
+			return code
+		}
+	}
+
+	ctx := context.Background()
+	stdout, stderr, err := git.Run(ctx, append([]string{"bisect"}, args...)...)
+	if stdout != "" {
+		fmt.Print(stdout)
+	}
+	if stderr != "" {
+		fmt.Fprint(os.Stderr, stderr)
+	}
+	if err != nil {
+		return 1
+	}
+
+	syncMainIndex(flags, "bisect")
+
+	_ = oplog.Append(sgDir, oplog.Entry{
+		Op: "bisect",
 		Extra: map[string]interface{}{
 			"args": strings.Join(args, " "),
 		},
