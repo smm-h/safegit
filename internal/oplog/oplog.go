@@ -160,7 +160,10 @@ func Rotate(safegitDir string, maxSizeMB int) (bool, error) {
 	return true, nil
 }
 
-// LastRefUpdate finds the most recent entry for a given ref with op "commit" or "amend".
+// LastRefUpdate finds the most recent oplog entry for a given ref that
+// records a new tip SHA. It accepts any op type and tries multiple extra
+// keys ("sha", "to", "result") since different ops store the new tip
+// under different names.
 // Returns nil if no matching entry is found.
 func LastRefUpdate(safegitDir, ref string) (*Entry, error) {
 	entries, err := Read(safegitDir)
@@ -171,16 +174,39 @@ func LastRefUpdate(safegitDir, ref string) (*Entry, error) {
 	// Walk backwards to find the most recent match
 	for i := len(entries) - 1; i >= 0; i-- {
 		e := entries[i]
-		if e.Op != "commit" && e.Op != "amend" && e.Op != "reword" {
-			continue
-		}
 		if e.Extra == nil {
 			continue
 		}
 		if entryRef, ok := e.Extra["ref"].(string); ok && entryRef == ref {
-			return &e, nil
+			// Ensure the entry has a resolvable SHA in one of the known keys
+			if hasTipSHA(e.Extra) {
+				return &e, nil
+			}
 		}
 	}
 
 	return nil, nil
+}
+
+// hasTipSHA returns true if extra contains a new-tip SHA under any of
+// the known keys: "sha" (commit/amend/reword), "to" (checkout),
+// "result" (merge).
+func hasTipSHA(extra map[string]interface{}) bool {
+	for _, key := range []string{"sha", "to", "result"} {
+		if v, ok := extra[key].(string); ok && v != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// TipSHA extracts the new-tip SHA from an oplog entry's extra map.
+// It checks "sha", "to", and "result" in order. Returns "" if none found.
+func TipSHA(extra map[string]interface{}) string {
+	for _, key := range []string{"sha", "to", "result"} {
+		if v, ok := extra[key].(string); ok && v != "" {
+			return v
+		}
+	}
+	return ""
 }
