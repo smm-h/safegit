@@ -1,0 +1,9 @@
+#!/bin/bash
+# Run stress and concurrency tests with race detection.
+# Usage: scripts/stress [count]   (default: count=5)
+set -euo pipefail
+
+COUNT="${1:-5}"
+
+echo "Running all integration tests (race, count=$COUNT)..."
+go test ./internal/test/ -race -count="$COUNT" -timeout=15m -v "$@"
