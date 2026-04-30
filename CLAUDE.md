@@ -1,20 +1,29 @@
 # safegit
 
+## Build and test
+
+- `go build -o safegit ./cmd/safegit` to build
+- `go test ./... -race` to run all tests with race detection
+- `go test ./internal/test/ -race -count=5 -timeout=15m` for stress tests
+- `scripts/stress` for a quick stress run
+
 ## Release workflow
 
 This project uses [rlsbl](https://github.com/smm-h/rlsbl) for release orchestration.
 
 - Update CHANGELOG.md with a `## X.Y.Z` entry describing changes
 - Run `rlsbl release [patch|minor|major]` to bump version and create a GitHub Release
-- CI handles publishing automatically via the publish workflow
-- Never publish manually — always use `rlsbl release`
-- Requires `NPM_TOKEN` secret on GitHub (for npm projects)
+- CI handles publishing via goreleaser (cross-platform static binaries)
+- Never publish manually -- always use `rlsbl release`
 - Use `rlsbl release --dry-run` to preview a release without making changes
 
 ## Conventions
 
-- No tokens or secrets in command-line arguments (use env vars or config files)
-- All file writes to shared state should be atomic (write to tmp, then rename)
-- External calls (APIs, CLI tools) must have timeouts and graceful fallbacks
-- Use `npm link` (npm) or `uv pip install -e .` (Python) for local development
-- CI runs smoke tests on every push; manual testing for UI/UX changes
+- Always use `safegit commit` (not raw `git commit`) when committing to this repo, if safegit is installed
+- All git plumbing calls go through internal/git (never shell out to git directly from other packages)
+- Per-invocation tmp indexes: never write to the shared .git/index
+- All ref updates use CAS (compare-and-swap) via git update-ref with old-value argument
+- Lock files use O_CREAT|O_EXCL for atomic creation
+- Oplog entries must be < 4096 bytes (POSIX atomic append guarantee)
+- Tests in internal/test/ are integration tests that build and run the safegit binary as a subprocess
+- CGO_ENABLED=0 for all builds (static binary, no C dependencies)
