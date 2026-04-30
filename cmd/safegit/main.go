@@ -102,13 +102,13 @@ func main() {
 	case "bisect":
 		os.Exit(runBisect(flags, cmdArgs))
 	case "status":
-		os.Exit(runPassthrough("status", cmdArgs))
+		os.Exit(runStatus(flags, cmdArgs))
 	case "diff":
-		os.Exit(runPassthrough("diff", cmdArgs))
+		os.Exit(runDiff(flags, cmdArgs))
 	case "log":
-		os.Exit(runPassthrough("log", cmdArgs))
+		os.Exit(runLog(flags, cmdArgs))
 	case "show":
-		os.Exit(runPassthrough("show", cmdArgs))
+		os.Exit(runShow(flags, cmdArgs))
 	case "push":
 		os.Exit(runPush(flags, cmdArgs))
 	case "fetch":
