@@ -204,14 +204,6 @@ func gitApply(ctx context.Context, env []string, patch []byte, threeWay bool) er
 	return err
 }
 
-// StageFile stages a whole file into a tmp index.
-func StageFile(indexPath, file string) error {
-	ctx := context.Background()
-	env := []string{"GIT_INDEX_FILE=" + indexPath}
-	_, _, err := git.RunWithEnv(ctx, env, "add", "--", file)
-	return err
-}
-
 // StageHunks stages only specific hunks of a file into a tmp index.
 // hunkIndices are 1-based.
 func StageHunks(indexPath, file string, hunkIndices []int) error {
@@ -236,53 +228,6 @@ func StageHunks(indexPath, file string, hunkIndices []int) error {
 	}
 
 	return ApplyPatch(indexPath, patch)
-}
-
-// UnstageFile resets a file in the tmp index to HEAD.
-func UnstageFile(indexPath, file string) error {
-	ctx := context.Background()
-	env := []string{"GIT_INDEX_FILE=" + indexPath}
-	_, _, err := git.RunWithEnv(ctx, env, "checkout", "HEAD", "--", file)
-	if err != nil {
-		// Try reset approach if checkout fails
-		_, _, err = git.RunWithEnv(ctx, env, "reset", "HEAD", "--", file)
-	}
-	return err
-}
-
-// UnstageHunks unstages specific hunks by applying them in reverse.
-// hunkIndices are 1-based.
-func UnstageHunks(indexPath, file string, hunkIndices []int) error {
-	header, hunks, err := ExtractHunks(indexPath, file)
-	if err != nil {
-		return fmt.Errorf("extracting hunks: %w", err)
-	}
-	if len(hunks) == 0 {
-		return errors.New("no hunks found (file has no changes)")
-	}
-
-	for _, idx := range hunkIndices {
-		if idx < 1 || idx > len(hunks) {
-			return fmt.Errorf("hunk index %d out of range (file has %d hunks)", idx, len(hunks))
-		}
-	}
-
-	patch, err := BuildPatch(header, hunks, hunkIndices)
-	if err != nil {
-		return fmt.Errorf("building patch: %w", err)
-	}
-
-	// Apply in reverse
-	ctx := context.Background()
-	env := []string{"GIT_INDEX_FILE=" + indexPath}
-	args := []string{"apply", "--cached", "--recount", "--whitespace=nowarn", "--reverse", "-"}
-	_, _, err = git.RunWithEnvStdin(ctx, env, patch, args...)
-	if err != nil {
-		// Retry with --3way
-		args = append(args[:len(args)-1], "--3way", "-")
-		_, _, err = git.RunWithEnvStdin(ctx, env, patch, args...)
-	}
-	return err
 }
 
 // ParseHunkSpec parses a hunk specifier string like "1,3,5" or "2-4" or "1,3-5".
