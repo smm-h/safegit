@@ -349,6 +349,7 @@ func runCommit(flags globalFlags, args []string) {
 
 	// Parse commit-specific flags
 	var messages []string
+	var messageFile string
 	var branch string
 	var allowEmpty bool
 	var files []string
@@ -368,6 +369,12 @@ func runCommit(flags globalFlags, args []string) {
 			}
 			i++
 			messages = append(messages, args[i])
+		case "-F":
+			if i+1 >= len(args) {
+				commitDie(flags, 2, "-F requires an argument")
+			}
+			i++
+			messageFile = args[i]
 		case "--branch":
 			if i+1 >= len(args) {
 				commitDie(flags, 2, "--branch requires an argument")
@@ -377,13 +384,20 @@ func runCommit(flags globalFlags, args []string) {
 		case "--allow-empty":
 			allowEmpty = true
 		default:
-			// Might be a flag value starting with -- that we don't recognise
 			commitDie(flags, 2, fmt.Sprintf("unknown flag: %s", args[i]))
 		}
 	}
 
+	if messageFile != "" {
+		data, err := os.ReadFile(messageFile)
+		if err != nil {
+			commitDie(flags, 1, fmt.Sprintf("reading message file: %v", err))
+		}
+		messages = append(messages, strings.TrimRight(string(data), "\n"))
+	}
+
 	if len(messages) == 0 {
-		commitDie(flags, 2, "commit message required (-m)")
+		commitDie(flags, 2, "commit message required (-m or -F)")
 	}
 	if len(files) == 0 {
 		commitDie(flags, 2, "no files specified (use -- file1 file2 ...)")
