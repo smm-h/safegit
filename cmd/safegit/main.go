@@ -37,12 +37,13 @@ const (
 
 // globalFlags holds flags parsed before command dispatch.
 type globalFlags struct {
-	format  outputFormat
-	quiet   bool
-	verbose bool
-	noColor bool
-	dryRun  bool
-	force   bool
+	format     outputFormat
+	quiet      bool
+	verbose    bool
+	noColor    bool
+	dryRun     bool
+	force      bool
+	configPath string
 }
 
 // jsonResponse is the envelope for all JSON output.
@@ -165,6 +166,14 @@ func parseGlobalFlags(args []string) (globalFlags, []string) {
 			f.dryRun = true
 		case "--force", "-f":
 			f.force = true
+		case "--config":
+			if i+1 < len(args) {
+				i++
+				f.configPath = args[i]
+			} else {
+				fmt.Fprintln(os.Stderr, "--config requires an argument")
+				os.Exit(2)
+			}
 		default:
 			// Not a global flag -- pass through (subcommand name or subcommand flag).
 			rest = append(rest, args[i])
@@ -250,6 +259,7 @@ Commands:
   help        Print this help
 
 Global flags:
+  --config <path>       Override config.json path
   --format human|json   Output format (default: human)
   --quiet, -q           Suppress non-essential output
   --verbose, -v         Verbose output
@@ -257,6 +267,14 @@ Global flags:
   --dry-run, -n         Show what would be done without doing it
   --force, -f           Skip safety checks (bypass coordination guard)
 `
+}
+
+// loadConfig loads the safegit config, using the override path if --config was set.
+func loadConfig(flags globalFlags, gitDir string) (*repo.Config, error) {
+	if flags.configPath != "" {
+		return repo.LoadConfigFrom(flags.configPath)
+	}
+	return repo.LoadConfig(gitDir)
 }
 
 // mustGitDir resolves the .git directory or exits with an error.
@@ -430,7 +448,7 @@ func runCommit(flags globalFlags, args []string) {
 	}
 
 	sgDir := repo.SafegitDir(gitDir)
-	cfg, err := repo.LoadConfig(gitDir)
+	cfg, err := loadConfig(flags, gitDir)
 	if err != nil {
 		commitDie(flags, 1, fmt.Sprintf("loading config: %v", err))
 	}
@@ -536,7 +554,7 @@ func runAmend(flags globalFlags, args []string) {
 	}
 
 	sgDir := repo.SafegitDir(gitDir)
-	cfg, err := repo.LoadConfig(gitDir)
+	cfg, err := loadConfig(flags, gitDir)
 	if err != nil {
 		amendDie(flags, 1, fmt.Sprintf("loading config: %v", err))
 	}
@@ -610,7 +628,7 @@ func runReword(flags globalFlags, args []string) {
 	msg := strings.Join(messages, "\n")
 
 	sgDir := repo.SafegitDir(gitDir)
-	cfg, err := repo.LoadConfig(gitDir)
+	cfg, err := loadConfig(flags, gitDir)
 	if err != nil {
 		rewordDie(flags, 1, fmt.Sprintf("loading config: %v", err))
 	}
@@ -1024,7 +1042,7 @@ func runGC(flags globalFlags) {
 	}
 
 	sgDir := repo.SafegitDir(gitDir)
-	cfg, _ := repo.LoadConfig(gitDir)
+	cfg, _ := loadConfig(flags, gitDir)
 
 	if flags.dryRun {
 		// Dry run: report what would be cleaned
@@ -1506,7 +1524,7 @@ func runConfig(flags globalFlags, args []string) int {
 		return 4
 	}
 
-	cfg, err := repo.LoadConfig(gitDir)
+	cfg, err := loadConfig(flags, gitDir)
 	if err != nil {
 		if flags.format == formatJSON {
 			emitJSON("config", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
@@ -1559,11 +1577,18 @@ func runConfig(flags globalFlags, args []string) int {
 			}
 			return 1
 		}
-		if err := repo.SaveConfig(gitDir, cfg); err != nil {
+		// Write to override path if --config was set, otherwise default location
+		var saveErr error
+		if flags.configPath != "" {
+			saveErr = repo.SaveConfigTo(flags.configPath, cfg)
+		} else {
+			saveErr = repo.SaveConfig(gitDir, cfg)
+		}
+		if saveErr != nil {
 			if flags.format == formatJSON {
-				emitJSON("config", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
+				emitJSON("config", nil, &jsonError{Code: 1, Message: saveErr.Error()}, nil)
 			} else {
-				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				fmt.Fprintf(os.Stderr, "error: %v\n", saveErr)
 			}
 			return 1
 		}
