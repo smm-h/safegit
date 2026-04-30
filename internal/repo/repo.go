@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/smm-h/safegit/internal/git"
 )
 
 // Config holds safegit configuration persisted in config.json.
@@ -250,7 +252,14 @@ func parseInt(s string) (int, error) {
 
 // checkUnsupportedFeatures refuses init on repos with submodules or LFS.
 func checkUnsupportedFeatures(gitDir string) error {
-	repoRoot := filepath.Dir(gitDir)
+	// Use git rev-parse to find the true worktree root. filepath.Dir(gitDir)
+	// breaks when .git is a file (worktrees, submodules) because gitDir points
+	// to the shared .git directory, not the worktree containing .gitmodules/.gitattributes.
+	repoRoot, err := git.RepoRoot()
+	if err != nil {
+		// Fall back to parent of gitDir if git rev-parse fails
+		repoRoot = filepath.Dir(gitDir)
+	}
 
 	if _, err := os.Stat(filepath.Join(repoRoot, ".gitmodules")); err == nil {
 		return fmt.Errorf("safegit does not support submodules (.gitmodules detected); use --force to override")

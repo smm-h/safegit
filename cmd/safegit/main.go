@@ -1058,6 +1058,13 @@ func runGC(flags globalFlags) {
 
 		orphanWipLocks, _ := wip.OrphanLocks(sgDir)
 
+		// Check for legacy queue directory
+		queueDir := filepath.Join(sgDir, "queue")
+		hasLegacyQueue := false
+		if info, err := os.Stat(queueDir); err == nil && info.IsDir() {
+			hasLegacyQueue = true
+		}
+
 		logSizeMB := float64(0)
 		logSize, _ := oplog.LogSize(sgDir)
 		if logSize > 0 {
@@ -1071,16 +1078,20 @@ func runGC(flags globalFlags) {
 
 		if flags.format == formatJSON {
 			emitJSON("gc", map[string]interface{}{
-				"dryRun":          true,
-				"orphanDirs":      len(orphanDirs),
-				"orphanWipLocks":  len(orphanWipLocks),
-				"logSizeMB":       logSizeMB,
-				"wouldRotateLog":  wouldRotate,
+				"dryRun":           true,
+				"orphanDirs":       len(orphanDirs),
+				"orphanWipLocks":   len(orphanWipLocks),
+				"hasLegacyQueue":   hasLegacyQueue,
+				"logSizeMB":        logSizeMB,
+				"wouldRotateLog":   wouldRotate,
 			}, nil, nil)
 		} else if !flags.quiet {
 			fmt.Printf("would remove %d orphan tmp dir(s)\n", len(orphanDirs))
 			if len(orphanWipLocks) > 0 {
 				fmt.Printf("would remove %d orphan wip-lock(s)\n", len(orphanWipLocks))
+			}
+			if hasLegacyQueue {
+				fmt.Println("would remove legacy queue directory")
 			}
 			fmt.Printf("log size: %.1f MB (max: %d MB)", logSizeMB, maxMB)
 			if wouldRotate {
@@ -1113,6 +1124,14 @@ func runGC(flags globalFlags) {
 		os.Exit(1)
 	}
 
+	// Clean up legacy queue directory (removed in v0.2)
+	queueDir := filepath.Join(sgDir, "queue")
+	queueRemoved := false
+	if info, err := os.Stat(queueDir); err == nil && info.IsDir() {
+		os.RemoveAll(queueDir)
+		queueRemoved = true
+	}
+
 	// Log rotation
 	maxMB := 100
 	if cfg != nil && cfg.Log.MaxSizeMB > 0 {
@@ -1127,6 +1146,7 @@ func runGC(flags globalFlags) {
 		data := map[string]interface{}{
 			"removed":         removed,
 			"wipLocksRemoved": wipCleaned,
+			"queueRemoved":    queueRemoved,
 			"logRotated":      rotated,
 		}
 		emitJSON("gc", data, nil, nil)
@@ -1134,6 +1154,9 @@ func runGC(flags globalFlags) {
 		fmt.Printf("removed %d orphan tmp dir(s)\n", removed)
 		if wipCleaned > 0 {
 			fmt.Printf("removed %d orphan wip-lock(s)\n", wipCleaned)
+		}
+		if queueRemoved {
+			fmt.Println("removed legacy queue directory")
 		}
 		if rotated {
 			fmt.Println("log rotated (old log saved as log.1)")
