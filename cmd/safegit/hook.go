@@ -79,7 +79,7 @@ func hookRun(flags globalFlags, args []string) int {
 		return 1
 	}
 
-	cfg, err := repo.LoadConfig(gitDir)
+	cfg, err := loadConfig(flags, gitDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: loading config: %v\n", err)
 		return 1

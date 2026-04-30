@@ -43,7 +43,7 @@ func runPush(flags globalFlags, args []string) int {
 		return 1
 	}
 
-	cfg, err := repo.LoadConfig(gitDir)
+	cfg, err := loadConfig(flags, gitDir)
 	if err != nil {
 		pushDie(flags, 1, fmt.Sprintf("loading config: %v", err))
 		return 1

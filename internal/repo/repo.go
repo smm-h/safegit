@@ -151,6 +151,28 @@ func LoadConfig(gitDir string) (*Config, error) {
 	return &cfg, nil
 }
 
+// LoadConfigFrom reads and parses config from an arbitrary path.
+func LoadConfigFrom(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading config: %w", err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing config: %w", err)
+	}
+	return &cfg, nil
+}
+
+// SaveConfigTo writes config to an arbitrary path.
+func SaveConfigTo(path string, cfg *Config) error {
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling config: %w", err)
+	}
+	return os.WriteFile(path, append(data, '\n'), 0644)
+}
+
 // SaveConfig writes config back to config.json.
 func SaveConfig(gitDir string, cfg *Config) error {
 	configPath := filepath.Join(SafegitDir(gitDir), "config.json")
