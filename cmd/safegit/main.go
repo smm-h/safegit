@@ -262,11 +262,11 @@ func mustGitDir(flags globalFlags) string {
 	if err != nil {
 		msg := "not a git repository (or git is not installed)"
 		if flags.format == formatJSON {
-			emitJSON("", nil, &jsonError{Code: 1, Message: msg}, nil)
+			emitJSON("", nil, &jsonError{Code: 3, Message: msg}, nil)
 		} else {
 			fmt.Fprintln(os.Stderr, msg)
 		}
-		os.Exit(1)
+		os.Exit(3)
 	}
 	// Resolve to absolute path
 	abs, err := filepath.Abs(gitDir)
@@ -337,11 +337,11 @@ func runCommit(flags globalFlags, args []string) {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		if flags.format == formatJSON {
-			emitJSON("commit", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
+			emitJSON("commit", nil, &jsonError{Code: 4, Message: err.Error()}, nil)
 		} else {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		}
-		os.Exit(1)
+		os.Exit(4)
 	}
 
 	// Parse commit-specific flags
@@ -456,11 +456,11 @@ func runAmend(flags globalFlags, args []string) {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		if flags.format == formatJSON {
-			emitJSON("amend", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
+			emitJSON("amend", nil, &jsonError{Code: 4, Message: err.Error()}, nil)
 		} else {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		}
-		os.Exit(1)
+		os.Exit(4)
 	}
 
 	// Parse amend-specific flags
@@ -564,11 +564,11 @@ func runReword(flags globalFlags, args []string) {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		if flags.format == formatJSON {
-			emitJSON("reword", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
+			emitJSON("reword", nil, &jsonError{Code: 4, Message: err.Error()}, nil)
 		} else {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		}
-		os.Exit(1)
+		os.Exit(4)
 	}
 
 	// Parse reword flags
@@ -671,7 +671,7 @@ func firstLine(s string) string {
 func runWip(flags globalFlags, args []string) {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
-		wipDie(flags, 1, err.Error())
+		wipDie(flags, 4, err.Error())
 	}
 	sgDir := repo.SafegitDir(gitDir)
 
@@ -720,7 +720,7 @@ func runWip(flags globalFlags, args []string) {
 func runUnwip(flags globalFlags, args []string) {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
-		wipDie(flags, 1, err.Error())
+		wipDie(flags, 4, err.Error())
 	}
 	sgDir := repo.SafegitDir(gitDir)
 
@@ -999,11 +999,11 @@ func runGC(flags globalFlags) {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		if flags.format == formatJSON {
-			emitJSON("gc", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
+			emitJSON("gc", nil, &jsonError{Code: 4, Message: err.Error()}, nil)
 		} else {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		}
-		os.Exit(1)
+		os.Exit(4)
 	}
 
 	sgDir := repo.SafegitDir(gitDir)
@@ -1155,7 +1155,7 @@ func runCheckout(flags globalFlags, args []string) int {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return 1
+		return 4
 	}
 	sgDir := repo.SafegitDir(gitDir)
 
@@ -1201,7 +1201,7 @@ func runPull(flags globalFlags, args []string) int {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return 1
+		return 4
 	}
 	sgDir := repo.SafegitDir(gitDir)
 
@@ -1279,7 +1279,7 @@ func runMerge(flags globalFlags, args []string) int {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return 1
+		return 4
 	}
 	sgDir := repo.SafegitDir(gitDir)
 
@@ -1321,7 +1321,7 @@ func runRebase(flags globalFlags, args []string) int {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return 1
+		return 4
 	}
 	sgDir := repo.SafegitDir(gitDir)
 
@@ -1361,7 +1361,7 @@ func runReset(flags globalFlags, args []string) int {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return 1
+		return 4
 	}
 	sgDir := repo.SafegitDir(gitDir)
 
@@ -1425,11 +1425,11 @@ func runConfig(flags globalFlags, args []string) int {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		if flags.format == formatJSON {
-			emitJSON("config", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
+			emitJSON("config", nil, &jsonError{Code: 4, Message: err.Error()}, nil)
 		} else {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		}
-		return 1
+		return 4
 	}
 
 	cfg, err := repo.LoadConfig(gitDir)
@@ -1515,11 +1515,11 @@ func runUnlock(flags globalFlags, args []string) int {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		if flags.format == formatJSON {
-			emitJSON("unlock", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
+			emitJSON("unlock", nil, &jsonError{Code: 4, Message: err.Error()}, nil)
 		} else {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		}
-		return 1
+		return 4
 	}
 
 	if len(args) == 0 {
@@ -1621,7 +1621,7 @@ func runBranch(flags globalFlags, args []string) int {
 			gitDir := mustGitDir(flags)
 			if err := repo.EnsureInitialized(gitDir); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
-				return 1
+				return 4
 			}
 			sgDir := repo.SafegitDir(gitDir)
 			if code := coordGuard(flags, sgDir, "branch -d"); code != 0 {
