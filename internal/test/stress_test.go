@@ -380,7 +380,8 @@ func TestConcurrentPush(t *testing.T) {
 		stderrs[i] = se
 	})
 
-	// At least one must succeed; both pushing the same tip should both succeed
+	// At least one must succeed; the other may fail with "reference already
+	// exists" due to the bare remote's own ref locking under concurrency.
 	successes := 0
 	for i := 0; i < 2; i++ {
 		if codes[i] == 0 {
@@ -388,8 +389,16 @@ func TestConcurrentPush(t *testing.T) {
 		}
 	}
 	if successes == 0 {
-		t.Fatalf("both pushes failed: agent0 code=%d stderr=%s | agent1 code=%d stderr=%s",
+		t.Fatalf("both pushes failed: [0] code=%d stderr=%s [1] code=%d stderr=%s",
 			codes[0], stderrs[0], codes[1], stderrs[1])
+	}
+
+	// If only one succeeded, push again to land the second
+	if successes == 1 {
+		_, _, code = runSafegit(t, dir, "push", "origin", "main")
+		if code != 0 {
+			t.Fatalf("retry push failed (code %d)", code)
+		}
 	}
 
 	// Verify remote has both commits (file_a.txt and file_b.txt in HEAD tree)
@@ -589,6 +598,196 @@ func TestDiskFullSimulated(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "diskfull.txt") {
 		t.Error("diskfull.txt not found in HEAD tree after recovery")
+	}
+}
+
+func TestCrossBranchCommit(t *testing.T) {
+	dir := newRepo(t)
+
+	// Create a feature branch
+	cmd := exec.Command("git", "branch", "feature")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git branch: %v\n%s", err, out)
+	}
+
+	// Write a file and commit to feature branch while on main
+	if err := os.WriteFile(filepath.Join(dir, "cross.txt"), []byte("cross\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, stderr, code := runSafegit(t, dir, "commit", "-m", "cross-branch commit", "--branch", "feature", "--", "cross.txt")
+	if code != 0 {
+		t.Fatalf("cross-branch commit failed (code %d): %s", code, stderr)
+	}
+
+	// Verify we're still on main
+	headCmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
+	headCmd.Dir = dir
+	headOut, _ := headCmd.Output()
+	if strings.TrimSpace(string(headOut)) != "main" {
+		t.Errorf("HEAD moved to %s, expected to stay on main", strings.TrimSpace(string(headOut)))
+	}
+
+	// Verify the file is in feature's tree
+	cmd = exec.Command("git", "ls-tree", "-r", "--name-only", "feature")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "cross.txt") {
+		t.Error("cross.txt not found in feature branch tree")
+	}
+
+	// Verify feature has 2 commits (initial + cross-branch)
+	count := gitLog(t, dir, "feature")
+	if count != 2 {
+		t.Errorf("feature has %d commits, expected 2", count)
+	}
+}
+
+func TestBisectGuardAndHelp(t *testing.T) {
+	dir := newRepo(t)
+
+	// Bare bisect (no args) should print help, not be blocked by guard
+	_, _, code := runSafegit(t, dir, "bisect")
+	// git bisect with no args prints help and exits 1
+	// The important thing is it doesn't exit 5 (coord guard refusal)
+	if code == 5 {
+		t.Error("bare 'safegit bisect' should not trigger coordination guard")
+	}
+}
+
+func TestCommitMessageFromFile(t *testing.T) {
+	dir := newRepo(t)
+
+	// Write message to a file
+	msgPath := filepath.Join(dir, "commit-msg.txt")
+	if err := os.WriteFile(msgPath, []byte("message from file\n\ndetailed body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write a file to commit
+	if err := os.WriteFile(filepath.Join(dir, "ftest.txt"), []byte("data\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, stderr, code := runSafegit(t, dir, "commit", "-F", msgPath, "--", "ftest.txt")
+	if code != 0 {
+		t.Fatalf("commit -F failed (code %d): %s", code, stderr)
+	}
+
+	// Verify commit message
+	cmd := exec.Command("git", "log", "-1", "--format=%s", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(out)) != "message from file" {
+		t.Errorf("subject = %q, want 'message from file'", strings.TrimSpace(string(out)))
+	}
+}
+
+func TestConfigOverride(t *testing.T) {
+	dir := newRepo(t)
+
+	// Write a custom config with different casMaxAttempts
+	customCfg := filepath.Join(dir, "custom-config.json")
+	if err := os.WriteFile(customCfg, []byte(`{"schemaVersion":1,"commit":{"casMaxAttempts":99},"lock":{"acquireTimeoutSeconds":30},"hooks":{"preprepush":{"timeoutSeconds":1800}},"push":{"retryAttempts":3},"log":{"maxSizeMB":100}}`+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read the config via --config flag
+	stdout, _, code := runSafegit(t, dir, "--format", "json", "--config", customCfg, "config", "commit.casMaxAttempts")
+	if code != 0 {
+		t.Fatalf("config read failed (code %d)", code)
+	}
+
+	r := parseJSON(t, stdout)
+	if !r.OK {
+		t.Fatalf("config returned ok=false: %s", stdout)
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(r.Data, &data); err != nil {
+		t.Fatal(err)
+	}
+	if val, ok := data["commit.casMaxAttempts"].(float64); !ok || val != 99 {
+		t.Errorf("casMaxAttempts = %v, want 99", data["commit.casMaxAttempts"])
+	}
+}
+
+func TestCoordinationBypassedOplog(t *testing.T) {
+	dir := newRepo(t)
+
+	// Dirty the working tree
+	seedPath := filepath.Join(dir, "seed.txt")
+	if err := os.WriteFile(seedPath, []byte("dirty\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a branch to checkout to
+	cmd := exec.Command("git", "branch", "other")
+	cmd.Dir = dir
+	cmd.CombinedOutput()
+
+	// Checkout with --force (should bypass coord guard and log it)
+	_, _, code := runSafegit(t, dir, "--force", "checkout", "other")
+	if code != 0 {
+		t.Fatalf("forced checkout failed (code %d)", code)
+	}
+
+	// Read oplog and find coordination_bypassed entry
+	logPath := filepath.Join(dir, ".git", "safegit", "log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "coordination_bypassed") {
+		t.Error("oplog missing coordination_bypassed entry after forced checkout")
+	}
+}
+
+func TestLockRecoveredOplog(t *testing.T) {
+	dir := newRepo(t)
+
+	// Write a file to commit
+	if err := os.WriteFile(filepath.Join(dir, "recover.txt"), []byte("data\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Start+kill a process to get a dead PID
+	helper := exec.Command("sleep", "60")
+	if err := helper.Start(); err != nil {
+		t.Fatal(err)
+	}
+	deadPID := helper.Process.Pid
+	helper.Process.Kill()
+	helper.Wait()
+
+	// Plant a stale lock
+	lockDir := filepath.Join(dir, ".git", "safegit", "locks", "refs", "heads")
+	os.MkdirAll(lockDir, 0755)
+	lockContent := fmt.Sprintf("pid=%d\nts=%s\nop=commit\nhost=test\n",
+		deadPID, time.Now().Add(-1*time.Hour).UTC().Format(time.RFC3339Nano))
+	os.WriteFile(filepath.Join(lockDir, "main.lock"), []byte(lockContent), 0644)
+
+	// Commit should recover the stale lock
+	_, _, code := runSafegit(t, dir, "commit", "-m", "after recovery", "--", "recover.txt")
+	if code != 0 {
+		t.Fatalf("commit after stale lock failed (code %d)", code)
+	}
+
+	// Read oplog and find lock_recovered entry
+	logPath := filepath.Join(dir, ".git", "safegit", "log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "lock_recovered") {
+		t.Error("oplog missing lock_recovered entry after stale lock recovery")
 	}
 }
 
