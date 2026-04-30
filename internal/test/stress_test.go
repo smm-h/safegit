@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // verifyAllFilesInTree checks that every file in the list is present in HEAD's tree.
@@ -329,6 +330,265 @@ func TestStressDifferentBranches(t *testing.T) {
 		if count != 2 {
 			t.Errorf("branch %s has %d commits, expected 2", branchName, count)
 		}
+	}
+}
+
+// T6: Two agents commit sequentially to main, then both push to a bare remote
+// concurrently. Both should succeed (same branch tip, linear history).
+func TestConcurrentPush(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping push test in short mode")
+	}
+	dir := newRepo(t)
+
+	// Create bare remote
+	remoteDir := t.TempDir()
+	cmd := exec.Command("git", "init", "--bare", remoteDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "remote", "add", "origin", remoteDir)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+
+	// Agent A commits file_a.txt
+	if err := os.WriteFile(filepath.Join(dir, "file_a.txt"), []byte("agent A\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegit(t, dir, "commit", "-m", "agent A commit", "--", "file_a.txt")
+	if code != 0 {
+		t.Fatalf("agent A commit failed (code %d): %s", code, stderr)
+	}
+
+	// Agent B commits file_b.txt (sequentially, so both on main)
+	if err := os.WriteFile(filepath.Join(dir, "file_b.txt"), []byte("agent B\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code = runSafegit(t, dir, "commit", "-m", "agent B commit", "--", "file_b.txt")
+	if code != 0 {
+		t.Fatalf("agent B commit failed (code %d): %s", code, stderr)
+	}
+
+	// Both push concurrently
+	codes := make([]int, 2)
+	stderrs := make([]string, 2)
+	parallel(2, func(i int) {
+		_, se, c := runSafegit(t, dir, "push", "origin", "main")
+		codes[i] = c
+		stderrs[i] = se
+	})
+
+	// At least one must succeed; both pushing the same tip should both succeed
+	successes := 0
+	for i := 0; i < 2; i++ {
+		if codes[i] == 0 {
+			successes++
+		}
+	}
+	if successes == 0 {
+		t.Fatalf("both pushes failed: agent0 code=%d stderr=%s | agent1 code=%d stderr=%s",
+			codes[0], stderrs[0], codes[1], stderrs[1])
+	}
+
+	// Verify remote has both commits (file_a.txt and file_b.txt in HEAD tree)
+	cmd = exec.Command("git", "ls-tree", "-r", "--name-only", "HEAD")
+	cmd.Dir = remoteDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git ls-tree on remote: %v", err)
+	}
+	tree := string(out)
+	for _, f := range []string{"file_a.txt", "file_b.txt"} {
+		if !strings.Contains(tree, f) {
+			t.Errorf("remote missing %s in HEAD tree", f)
+		}
+	}
+}
+
+// T7: Two agents push different branches concurrently to the same bare remote.
+// No contention (different refs), both should succeed.
+func TestConcurrentDifferentBranchPush(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping push test in short mode")
+	}
+	dir := newRepo(t)
+
+	// Create bare remote and add as origin
+	remoteDir := t.TempDir()
+	cmd := exec.Command("git", "init", "--bare", remoteDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "remote", "add", "origin", remoteDir)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+
+	// Create branch_a and branch_b
+	for _, br := range []string{"branch_a", "branch_b"} {
+		cmd = exec.Command("git", "branch", br)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git branch %s: %v\n%s", br, err, out)
+		}
+	}
+
+	// Commit a file to each branch via safegit
+	if err := os.WriteFile(filepath.Join(dir, "br_a.txt"), []byte("branch A\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegit(t, dir, "commit", "-m", "branch_a commit", "--branch", "branch_a", "--", "br_a.txt")
+	if code != 0 {
+		t.Fatalf("branch_a commit failed (code %d): %s", code, stderr)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "br_b.txt"), []byte("branch B\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code = runSafegit(t, dir, "commit", "-m", "branch_b commit", "--branch", "branch_b", "--", "br_b.txt")
+	if code != 0 {
+		t.Fatalf("branch_b commit failed (code %d): %s", code, stderr)
+	}
+
+	// Push both branches concurrently
+	branches := []string{"branch_a", "branch_b"}
+	codes := make([]int, 2)
+	stderrs := make([]string, 2)
+	parallel(2, func(i int) {
+		_, se, c := runSafegit(t, dir, "push", "origin", branches[i])
+		codes[i] = c
+		stderrs[i] = se
+	})
+
+	// Both should succeed (different refs, no contention)
+	for i, br := range branches {
+		if codes[i] != 0 {
+			t.Errorf("push %s failed (code %d): %s", br, codes[i], stderrs[i])
+		}
+	}
+
+	// Verify remote has both branches
+	cmd = exec.Command("git", "branch")
+	cmd.Dir = remoteDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git branch on remote: %v", err)
+	}
+	remoteBranches := string(out)
+	for _, br := range branches {
+		if !strings.Contains(remoteBranches, br) {
+			t.Errorf("remote missing branch %s", br)
+		}
+	}
+}
+
+// T9: One agent holds a lock for 500ms (live PID), another tries to commit.
+// The commit should poll and succeed once the lock is released.
+func TestPollingWakeupLatency(t *testing.T) {
+	dir := newRepo(t)
+
+	// Create a file to commit
+	if err := os.WriteFile(filepath.Join(dir, "poll.txt"), []byte("poll test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a lock file with the CURRENT process PID (alive, so not stale)
+	lockDir := filepath.Join(dir, ".git", "safegit", "locks", "refs", "heads")
+	if err := os.MkdirAll(lockDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	lockFile := filepath.Join(lockDir, "main.lock")
+	lockContent := fmt.Sprintf("pid=%d\nts=%s\nop=commit\nhost=test\n",
+		os.Getpid(), time.Now().UTC().Format(time.RFC3339Nano))
+	if err := os.WriteFile(lockFile, []byte(lockContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Start a goroutine that removes the lock after 500ms
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		os.Remove(lockFile)
+	}()
+
+	// Run safegit commit -- it will poll waiting for the lock
+	start := time.Now()
+	_, stderr, code := runSafegit(t, dir, "commit", "-m", "after poll", "--", "poll.txt")
+	elapsed := time.Since(start)
+
+	if code != 0 {
+		t.Fatalf("commit failed (code %d) after polling: %s", code, stderr)
+	}
+
+	// Should complete within 2s (500ms lock hold + polling overhead)
+	if elapsed > 2*time.Second {
+		t.Errorf("commit took %v, expected < 2s (lock held for 500ms)", elapsed)
+	}
+
+	// Should have taken at least ~500ms (lock was held that long)
+	if elapsed < 400*time.Millisecond {
+		t.Errorf("commit took %v, suspiciously fast (lock should have been held 500ms)", elapsed)
+	}
+}
+
+// T13: Make .git/objects read-only, verify commit fails, restore and verify recovery.
+func TestDiskFullSimulated(t *testing.T) {
+	dir := newRepo(t)
+
+	objectsDir := filepath.Join(dir, ".git", "objects")
+
+	// Always restore permissions, even if the test panics
+	t.Cleanup(func() {
+		// Restore write permissions recursively (objects dir + subdirs)
+		filepath.Walk(objectsDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			if info.IsDir() {
+				os.Chmod(path, 0755)
+			}
+			return nil
+		})
+	})
+
+	// Create a file to commit
+	if err := os.WriteFile(filepath.Join(dir, "diskfull.txt"), []byte("test content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make .git/objects read-only (prevents git from writing new objects)
+	if err := os.Chmod(objectsDir, 0555); err != nil {
+		t.Fatalf("chmod objects dir: %v", err)
+	}
+
+	// Commit should fail (can't write objects)
+	_, _, code := runSafegit(t, dir, "commit", "-m", "should fail", "--", "diskfull.txt")
+	if code == 0 {
+		t.Error("commit succeeded with read-only .git/objects, expected failure")
+	}
+
+	// Restore permissions
+	if err := os.Chmod(objectsDir, 0755); err != nil {
+		t.Fatalf("restoring objects dir permissions: %v", err)
+	}
+
+	// Now commit should succeed
+	_, stderr, code := runSafegit(t, dir, "commit", "-m", "after recovery", "--", "diskfull.txt")
+	if code != 0 {
+		t.Errorf("commit failed after restoring permissions (code %d): %s", code, stderr)
+	}
+
+	// Verify the file is in HEAD tree
+	cmd := exec.Command("git", "ls-tree", "-r", "--name-only", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "diskfull.txt") {
+		t.Error("diskfull.txt not found in HEAD tree after recovery")
 	}
 }
 
