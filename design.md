@@ -46,7 +46,7 @@ All safegit-specific state lives under `.git/safegit/`. Nothing escapes that dir
       refs/
         heads/<branch>.lock  active ref lock (PID + ts + op_kind)
       objects.lock           optional coarse lock for pack writes (rare; usually unused)
-    queue/
+    queue/                           (not implemented in v1)
       refs/
         heads/<branch>.q     FIFO queue file for ref-lock waiters (one line per waiter: <pid> <ts>)
     wip-locks/
@@ -171,7 +171,7 @@ At this point we have a valid commit object in the object DB but no ref points t
     ```
 
     `update-ref` itself takes the `<old-value>` argument so it performs an atomic CAS at the git level too. This is belt-and-suspenders: our lock prevents most contention, and `update-ref --old` catches any we missed.
-11. **Release the ref lock.** Atomic `unlink(2)` of the lock file. Pop our entry from the queue. Notify next waiter (writing to a sentinel pipe or just relying on inotify -- see 2.4).
+11. **Release the ref lock.** Atomic `unlink(2)` of the lock file. ~~Pop our entry from the queue. Notify next waiter (writing to a sentinel pipe or just relying on inotify -- see 2.4).~~ Note: the queue mechanism and inotify/kqueue notification were not implemented in v1; waiters use exponential-backoff polling.
 12. **Append to op log.** Write the `commit` JSONL line per Section 1.3.
 13. **Cleanup.** Delete `.git/safegit/tmp/<pid>-<random>/`.
 
@@ -186,14 +186,16 @@ At this point we have a valid commit object in the object DB but no ref points t
 | 5. Resolve parent ref | A | no | reads only |
 | 6. `git commit-tree` | A | no | yes (writes one commit object) |
 | 7. Acquire ref lock | B | acquiring | yes (creates lock file) |
-| 8. Enqueue/wait if held | B | waiting | yes (writes queue file) |
+| 8. Enqueue/wait if held | B | waiting | yes (writes queue file) -- Note: queue not implemented in v1; uses polling |
 | 9. Re-resolve parent / CAS check | B | held | reads only |
 | 10. `git update-ref --old` | B | held | yes (writes ref) |
-| 11. Release ref lock | B | releasing | yes (unlink + notify) |
+| 11. Release ref lock | B | releasing | yes (unlink only; no queue/notify in v1) |
 | 12. Append op log | B | not held | yes (append-only line) |
 | 13. Cleanup | B | not held | tmp dir only |
 
 ### 2.4 Wakeup mechanism
+
+> **Note:** v1 uses exponential-backoff polling instead of filesystem watchers. The inotify/kqueue design below was not implemented.
 
 Waiters MUST be woken automatically (req: "no polling, no human intervention"). Mechanisms by platform:
 
@@ -201,14 +203,14 @@ Waiters MUST be woken automatically (req: "no polling, no human intervention"). 
 - **macOS:** `kqueue(2)` with `EVFILT_VNODE` on the parent dir.
 - **Fallback:** exponential-backoff polling 10ms, 20ms, 50ms, 100ms, 200ms, 500ms, capped at 1s. The poll loop is bounded by `lock.acquireTimeout` (default 30s); past that we exit with code 8 ("ref lock acquisition timed out").
 
-The Go implementation uses `github.com/fsnotify/fsnotify` (well-vetted, no CGo).
+The Go implementation uses `github.com/fsnotify/fsnotify` (well-vetted, no CGo). (Not used in v1; polling fallback is the only implemented path.)
 
 ### 2.5 Retry policy
 
 | Failure | Retry? | Max attempts | Backoff |
 |---|---|---|---|
 | CAS miss (parent changed) | yes | `commit.casMaxAttempts` (default 5) | none -- retry immediately, lock will queue us |
-| Ref lock contention | yes (waiting) | unbounded under `lock.acquireTimeout` (30s) | inotify-driven, no backoff; polling fallback uses exp backoff |
+| Ref lock contention | yes (waiting) | unbounded under `lock.acquireTimeout` (30s) | v1: exponential-backoff polling (inotify/kqueue not implemented) |
 | `git write-tree` fails | no | 0 | exit code 9 |
 | `git commit-tree` fails | no | 0 | exit code 10 |
 | `git update-ref` fails after lock held | yes | `commit.casMaxAttempts` (rare; usually means stale parent) | retry from step 5 |
@@ -216,6 +218,8 @@ The Go implementation uses `github.com/fsnotify/fsnotify` (well-vetted, no CGo).
 ---
 
 ## 3. Hunk Staging API
+
+> **Note:** Standalone `safegit stage` and `safegit unstage` commands were not implemented. Hunk-level staging is available via `safegit commit -- file:hunk-spec` (see Section 5.3).
 
 ### 3.1 Hunk extraction
 
@@ -482,7 +486,7 @@ See Section 7 for semantics.
 ### 5.9 Recovery
 
 - **`safegit unlock <ref> [--force]`** -- force-release a stale ref lock. Without `--force`, refuses to release a lock whose holder is alive.
-- **`safegit gc [--dry-run]`** -- remove `tmp/<pid>-<rand>/` directories whose PID is dead, prune empty queue files, compact `log` (rotates at `log.maxSize`, default 100MB).
+- **`safegit gc [--dry-run]`** -- remove `tmp/<pid>-<rand>/` directories whose PID is dead, ~~prune empty queue files~~ (queue not implemented in v1), compact `log` (rotates at `log.maxSize`, default 100MB).
 
 ### 5.10 Utility
 
@@ -511,7 +515,7 @@ For each, the design must specify both detection AND recovery. Recovery is autom
 ### 6.3 Two invocations commit to same branch simultaneously
 
 - **Symptom:** both reach step 7 of Section 2 around the same time.
-- **Detection:** `O_CREAT|O_EXCL` lock acquisition fails for the second; second waits via inotify.
+- **Detection:** `O_CREAT|O_EXCL` lock acquisition fails for the second; second waits via exponential-backoff polling (design called for inotify; v1 uses polling).
 - **Recovery:** lock orders them. After the first commits and releases, the second wakes, re-resolves parent (now the first invocation's commit), detects CAS miss, rebuilds commit with new parent, then succeeds. End result: linear history, no corruption, both commits land.
 
 ### 6.4 Network failure mid-push
@@ -766,7 +770,7 @@ Helper: `parallel(n int, fn func(i int))` -- spawns n goroutines, calls `fn(i)`,
 | T6 | ConcurrentPush | 2 invocations both push `main` to the same remote | Both run `safegit push origin main` after each commits to `main` | First wins; second sees `non-fast-forward`; safegit re-fetches and either succeeds (after rebase prompt) or exits with code 41. v1: fail with 41. |
 | T7 | ConcurrentDifferentBranchPush | 2 invocations push different branches concurrently | -- | Both succeed; no contention. |
 | T8 | StaleLockReplace | Create a lock file with a dead PID; another invocation waits | -- | Replacement happens within 100ms; no lock leak. |
-| T9 | InotifyWakeup | One invocation holds a lock for 500ms; another waits | -- | The waiter wakes within 50ms of release (verifies inotify path, not polling fallback). |
+| T9 | InotifyWakeup | One invocation holds a lock for 500ms; another waits | -- | The waiter wakes within 50ms of release (verifies inotify path, not polling fallback). Note: not implemented in v1; v1 uses polling only. |
 | T10 | OpLogIntegrity | Run T3 (10 concurrent commits to same branch) under `strace` to confirm `O_APPEND` writes | -- | Op log has exactly 10 commit lines, no partial/interleaved lines, all parseable as JSON. |
 | T11 | HookTimeout | Configure `pre-pre-push` to `sleep 60`; set `hooks.preprepush.timeoutSeconds=2`; run push | -- | Push aborts within 8s with exit code 21. |
 | T12 | RawGitBypassDetection | `git commit -am "bypass"`; then `safegit doctor` | -- | Doctor reports the bypass; exit code 0 with warnings array containing the bypass detection. |
