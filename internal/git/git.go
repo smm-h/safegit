@@ -84,13 +84,16 @@ func GitDir() (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// ErrDetachedHead is returned when HEAD is not on a branch.
+var ErrDetachedHead = fmt.Errorf("HEAD is detached (not on a branch); check out a branch first or use --branch")
+
 // HeadRef returns the current branch ref (e.g. "refs/heads/main").
-// Returns empty string if HEAD is detached.
+// Returns ErrDetachedHead if HEAD is not on a branch.
 func HeadRef() (string, error) {
 	ctx := context.Background()
 	out, _, err := Run(ctx, "symbolic-ref", "HEAD")
 	if err != nil {
-		return "", err
+		return "", ErrDetachedHead
 	}
 	return strings.TrimSpace(out), nil
 }
