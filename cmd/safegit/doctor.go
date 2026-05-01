@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/smm-h/safegit/internal/git"
 	"github.com/smm-h/safegit/internal/index"
@@ -15,14 +14,14 @@ import (
 	"github.com/smm-h/safegit/internal/wip"
 )
 
+type checkResult struct {
+	Name   string `json:"name"`
+	Status string `json:"status"` // "ok", "warn", "error"
+	Detail string `json:"detail,omitempty"`
+}
+
 func runDoctor(flags globalFlags) {
 	gitDir := mustGitDir(flags)
-
-	type checkResult struct {
-		Name   string `json:"name"`
-		Status string `json:"status"` // "ok", "warn", "error"
-		Detail string `json:"detail,omitempty"`
-	}
 
 	var checks []checkResult
 
@@ -136,42 +135,8 @@ func runDoctor(flags globalFlags) {
 		}
 	}
 
-	// Check 7: NFS/network filesystem detection
-	{
-		var buf syscall.Statfs_t
-		if err := syscall.Statfs(gitDir, &buf); err != nil {
-			checks = append(checks, checkResult{Name: "filesystem", Status: "warn", Detail: fmt.Sprintf("statfs failed: %v", err)})
-		} else {
-			// Known network filesystem magic numbers (Linux)
-			const (
-				nfsMagic  int64 = 0x6969
-				cifsMagic int64 = 0xFF534D42
-				smbMagic  int64 = 0x517B
-				fuseMagic int64 = 0x65735546
-			)
-			fsType := int64(buf.Type)
-			var fsName string
-			switch fsType {
-			case nfsMagic:
-				fsName = "NFS"
-			case cifsMagic:
-				fsName = "CIFS/SMB"
-			case smbMagic:
-				fsName = "SMB"
-			case fuseMagic:
-				fsName = "FUSE (possibly SSHFS)"
-			}
-			if fsName != "" {
-				checks = append(checks, checkResult{
-					Name:   "filesystem",
-					Status: "warn",
-					Detail: fmt.Sprintf("network filesystem detected: %s (lock atomicity not guaranteed)", fsName),
-				})
-			} else {
-				checks = append(checks, checkResult{Name: "filesystem", Status: "ok"})
-			}
-		}
-	}
+	// Check 7: NFS/network filesystem detection (platform-specific)
+	checks = append(checks, checkFilesystem(gitDir))
 
 	// Check 8: Non-executable hooks in pre-pre-push.d/
 	if repo.IsInitialized(gitDir) {
