@@ -1492,11 +1492,8 @@ func runBisect(flags globalFlags, args []string) int {
 // runPassthrough executes a git command directly, forwarding all args.
 // Used for read-only commands (status, diff, log, show).
 func runPassthrough(gitCmd string, args []string) int {
-	cmd := exec.Command("git", append([]string{gitCmd}, args...)...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	if err := cmd.Run(); err != nil {
+	ctx := context.Background()
+	if err := git.RunPassthrough(ctx, append([]string{gitCmd}, args...)...); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return exitErr.ExitCode()
 		}

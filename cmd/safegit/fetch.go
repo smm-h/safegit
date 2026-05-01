@@ -1,18 +1,17 @@
 package main
 
 import (
-	"os"
-	"os/exec"
+	"context"
+
+	"github.com/smm-h/safegit/internal/git"
 )
 
 // runFetch is a simple passthrough to git fetch -- no hooks, no coordination.
 func runFetch(args []string) int {
-	cmd := exec.Command("git", append([]string{"fetch"}, args...)...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+	ctx := context.Background()
+	if err := git.RunPassthrough(ctx, append([]string{"fetch"}, args...)...); err != nil {
+		// Extract exit code via interface to avoid importing os/exec
+		if exitErr, ok := err.(interface{ ExitCode() int }); ok {
 			return exitErr.ExitCode()
 		}
 		return 1

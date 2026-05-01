@@ -188,6 +188,18 @@ func SyncMainIndex(treeish string) error {
 	return err
 }
 
+// RunPassthrough executes a git command with stdin/stdout/stderr wired to
+// the terminal (os.Stdin, os.Stdout, os.Stderr). It prepends --no-optional-locks
+// like Run, but does not capture output -- suitable for interactive/pager commands.
+func RunPassthrough(ctx context.Context, args ...string) error {
+	fullArgs := append([]string{"--no-optional-locks"}, args...)
+	cmd := exec.CommandContext(ctx, "git", fullArgs...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 // IsIgnored checks whether a file matches a gitignore rule.
 func IsIgnored(filePath string) (bool, error) {
 	ctx := context.Background()
