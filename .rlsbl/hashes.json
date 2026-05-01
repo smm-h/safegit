@@ -1,0 +1,12 @@
+{
+  ".github/workflows/ci.yml": "609855ac7ad32c4ae65a825df887d930d0309d6ea7944823c9a86cf09bb4fd21",
+  ".github/workflows/publish.yml": "234ab288289eff282f1538e402eba189fb17ff68be184f530669e5fb79bd4619",
+  ".goreleaser.yml": "662cb9ef2c5d58c830d6ad8556c07e22ea6ab76f004e2abb2bf709649c5aafd4",
+  "CHANGELOG.md": "fca781960bc4a70fce00e622926810542c6c62b34357a1228fa2e8432108c013",
+  "CLAUDE.md": "03740c2f920cc79711453ee400363716c5f510a4439bc681dc91b0786aad2be2",
+  "scripts/check-prs.sh": "a438f046ac169256b859873e6f12b66bf629e12fa4bc1f766ed8484af983383c",
+  ".claude/settings.json": "99ee3041446e119611136c7c0f1955c1eef7e12ff21350e3da3380351dc25ef4",
+  "scripts/record-gif.sh": "9eeeeca1c1e50717dd3fc78842577947daefb42dbf37f77f4a792377c0b54081",
+  "scripts/pre-release.sh": "873d1b8f12f9507489d5f39bff6121f4ec766a27fc46af9cfe1eb85c57eeebe0",
+  "scripts/pre-push-hook.sh": "6f3258e6082540207f7720cc1ef4c1babf80e9dee79a3e5175c8b81f09031ef6"
+}
