@@ -1111,26 +1111,29 @@ func parseFileSpecs(files []string, flags globalFlags, cmd string) []commit.File
 	specs := make([]commit.FileSpec, 0, len(files))
 	for _, f := range files {
 		spec := commit.FileSpec{}
-		if colonIdx := strings.LastIndex(f, ":"); colonIdx > 0 {
-			// Check if what's after the colon looks like a hunk spec (digits, commas, dashes)
-			suffix := f[colonIdx+1:]
-			if isHunkSpec(suffix) {
-				hunks, err := stage.ParseHunkSpec(suffix)
-				if err != nil {
-					die(flags, cmd, 2, fmt.Sprintf("invalid hunk spec in %q: %v", f, err))
-				}
-				spec.Path = f[:colonIdx]
-				spec.Hunks = hunks
-			} else {
-				// Colon is part of the filename (e.g. Windows path or something)
-				spec.Path = f
+		colonIdx := strings.LastIndex(f, ":")
+		// Only attempt hunk parsing when:
+		// 1. There is a colon (not at position 0)
+		// 2. The suffix looks like a hunk spec
+		// 3. The full string doesn't exist as a file (avoids misidentifying "1:2" as hunk spec)
+		if colonIdx > 0 && isHunkSpec(f[colonIdx+1:]) && !fileExists(f) {
+			hunks, err := stage.ParseHunkSpec(f[colonIdx+1:])
+			if err != nil {
+				die(flags, cmd, 2, fmt.Sprintf("invalid hunk spec in %q: %v", f, err))
 			}
+			spec.Path = f[:colonIdx]
+			spec.Hunks = hunks
 		} else {
 			spec.Path = f
 		}
 		specs = append(specs, spec)
 	}
 	return specs
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // isHunkSpec returns true if s looks like a hunk specifier (digits, commas, dashes only).
