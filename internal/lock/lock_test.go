@@ -57,11 +57,15 @@ func TestAcquireConflict(t *testing.T) {
 func TestStaleLockReclaimed(t *testing.T) {
 	sgDir := setupSafegitDir(t)
 	ref := "refs/heads/main"
+	hostname, err := os.Hostname()
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	// Manually create a lock file with a dead PID
+	// Manually create a lock file with a dead PID on the local host
 	lp := lockPath(sgDir, ref)
 	os.MkdirAll(filepath.Dir(lp), 0755)
-	err := os.WriteFile(lp, []byte("pid=999999999\nts=2026-01-01T00:00:00Z\nop=commit\nhost=test\n"), 0644)
+	err = os.WriteFile(lp, []byte("pid=999999999\nts=2026-01-01T00:00:00Z\nop=commit\nhost="+hostname+"\n"), 0644)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,29 +80,115 @@ func TestStaleLockReclaimed(t *testing.T) {
 
 func TestIsStale(t *testing.T) {
 	dir := t.TempDir()
-
-	// Create a lock file with a dead PID
-	deadLock := filepath.Join(dir, "dead.lock")
-	os.WriteFile(deadLock, []byte("pid=999999999\nts=2026-01-01T00:00:00Z\nop=test\nhost=test\n"), 0644)
-
-	stale, err := IsStale(deadLock)
+	hostname, err := os.Hostname()
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	// Create a lock file with a dead PID on the local host
+	deadLock := filepath.Join(dir, "dead.lock")
+	os.WriteFile(deadLock, []byte("pid=999999999\nts=2026-01-01T00:00:00Z\nop=test\nhost="+hostname+"\n"), 0644)
+
+	stale, staleErr := IsStale(deadLock)
+	if staleErr != nil {
+		t.Fatal(staleErr)
 	}
 	if !stale {
 		t.Error("lock with dead PID should be stale")
 	}
 
-	// Create a lock file with our own PID (alive)
+	// Create a lock file with PID 1 (alive) on the local host
 	aliveLock := filepath.Join(dir, "alive.lock")
-	os.WriteFile(aliveLock, []byte("pid=1\nts=2026-01-01T00:00:00Z\nop=test\nhost=test\n"), 0644)
+	os.WriteFile(aliveLock, []byte("pid=1\nts=2026-01-01T00:00:00Z\nop=test\nhost="+hostname+"\n"), 0644)
 
-	stale, err = IsStale(aliveLock)
+	stale, staleErr = IsStale(aliveLock)
+	if staleErr != nil {
+		t.Fatal(staleErr)
+	}
+	if stale {
+		t.Error("lock with PID 1 should not be stale")
+	}
+}
+
+func TestParseHost(t *testing.T) {
+	dir := t.TempDir()
+
+	// Normal lock file with host= field
+	f := filepath.Join(dir, "withhost.lock")
+	os.WriteFile(f, []byte("pid=42\nts=2026-01-01T00:00:00Z\nop=test\nhost=myhost\n"), 0644)
+	got := parseHost(f)
+	if got != "myhost" {
+		t.Errorf("parseHost = %q, want %q", got, "myhost")
+	}
+
+	// Lock file without host= field (backward compat)
+	noHost := filepath.Join(dir, "nohost.lock")
+	os.WriteFile(noHost, []byte("pid=42\nts=2026-01-01T00:00:00Z\nop=test\n"), 0644)
+	got = parseHost(noHost)
+	if got != "" {
+		t.Errorf("parseHost = %q, want empty string", got)
+	}
+
+	// Nonexistent file
+	got = parseHost(filepath.Join(dir, "nope.lock"))
+	if got != "" {
+		t.Errorf("parseHost on missing file = %q, want empty", got)
+	}
+}
+
+func TestIsStale_ForeignHost(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a lock file with a dead PID but from a different host.
+	// The dead PID (999999999) would normally be stale, but the hostname
+	// mismatch should prevent reclamation.
+	foreignLock := filepath.Join(dir, "foreign.lock")
+	os.WriteFile(foreignLock, []byte("pid=999999999\nts=2026-01-01T00:00:00Z\nop=test\nhost=some-other-machine-that-does-not-exist\n"), 0644)
+
+	stale, err := IsStale(foreignLock)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if stale {
-		t.Error("lock with PID 1 should not be stale")
+		t.Error("lock from a different host should NOT be considered stale (PID namespace is foreign)")
+	}
+}
+
+func TestIsStale_EmptyHost(t *testing.T) {
+	dir := t.TempDir()
+
+	// Lock file with no host= field (old format): dead PID should still be stale
+	oldFormatLock := filepath.Join(dir, "old.lock")
+	os.WriteFile(oldFormatLock, []byte("pid=999999999\nts=2026-01-01T00:00:00Z\nop=test\n"), 0644)
+
+	stale, err := IsStale(oldFormatLock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stale {
+		t.Error("lock with dead PID and no host field should be stale (backward compat)")
+	}
+}
+
+func TestIsStale_SameHost(t *testing.T) {
+	dir := t.TempDir()
+
+	// Lock file with matching hostname and dead PID should be stale
+	hostname, err := os.Hostname()
+	if err != nil {
+		t.Skip("cannot determine hostname")
+	}
+
+	sameHostLock := filepath.Join(dir, "samehost.lock")
+	content := "pid=999999999\nts=2026-01-01T00:00:00Z\nop=test\nhost=" + hostname + "\n"
+	os.WriteFile(sameHostLock, []byte(content), 0644)
+
+	stale, staleErr := IsStale(sameHostLock)
+	if staleErr != nil {
+		t.Fatal(staleErr)
+	}
+	if !stale {
+		t.Error("lock with dead PID on same host should be stale")
 	}
 }
 

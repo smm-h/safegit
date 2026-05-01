@@ -141,11 +141,27 @@ func (l *RefLock) Release() error {
 // IsStale checks whether the process that holds the lock file is dead.
 // Returns (true, nil) if the lock is stale and can be reclaimed.
 // A corrupt or zero-length lock file (no parseable PID) is treated as stale.
-func IsStale(lockPath string) (bool, error) {
-	pid, err := parsePID(lockPath)
+//
+// Hardening checks beyond simple PID liveness:
+//   - If the lock contains a host= field that differs from the local hostname,
+//     refuse to reclaim (the PID belongs to a different machine's namespace).
+//   - On Linux, if the process started after the lock was created, the PID was
+//     reused by a new process and the lock is stale.
+func IsStale(path string) (bool, error) {
+	pid, err := parsePID(path)
 	if err != nil {
 		// Corrupt lock (e.g. zero-length from a crash mid-create) -- treat as stale
 		return true, nil
+	}
+
+	// If lock has a host= field and it doesn't match this machine, the PID
+	// check is meaningless (different PID namespace on NFS/shared FS).
+	lockHost := parseHost(path)
+	if lockHost != "" {
+		localHost, hostErr := os.Hostname()
+		if hostErr == nil && lockHost != localHost {
+			return false, nil
+		}
 	}
 
 	// kill(pid, 0) checks existence without sending a signal
@@ -153,7 +169,14 @@ func IsStale(lockPath string) (bool, error) {
 	if err == syscall.ESRCH {
 		return true, nil // process does not exist
 	}
-	// EPERM means process exists but we can't signal it -- still alive
+	// EPERM means process exists but we can't signal it -- still alive.
+
+	// On Linux, detect PID reuse: if /proc/<pid> was created after the lock
+	// file, a different process now occupies the PID and the lock is stale.
+	if processStartedAfterLock(pid, path) {
+		return true, nil
+	}
+
 	return false, nil
 }
 
@@ -190,6 +213,42 @@ func parsePID(lockPath string) (int, error) {
 		}
 	}
 	return 0, fmt.Errorf("no pid= line in lock file %s", lockPath)
+}
+
+// parseHost reads the lock file and extracts the host= value.
+// Returns "" if the field is missing or the file can't be read.
+func parseHost(lockPath string) string {
+	f, err := os.Open(lockPath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "host=") {
+			return strings.TrimPrefix(line, "host=")
+		}
+	}
+	return ""
+}
+
+// processStartedAfterLock checks whether the process with the given PID
+// started after the lock file was created. If so, the PID was reused and the
+// lock is stale. Only works on Linux (reads /proc/<pid>); returns false on
+// other platforms or on any error (fail-open: assume no reuse).
+func processStartedAfterLock(pid int, lockPath string) bool {
+	procInfo, err := os.Stat(fmt.Sprintf("/proc/%d", pid))
+	if err != nil {
+		return false // /proc not available or PID gone; can't determine
+	}
+	lockInfo, err := os.Stat(lockPath)
+	if err != nil {
+		return false
+	}
+	// If the process started after the lock was created, PID was reused.
+	return procInfo.ModTime().After(lockInfo.ModTime())
 }
 
 // describeHolder returns a human-readable description of the lock holder.
