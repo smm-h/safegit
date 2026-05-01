@@ -2,31 +2,20 @@ package index
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/smm-h/safegit/internal/testutil"
 )
 
-// initTestRepo creates a temp git repo with an initial commit, returns the .git dir path.
-func initTestRepo(t *testing.T) string {
+// initIndexTestRepo creates a bare repo and manually initializes the safegit
+// tmp directory structure (without full repo.Init). Returns the .git dir path.
+func initIndexTestRepo(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
+	dir := testutil.InitBareRepo(t)
 
-	cmds := [][]string{
-		{"git", "init", "--initial-branch=main"},
-		{"git", "config", "user.email", "test@test.com"},
-		{"git", "config", "user.name", "Test"},
-		{"git", "commit", "--allow-empty", "-m", "initial"},
-	}
-	for _, args := range cmds {
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v failed: %v\n%s", args, err, out)
-		}
-	}
-
-	// Initialize safegit directory structure
+	// Manually create safegit directory structure (index package doesn't
+	// need full repo.Init, just the tmp dir for temporary indexes).
 	sgDir := filepath.Join(dir, ".git", "safegit")
 	os.MkdirAll(filepath.Join(sgDir, "tmp"), 0755)
 
@@ -34,13 +23,11 @@ func initTestRepo(t *testing.T) string {
 }
 
 func TestNew(t *testing.T) {
-	gitDir := initTestRepo(t)
+	gitDir := initIndexTestRepo(t)
 	sgDir := filepath.Join(gitDir, "safegit")
 
 	// Must chdir to the repo for git commands to work
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(filepath.Dir(gitDir))
+	testutil.Chdir(t, filepath.Dir(gitDir))
 
 	idx, err := New(sgDir, "HEAD")
 	if err != nil {
@@ -66,12 +53,10 @@ func TestNew(t *testing.T) {
 }
 
 func TestCleanup(t *testing.T) {
-	gitDir := initTestRepo(t)
+	gitDir := initIndexTestRepo(t)
 	sgDir := filepath.Join(gitDir, "safegit")
 
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(filepath.Dir(gitDir))
+	testutil.Chdir(t, filepath.Dir(gitDir))
 
 	idx, err := New(sgDir, "HEAD")
 	if err != nil {
@@ -89,7 +74,7 @@ func TestCleanup(t *testing.T) {
 }
 
 func TestGarbageCollect(t *testing.T) {
-	gitDir := initTestRepo(t)
+	gitDir := initIndexTestRepo(t)
 	sgDir := filepath.Join(gitDir, "safegit")
 	tmpBase := filepath.Join(sgDir, "tmp")
 
@@ -124,7 +109,7 @@ func TestGarbageCollect(t *testing.T) {
 }
 
 func TestGarbageCollectEmptyTmp(t *testing.T) {
-	gitDir := initTestRepo(t)
+	gitDir := initIndexTestRepo(t)
 	sgDir := filepath.Join(gitDir, "safegit")
 
 	removed, err := GarbageCollect(sgDir)

@@ -11,61 +11,9 @@ import (
 
 	"github.com/smm-h/safegit/internal/git"
 	"github.com/smm-h/safegit/internal/repo"
+	"github.com/smm-h/safegit/internal/testutil"
 	"github.com/smm-h/safegit/internal/wip"
 )
-
-// initTestRepo creates a temp git repo with an initial commit containing one
-// file, runs safegit init, and returns (repoDir, gitDir, safegitDir).
-func initTestRepo(t *testing.T) (string, string, string) {
-	t.Helper()
-	dir := t.TempDir()
-
-	cmds := [][]string{
-		{"git", "init", "--initial-branch=main"},
-		{"git", "config", "user.email", "test@test.com"},
-		{"git", "config", "user.name", "Test"},
-	}
-	for _, args := range cmds {
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v failed: %v\n%s", args, err, out)
-		}
-	}
-
-	// Create a seed file so the initial commit has a non-empty tree
-	seedPath := filepath.Join(dir, "seed.txt")
-	if err := os.WriteFile(seedPath, []byte("seed\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{
-		{"git", "add", "seed.txt"},
-		{"git", "commit", "-m", "initial"},
-	} {
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v failed: %v\n%s", args, err, out)
-		}
-	}
-
-	gitDir := filepath.Join(dir, ".git")
-	if err := repo.Init(gitDir, false); err != nil {
-		t.Fatalf("safegit init: %v", err)
-	}
-	sgDir := repo.SafegitDir(gitDir)
-	return dir, gitDir, sgDir
-}
-
-// chdir changes into dir for the duration of the test, restoring on cleanup.
-func chdir(t *testing.T, dir string) {
-	t.Helper()
-	old, _ := os.Getwd()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chdir(old) })
-}
 
 // newPipeline creates a Pipeline with default config for the given safegitDir.
 func newPipeline(sgDir string) *Pipeline {
@@ -118,8 +66,8 @@ func treeLacksFile(t *testing.T, commitSHA, path string) {
 }
 
 func TestBasicCommit(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	// Write a new file
 	if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hello\n"), 0644); err != nil {
@@ -150,8 +98,8 @@ func TestBasicCommit(t *testing.T) {
 }
 
 func TestMultipleFiles(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	files := []string{"a.txt", "b.txt", "c.txt"}
 	for _, f := range files {
@@ -175,8 +123,8 @@ func TestMultipleFiles(t *testing.T) {
 }
 
 func TestDeletedFile(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	// The seed.txt file was created by initTestRepo; delete it
 	if err := os.Remove(filepath.Join(dir, "seed.txt")); err != nil {
@@ -198,8 +146,8 @@ func TestDeletedFile(t *testing.T) {
 func TestDeleteSafegitCommittedFile(t *testing.T) {
 	// Regression test: a file committed via safegit (not regular git) must be
 	// deletable via safegit. IsTracked must check HEAD, not the main index.
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	// Step 1: Create and commit a file via safegit
 	filePath := filepath.Join(dir, "ephemeral.txt")
@@ -231,8 +179,8 @@ func TestDeleteSafegitCommittedFile(t *testing.T) {
 }
 
 func TestCASRetry(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	if err := os.WriteFile(filepath.Join(dir, "ours.txt"), []byte("ours\n"), 0644); err != nil {
 		t.Fatal(err)
@@ -276,8 +224,8 @@ func TestCASRetry(t *testing.T) {
 }
 
 func TestCASExhaustion(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("data\n"), 0644); err != nil {
 		t.Fatal(err)
@@ -318,8 +266,8 @@ func TestCASExhaustion(t *testing.T) {
 }
 
 func TestNewUntrackedFile(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	// Create a brand-new file that has never been tracked
 	if err := os.WriteFile(filepath.Join(dir, "brand-new.txt"), []byte("new\n"), 0644); err != nil {
@@ -340,8 +288,8 @@ func TestNewUntrackedFile(t *testing.T) {
 }
 
 func TestDryRun(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	if err := os.WriteFile(filepath.Join(dir, "dry.txt"), []byte("dry\n"), 0644); err != nil {
 		t.Fatal(err)
@@ -378,8 +326,8 @@ func TestDryRun(t *testing.T) {
 }
 
 func TestAmend(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	// Create initial commit with file via safegit
 	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("v1\n"), 0644); err != nil {
@@ -436,8 +384,8 @@ func TestAmend(t *testing.T) {
 }
 
 func TestAmendKeepMessage(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	// Create initial commit
 	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("v1\n"), 0644); err != nil {
@@ -481,8 +429,8 @@ func TestAmendKeepMessage(t *testing.T) {
 }
 
 func TestReword(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	// Create a commit
 	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("data\n"), 0644); err != nil {
@@ -538,8 +486,8 @@ func TestReword(t *testing.T) {
 }
 
 func TestCommitRefusesWipLocked(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	// Modify seed.txt and create a wip to lock the file
 	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("wip content\n"), 0644); err != nil {

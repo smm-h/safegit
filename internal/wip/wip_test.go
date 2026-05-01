@@ -8,64 +8,12 @@ import (
 	"testing"
 
 	"github.com/smm-h/safegit/internal/repo"
+	"github.com/smm-h/safegit/internal/testutil"
 )
 
-// initTestRepo creates a temp git repo with an initial commit, runs safegit init,
-// and returns (repoDir, gitDir, safegitDir).
-func initTestRepo(t *testing.T) (string, string, string) {
-	t.Helper()
-	dir := t.TempDir()
-
-	cmds := [][]string{
-		{"git", "init", "--initial-branch=main"},
-		{"git", "config", "user.email", "test@test.com"},
-		{"git", "config", "user.name", "Test"},
-	}
-	for _, args := range cmds {
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v failed: %v\n%s", args, err, out)
-		}
-	}
-
-	// Seed file so the initial commit has a non-empty tree
-	seedPath := filepath.Join(dir, "seed.txt")
-	if err := os.WriteFile(seedPath, []byte("seed\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{
-		{"git", "add", "seed.txt"},
-		{"git", "commit", "-m", "initial"},
-	} {
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v failed: %v\n%s", args, err, out)
-		}
-	}
-
-	gitDir := filepath.Join(dir, ".git")
-	if err := repo.Init(gitDir, false); err != nil {
-		t.Fatalf("safegit init: %v", err)
-	}
-	sgDir := repo.SafegitDir(gitDir)
-	return dir, gitDir, sgDir
-}
-
-// chdir changes into dir for the duration of the test, restoring on cleanup.
-func chdir(t *testing.T, dir string) {
-	t.Helper()
-	old, _ := os.Getwd()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chdir(old) })
-}
-
 func TestCreateAndList(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	// Write a file to wip
 	if err := os.WriteFile(filepath.Join(dir, "wip-file.txt"), []byte("work in progress\n"), 0644); err != nil {
@@ -109,8 +57,8 @@ func TestCreateAndList(t *testing.T) {
 }
 
 func TestRestore(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	// Modify the existing tracked file (seed.txt)
 	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("modified seed\n"), 0644); err != nil {
@@ -166,8 +114,8 @@ func TestRestore(t *testing.T) {
 }
 
 func TestLockConflict(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	// Modify seed.txt and create a wip
 	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("wip content\n"), 0644); err != nil {
@@ -194,8 +142,8 @@ func TestLockConflict(t *testing.T) {
 }
 
 func TestRestoreAfterModification(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	// Modify seed.txt and create a wip
 	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("wip content\n"), 0644); err != nil {
@@ -232,8 +180,8 @@ func TestRestoreAfterModification(t *testing.T) {
 }
 
 func TestOrphanLocks(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	// Create a lock file without a corresponding wip ref (orphan)
 	if err := writeLockFile(sgDir, "ghost.txt", "deadbeef"); err != nil {
@@ -268,8 +216,8 @@ func TestOrphanLocks(t *testing.T) {
 }
 
 func TestListEmpty(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	wips, err := List(sgDir)
 	if err != nil {
@@ -281,8 +229,8 @@ func TestListEmpty(t *testing.T) {
 }
 
 func TestMultipleFiles(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	// Create and track two extra files via regular git
 	for _, name := range []string{"a.txt", "b.txt"} {
@@ -350,8 +298,8 @@ func TestMultipleFiles(t *testing.T) {
 
 // TestRestoreNonexistent verifies that restoring a nonexistent wip-id returns an error.
 func TestRestoreNonexistent(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	_, err := Restore(sgDir, "deadbeef", false)
 	if err == nil {
@@ -364,8 +312,8 @@ func TestRestoreNonexistent(t *testing.T) {
 
 // TestIsLockedAfterCreate verifies lock state matches expectations.
 func TestIsLockedAfterCreate(t *testing.T) {
-	dir, _, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	// Modify seed.txt
 	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("locked content\n"), 0644); err != nil {
