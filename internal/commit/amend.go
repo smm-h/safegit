@@ -213,9 +213,11 @@ func (p *Pipeline) tryAmend(
 		return nil, false, fmt.Errorf("update-ref CAS failed: %w", err)
 	}
 
-	// Sync main index
-	if err := git.SyncMainIndex("HEAD"); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
+	// Sync main index only when amending the current branch
+	if headRef, herr := git.HeadRef(); herr == nil && headRef == ref {
+		if err := git.SyncMainIndex("HEAD"); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
+		}
 	}
 
 	// Oplog
@@ -357,8 +359,10 @@ func (p *Pipeline) tryReword(
 		return nil, false, fmt.Errorf("update-ref CAS failed: %w", err)
 	}
 
-	if err := git.SyncMainIndex("HEAD"); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
+	if headRef, herr := git.HeadRef(); herr == nil && headRef == ref {
+		if err := git.SyncMainIndex("HEAD"); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
+		}
 	}
 
 	_ = oplog.Append(p.SafegitDir, oplog.Entry{
