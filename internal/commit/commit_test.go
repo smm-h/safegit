@@ -485,6 +485,190 @@ func TestReword(t *testing.T) {
 	commitLandsOnBranch(t, "refs/heads/main", rewordResult.SHA)
 }
 
+func TestAmendCASRetry(t *testing.T) {
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
+
+	// Create initial commit with file.txt via safegit
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("v1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	p := newPipeline(sgDir)
+	_, err := p.Execute(context.Background(), CommitRequest{
+		Message: "first commit",
+		Files:   []string{"file.txt"},
+	})
+	if err != nil {
+		t.Fatalf("first commit: %v", err)
+	}
+
+	// Write files for the concurrent operations
+	if err := os.WriteFile(filepath.Join(dir, "racer.txt"), []byte("racer\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "extra.txt"), []byte("extra\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Race a raw git commit against a safegit amend.
+	// The goroutine advances the branch tip via raw git, which should cause
+	// a CAS miss in the amend path, triggering a retry.
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cmd := exec.Command("git", "add", "racer.txt")
+		cmd.Dir = dir
+		cmd.Run()
+		cmd = exec.Command("git", "commit", "-m", "racing commit")
+		cmd.Dir = dir
+		cmd.Run()
+	}()
+
+	amendResult, amendErr := p.Amend(context.Background(), AmendRequest{
+		Message:   "amended commit",
+		FileSpecs: []FileSpec{{Path: "extra.txt"}},
+	})
+	wg.Wait()
+
+	if amendErr != nil {
+		// "branch tip moved" style errors indicate the old CAS bug
+		if strings.Contains(amendErr.Error(), "branch tip moved") {
+			t.Fatalf("amend failed with old CAS bug: %v", amendErr)
+		}
+		// CAS exhaustion is acceptable in a tight race if the racer kept winning
+		ce, ok := amendErr.(*CommitError)
+		if ok && ce.Code == ExitCASExhausted {
+			t.Logf("CAS exhausted (racer kept winning) -- acceptable in race test")
+			return
+		}
+		t.Fatalf("Amend: %v", amendErr)
+	}
+
+	// If amend succeeded, verify the result is sound
+	if len(amendResult.SHA) != 40 {
+		t.Errorf("SHA = %q, want 40-char hex", amendResult.SHA)
+	}
+	commitLandsOnBranch(t, "refs/heads/main", amendResult.SHA)
+	treeHasFile(t, amendResult.SHA, "extra.txt")
+
+	if amendResult.Attempts > 1 {
+		t.Logf("CAS retry worked: amend succeeded after %d attempts", amendResult.Attempts)
+	} else {
+		t.Logf("amend won the race on first attempt (Attempts=%d)", amendResult.Attempts)
+	}
+}
+
+func TestCrossBranchPreservesMainIndex(t *testing.T) {
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
+
+	// Create a feature branch (from current HEAD)
+	ctx := context.Background()
+	cmd := exec.Command("git", "branch", "feature")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git branch feature: %v\n%s", err, out)
+	}
+
+	// Stage a file in the main index via raw git (simulating another session)
+	if err := os.WriteFile(filepath.Join(dir, "staged.txt"), []byte("staged\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("git", "add", "staged.txt")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add staged.txt: %v\n%s", err, out)
+	}
+
+	// Commit a different file to the feature branch via safegit
+	if err := os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("feature\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	p := newPipeline(sgDir)
+	result, err := p.Execute(ctx, CommitRequest{
+		Message: "feature commit",
+		Files:   []string{"feature.txt"},
+		Branch:  "feature",
+	})
+	if err != nil {
+		t.Fatalf("cross-branch commit: %v", err)
+	}
+	treeHasFile(t, result.SHA, "feature.txt")
+
+	// Verify the staged file is still in the main index (git diff --cached)
+	out, cErr := exec.Command("git", "diff", "--cached", "--name-only").Output()
+	if cErr != nil {
+		t.Fatalf("git diff --cached: %v", cErr)
+	}
+	cachedFiles := strings.TrimSpace(string(out))
+	if !strings.Contains(cachedFiles, "staged.txt") {
+		t.Errorf("staged.txt should still be in main index after cross-branch commit; cached files: %q", cachedFiles)
+	}
+}
+
+func TestInitialCommit(t *testing.T) {
+	// Create a git repo with NO initial commit (empty repo)
+	dir := t.TempDir()
+
+	cmds := [][]string{
+		{"git", "init", "--initial-branch=main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	// Initialize safegit
+	gitDir := filepath.Join(dir, ".git")
+	if err := repo.Init(gitDir, false); err != nil {
+		t.Fatalf("safegit init: %v", err)
+	}
+	sgDir := filepath.Join(gitDir, "safegit")
+	testutil.Chdir(t, dir)
+
+	// Create a file and commit via safegit pipeline
+	if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hello\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := newPipeline(sgDir)
+	result, err := p.Execute(context.Background(), CommitRequest{
+		Message: "initial commit via safegit",
+		Files:   []string{"hello.txt"},
+	})
+	if err != nil {
+		t.Fatalf("Execute on empty repo: %v", err)
+	}
+
+	// Verify the commit landed
+	if len(result.SHA) != 40 {
+		t.Errorf("SHA = %q, want 40-char hex", result.SHA)
+	}
+	commitLandsOnBranch(t, "refs/heads/main", result.SHA)
+	treeHasFile(t, result.SHA, "hello.txt")
+
+	// Verify it's a root commit (no parent)
+	if result.Parent != "" {
+		t.Errorf("Parent = %q, want empty (root commit)", result.Parent)
+	}
+
+	// Double-check: git log should show exactly one commit
+	ctx := context.Background()
+	out, _, err := git.Run(ctx, "rev-list", "--count", "HEAD")
+	if err != nil {
+		t.Fatalf("rev-list --count: %v", err)
+	}
+	if strings.TrimSpace(out) != "1" {
+		t.Errorf("commit count = %s, want 1", strings.TrimSpace(out))
+	}
+}
+
 func TestCommitRefusesWipLocked(t *testing.T) {
 	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
 	testutil.Chdir(t, dir)
