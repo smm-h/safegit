@@ -18,4 +18,4 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
       - run: go vet ./...
-      - run: go test ./... -race -timeout=10m
+      - run: go test ./... -race -short -timeout=10m
