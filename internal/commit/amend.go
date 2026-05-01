@@ -210,6 +210,9 @@ func (p *Pipeline) tryAmend(
 
 	// Update ref: old = headSHA, new = commitSHA
 	if err := git.UpdateRef(ref, commitSHA, headSHA); err != nil {
+		if isTransientRefError(err) {
+			return nil, true, nil
+		}
 		return nil, false, fmt.Errorf("update-ref CAS failed: %w", err)
 	}
 
@@ -356,6 +359,9 @@ func (p *Pipeline) tryReword(
 	}
 
 	if err := git.UpdateRef(ref, commitSHA, headSHA); err != nil {
+		if isTransientRefError(err) {
+			return nil, true, nil
+		}
 		return nil, false, fmt.Errorf("update-ref CAS failed: %w", err)
 	}
 
