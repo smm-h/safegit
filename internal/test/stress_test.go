@@ -1279,3 +1279,230 @@ func TestUndoAmend(t *testing.T) {
 		t.Error("extra.txt still in HEAD tree after undo (should have been removed)")
 	}
 }
+
+// R7: TestPassthrough_CherryPick verifies that safegit cherry-pick passes through
+// to git cherry-pick on a clean tree and the picked commit's file appears in HEAD.
+func TestPassthrough_CherryPick(t *testing.T) {
+	dir := newRepo(t)
+
+	// Create branch "feature" from current HEAD
+	cmd := exec.Command("git", "branch", "feature")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git branch feature: %v\n%s", err, out)
+	}
+
+	// Commit a file to the feature branch via safegit --branch
+	if err := os.WriteFile(filepath.Join(dir, "cherry.txt"), []byte("cherry\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegit(t, dir, "commit", "-m", "feature commit", "--branch", "feature", "--", "cherry.txt")
+	if code != 0 {
+		t.Fatalf("commit to feature failed (code %d): %s", code, stderr)
+	}
+
+	// Remove the file from working tree so the tree is clean for cherry-pick.
+	// safegit commit --branch only commits to the target branch's tree; it
+	// leaves the working copy file behind as untracked.
+	if err := os.Remove(filepath.Join(dir, "cherry.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Get the commit SHA from the feature branch
+	shaCmd := exec.Command("git", "rev-parse", "feature")
+	shaCmd.Dir = dir
+	shaOut, err := shaCmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse feature: %v", err)
+	}
+	featureSHA := strings.TrimSpace(string(shaOut))
+
+	// Cherry-pick onto main (working tree is clean)
+	_, stderr, code = runSafegit(t, dir, "cherry-pick", featureSHA)
+	if code != 0 {
+		t.Fatalf("cherry-pick failed (code %d): %s", code, stderr)
+	}
+
+	// Verify cherry.txt is in HEAD's tree on main
+	treeCmd := exec.Command("git", "ls-tree", "-r", "--name-only", "HEAD")
+	treeCmd.Dir = dir
+	treeOut, err := treeCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(treeOut), "cherry.txt") {
+		t.Error("cherry.txt not found in HEAD tree after cherry-pick")
+	}
+
+	// Verify we're still on main
+	headCmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
+	headCmd.Dir = dir
+	headOut, _ := headCmd.Output()
+	if strings.TrimSpace(string(headOut)) != "main" {
+		t.Errorf("HEAD = %q, want 'main'", strings.TrimSpace(string(headOut)))
+	}
+}
+
+// R7: TestPassthrough_Tag verifies safegit tag creation, listing, and deletion.
+func TestPassthrough_Tag(t *testing.T) {
+	dir := newRepo(t)
+
+	// Create a tag
+	_, stderr, code := runSafegit(t, dir, "tag", "v-test")
+	if code != 0 {
+		t.Fatalf("tag creation failed (code %d): %s", code, stderr)
+	}
+
+	// Verify the tag exists via git tag -l
+	tagCmd := exec.Command("git", "tag", "-l")
+	tagCmd.Dir = dir
+	tagOut, err := tagCmd.Output()
+	if err != nil {
+		t.Fatalf("git tag -l: %v", err)
+	}
+	if !strings.Contains(string(tagOut), "v-test") {
+		t.Errorf("git tag -l output %q does not contain 'v-test'", string(tagOut))
+	}
+
+	// Delete the tag via safegit
+	_, stderr, code = runSafegit(t, dir, "tag", "-d", "v-test")
+	if code != 0 {
+		t.Fatalf("tag deletion failed (code %d): %s", code, stderr)
+	}
+
+	// Verify the tag is gone
+	tagCmd = exec.Command("git", "tag", "-l")
+	tagCmd.Dir = dir
+	tagOut, err = tagCmd.Output()
+	if err != nil {
+		t.Fatalf("git tag -l after delete: %v", err)
+	}
+	if strings.Contains(string(tagOut), "v-test") {
+		t.Error("v-test still present after safegit tag -d")
+	}
+}
+
+// R7: TestPassthrough_StashRefused verifies that safegit stash is refused with
+// exit code 5 when the working tree is dirty (coordination guard).
+func TestPassthrough_StashRefused(t *testing.T) {
+	dir := newRepo(t)
+
+	// Dirty the working tree by modifying a tracked file
+	seedPath := filepath.Join(dir, "seed.txt")
+	if err := os.WriteFile(seedPath, []byte("dirty for stash test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// safegit stash should be refused by coord guard (dirty tree)
+	_, _, code := runSafegit(t, dir, "stash")
+	if code != 5 {
+		t.Errorf("expected exit code 5 (coord guard refusal), got %d", code)
+	}
+
+	// Verify working tree is still dirty (stash didn't run)
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = dir
+	statusOut, err := statusCmd.Output()
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
+	if !strings.Contains(string(statusOut), "seed.txt") {
+		t.Error("working tree is clean after stash refusal -- stash should not have run")
+	}
+}
+
+// R8: TestWorktree_LockSharing verifies that safegit init works inside a git
+// worktree and that the lock directory is placed under the common .git dir
+// (not the worktree's own .git file), enabling lock sharing across worktrees.
+func TestWorktree_LockSharing(t *testing.T) {
+	dir := newRepo(t)
+
+	// Create a git worktree
+	wtDir := filepath.Join(t.TempDir(), "wt")
+	cmd := exec.Command("git", "worktree", "add", wtDir, "-b", "feature")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add: %v\n%s", err, out)
+	}
+
+	// Set user config in worktree (inherits from main but be safe)
+	for _, args := range [][]string{
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	} {
+		c := exec.Command(args[0], args[1:]...)
+		c.Dir = wtDir
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("%v in worktree: %v\n%s", args, err, out)
+		}
+	}
+
+	// Run safegit init in the worktree
+	_, stderr, code := runSafegit(t, wtDir, "init")
+	if code != 0 {
+		t.Fatalf("safegit init in worktree failed (code %d): %s", code, stderr)
+	}
+
+	// Bump CAS attempts for the worktree too
+	runSafegit(t, wtDir, "config", "commit.casMaxAttempts", "50")
+
+	// Create a file in the main repo and commit to main
+	if err := os.WriteFile(filepath.Join(dir, "main_file.txt"), []byte("from main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code = runSafegit(t, dir, "commit", "-m", "main commit", "--", "main_file.txt")
+	if code != 0 {
+		t.Fatalf("commit in main repo failed (code %d): %s", code, stderr)
+	}
+
+	// Create a file in the worktree and commit to feature
+	if err := os.WriteFile(filepath.Join(wtDir, "wt_file.txt"), []byte("from worktree\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code = runSafegit(t, wtDir, "commit", "-m", "worktree commit", "--", "wt_file.txt")
+	if code != 0 {
+		t.Fatalf("commit in worktree failed (code %d): %s", code, stderr)
+	}
+
+	// Verify main commit landed
+	treeCmd := exec.Command("git", "ls-tree", "-r", "--name-only", "refs/heads/main")
+	treeCmd.Dir = dir
+	treeOut, err := treeCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(treeOut), "main_file.txt") {
+		t.Error("main_file.txt not found in main branch tree")
+	}
+
+	// Verify worktree commit landed on feature
+	treeCmd = exec.Command("git", "ls-tree", "-r", "--name-only", "refs/heads/feature")
+	treeCmd.Dir = dir
+	treeOut, err = treeCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(treeOut), "wt_file.txt") {
+		t.Error("wt_file.txt not found in feature branch tree")
+	}
+
+	// Verify the lock directory is under the common .git dir (not the worktree's).
+	// The main repo's .git/safegit/locks/refs/heads/ should exist.
+	mainGitDir := filepath.Join(dir, ".git")
+	sharedLocksDir := filepath.Join(mainGitDir, "safegit", "locks", "refs", "heads")
+	if _, err := os.Stat(sharedLocksDir); os.IsNotExist(err) {
+		t.Errorf("shared locks dir %s does not exist -- locks are not shared across worktrees", sharedLocksDir)
+	}
+
+	// The worktree's .git is a file (not a directory), so there should NOT be
+	// a safegit/locks/ dir at the worktree level outside the common git dir.
+	// The worktree's git dir is at .git/worktrees/wt/.
+	wtGitDir := filepath.Join(mainGitDir, "worktrees", "wt")
+	wtLocksDir := filepath.Join(wtGitDir, "safegit", "locks", "refs", "heads")
+	// This dir may or may not exist (safegit init creates it under the worktree's
+	// git dir too), but the important thing is that the SHARED dir exists.
+	// Log whether the worktree-local locks dir exists for diagnostic purposes.
+	if _, err := os.Stat(wtLocksDir); err == nil {
+		t.Logf("note: worktree-local locks dir also exists at %s (init creates both)", wtLocksDir)
+	}
+}
