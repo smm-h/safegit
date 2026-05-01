@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.0
+
+### Removed commands
+
+Seven commands dropped to reduce surface area and eliminate code that adds no concurrency safety:
+
+- **`safegit status`** -- JSON wrapper around `git status --porcelain`. Agents can parse porcelain format directly; it's designed to be machine-readable. The JSON re-encoding was ~100 lines of parsing code that had to be maintained as git's output evolves, with no concurrency benefit.
+- **`safegit diff`** -- JSON wrapper around `git diff`. The hunk-splitting logic (`splitDiffChunks`) already had one panic bug. Agents already parse unified diff routinely, and git's native output is the source of truth.
+- **`safegit log`** -- JSON wrapper around `git log`. Git's own `--format` flag already produces structured output. Marginal value over native git.
+- **`safegit show`** -- JSON wrapper around `git show`. Same rationale as `log`.
+- **`safegit stash`** -- Guarded passthrough, but the guard doesn't solve the real problem. In a multi-agent worktree, `git stash` captures all agents' uncommitted changes indiscriminately. The operation itself is fundamentally unsafe with concurrent agents. Use `safegit wip` instead (per-file, lock-protected).
+- **`safegit tag`** -- Unguarded passthrough with zero safegit logic. Agents can use `git tag` directly with no risk since tags don't affect the working tree or index.
+- **`safegit fetch`** -- Unguarded passthrough with zero safegit logic. Fetch only updates remote-tracking refs, which is safe to do concurrently. Use `git fetch` directly.
+
+### Other
+
+- Add blocking stress tests to pre-push hook (skip with `SKIP_STRESS=1`)
+- Add WSL compatibility note to README
+
 ## 0.1.6
 
 - Fix: `safegit unwip` now refuses to restore when files were modified since the wip was created, preventing silent data loss from overwriting another agent's edits

@@ -106,18 +106,8 @@ func main() {
 		os.Exit(runReset(flags, cmdArgs))
 	case "bisect":
 		os.Exit(runBisect(flags, cmdArgs))
-	case "status":
-		os.Exit(runStatus(flags, cmdArgs))
-	case "diff":
-		os.Exit(runDiff(flags, cmdArgs))
-	case "log":
-		os.Exit(runLog(flags, cmdArgs))
-	case "show":
-		os.Exit(runShow(flags, cmdArgs))
 	case "push":
 		os.Exit(runPush(flags, cmdArgs))
-	case "fetch":
-		os.Exit(runFetch(cmdArgs))
 	case "hook":
 		os.Exit(runHook(flags, cmdArgs))
 	case "config":
@@ -128,14 +118,10 @@ func main() {
 		runUndo(flags, cmdArgs)
 	case "branch":
 		os.Exit(runBranch(flags, cmdArgs))
-	case "stash":
-		os.Exit(runGuardedPassthrough(flags, "stash", cmdArgs))
 	case "cherry-pick":
 		os.Exit(runGuardedPassthrough(flags, "cherry-pick", cmdArgs))
 	case "revert":
 		os.Exit(runGuardedPassthrough(flags, "revert", cmdArgs))
-	case "tag":
-		os.Exit(runPassthrough("tag", cmdArgs))
 	case "help", "--help", "-h":
 		printUsage(flags)
 	default:
@@ -260,17 +246,10 @@ Commands:
   reset       Reset (guarded for --hard)
   bisect      Bisect (guarded: checks for uncommitted work)
   push        Push with pre-pre-push hooks and retry logic
-  fetch       Fetch from remote (git passthrough)
   hook        Manage pre-pre-push hooks (list, run, install)
   branch      List, create, or delete branches
-  status      Show working tree status (git passthrough)
-  diff        Show diffs (git passthrough)
-  log         Show commit log (git passthrough)
-  show        Show objects (git passthrough)
-  stash       Stash changes (guarded)
   cherry-pick Cherry-pick commits (guarded)
   revert      Revert commits (guarded)
-  tag         Manage tags (git passthrough)
   config      Show or set configuration values
   unlock      Release a stale ref lock (--force to override live holder)
   doctor      Health checks (initialized? orphan dirs? stale locks?)
