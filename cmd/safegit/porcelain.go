@@ -204,6 +204,9 @@ func parseDiffOutput(raw string) []diffFile {
 // splitDiffChunks splits multi-file diff output into per-file chunks.
 // Each returned string starts with "diff --git".
 func splitDiffChunks(raw string) []string {
+	if len(raw) < 2 {
+		return nil
+	}
 	const prefix = "diff --git "
 	var chunks []string
 	rest := raw
