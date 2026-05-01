@@ -50,7 +50,7 @@ func TestRepoRoot(t *testing.T) {
 	dir := testutil.InitBareRepo(t)
 	testutil.Chdir(t, dir)
 
-	root, err := RepoRoot()
+	root, err := RepoRoot(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestHeadRef(t *testing.T) {
 	dir := testutil.InitBareRepo(t)
 	testutil.Chdir(t, dir)
 
-	ref, err := HeadRef()
+	ref, err := HeadRef(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestRevParse(t *testing.T) {
 	dir := testutil.InitBareRepo(t)
 	testutil.Chdir(t, dir)
 
-	sha, err := RevParse("HEAD")
+	sha, err := RevParse(context.Background(), "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestReadTreeAndWriteTree(t *testing.T) {
 	exec.Command("git", "-C", dir, "commit", "-m", "add hello").Run()
 
 	indexPath := filepath.Join(dir, "test-index")
-	err := ReadTree(indexPath, "HEAD")
+	err := ReadTree(context.Background(), indexPath, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestReadTreeAndWriteTree(t *testing.T) {
 		t.Fatal("ReadTree did not create index file")
 	}
 
-	treeSHA, err := WriteTree(indexPath)
+	treeSHA, err := WriteTree(context.Background(), indexPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,11 +120,11 @@ func TestCommitTree(t *testing.T) {
 	testutil.Chdir(t, dir)
 
 	// Get the tree SHA from HEAD
-	headSHA, _ := RevParse("HEAD")
+	headSHA, _ := RevParse(context.Background(), "HEAD")
 	treeSHA, _, _ := Run(context.Background(), "rev-parse", "HEAD^{tree}")
 	treeSHA = strings.TrimSpace(treeSHA)
 
-	commitSHA, err := CommitTree(treeSHA, headSHA, "test commit")
+	commitSHA, err := CommitTree(context.Background(), treeSHA, headSHA, "test commit")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,26 +137,27 @@ func TestUpdateRef(t *testing.T) {
 	dir := testutil.InitBareRepo(t)
 	testutil.Chdir(t, dir)
 
-	headSHA, _ := RevParse("HEAD")
-	treeSHA, _, _ := Run(context.Background(), "rev-parse", "HEAD^{tree}")
+	ctx := context.Background()
+	headSHA, _ := RevParse(ctx, "HEAD")
+	treeSHA, _, _ := Run(ctx, "rev-parse", "HEAD^{tree}")
 	treeSHA = strings.TrimSpace(treeSHA)
 
-	newCommit, _ := CommitTree(treeSHA, headSHA, "new commit")
+	newCommit, _ := CommitTree(ctx, treeSHA, headSHA, "new commit")
 
 	// CAS update: expect headSHA, set to newCommit
-	err := UpdateRef("refs/heads/main", newCommit, headSHA)
+	err := UpdateRef(ctx, "refs/heads/main", newCommit, headSHA)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Verify
-	currentSHA, _ := RevParse("refs/heads/main")
+	currentSHA, _ := RevParse(ctx, "refs/heads/main")
 	if currentSHA != newCommit {
 		t.Errorf("after UpdateRef: ref = %q, want %q", currentSHA, newCommit)
 	}
 
 	// CAS failure: wrong old value
-	err = UpdateRef("refs/heads/main", headSHA, "0000000000000000000000000000000000000000")
+	err = UpdateRef(ctx, "refs/heads/main", headSHA, "0000000000000000000000000000000000000000")
 	if err == nil {
 		t.Error("UpdateRef should fail with wrong old SHA")
 	}
@@ -166,7 +167,7 @@ func TestGitDir(t *testing.T) {
 	dir := testutil.InitBareRepo(t)
 	testutil.Chdir(t, dir)
 
-	gitDir, err := GitDir()
+	gitDir, err := GitDir(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

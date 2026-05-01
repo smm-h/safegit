@@ -3,6 +3,7 @@
 package repo
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,8 +69,8 @@ func SafegitDir(gitDir string) string {
 // For normal repos this is identical to SafegitDir(gitDir). For worktrees it
 // returns <common-git-dir>/safegit so that lock files are shared across all
 // worktrees, ensuring proper serialization of ref updates.
-func SharedSafegitDir(gitDir string) string {
-	commonDir, err := git.CommonGitDir()
+func SharedSafegitDir(ctx context.Context, gitDir string) string {
+	commonDir, err := git.CommonGitDir(ctx)
 	if err != nil {
 		return SafegitDir(gitDir)
 	}
@@ -118,7 +119,7 @@ func Init(gitDir string, force bool) error {
 
 	// If running inside a worktree, also create the shared locks dir under
 	// the common .git dir so that ref locks are visible to all worktrees.
-	sharedDir := SharedSafegitDir(gitDir)
+	sharedDir := SharedSafegitDir(context.Background(), gitDir)
 	if sharedDir != sgDir {
 		if err := os.MkdirAll(filepath.Join(sharedDir, "locks", "refs", "heads"), 0755); err != nil {
 			return fmt.Errorf("creating shared locks directory %s: %w", sharedDir, err)
@@ -165,7 +166,7 @@ func Uninstall(gitDir string) error {
 	if err := os.RemoveAll(sgDir); err != nil {
 		return err
 	}
-	sharedDir := SharedSafegitDir(gitDir)
+	sharedDir := SharedSafegitDir(context.Background(), gitDir)
 	if sharedDir != sgDir {
 		os.RemoveAll(filepath.Join(sharedDir, "locks"))
 	}
@@ -314,7 +315,7 @@ func checkUnsupportedFeatures(gitDir string) error {
 	// Use git rev-parse to find the true worktree root. filepath.Dir(gitDir)
 	// breaks when .git is a file (worktrees, submodules) because gitDir points
 	// to the shared .git directory, not the worktree containing .gitmodules/.gitattributes.
-	repoRoot, err := git.RepoRoot()
+	repoRoot, err := git.RepoRoot(context.Background())
 	if err != nil {
 		// Fall back to parent of gitDir if git rev-parse fails
 		repoRoot = filepath.Dir(gitDir)

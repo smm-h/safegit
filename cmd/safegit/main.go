@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -298,7 +299,8 @@ func loadConfig(flags globalFlags, gitDir string) (*repo.Config, error) {
 
 // mustGitDir resolves the .git directory or exits with an error.
 func mustGitDir(flags globalFlags) string {
-	gitDir, err := git.GitDir()
+	ctx := context.Background()
+	gitDir, err := git.GitDir(ctx)
 	if err != nil {
 		msg := "not a git repository (or git is not installed)"
 		if flags.format == formatJSON {

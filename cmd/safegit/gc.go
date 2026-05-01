@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,7 +38,7 @@ func runGC(flags globalFlags) {
 			os.Exit(1)
 		}
 
-		orphanWipLocks, _ := wip.OrphanLocks(sgDir)
+		orphanWipLocks, _ := wip.OrphanLocks(context.Background(), sgDir)
 
 		// Check for legacy queue directory
 		queueDir := filepath.Join(sgDir, "queue")
@@ -95,7 +96,7 @@ func runGC(flags globalFlags) {
 	}
 
 	// Clean orphan wip-locks
-	wipCleaned, wipErr := wip.CleanOrphanLocks(sgDir)
+	wipCleaned, wipErr := wip.CleanOrphanLocks(context.Background(), sgDir)
 	if wipErr != nil {
 		if flags.format == formatJSON {
 			emitJSON("gc", nil, &jsonError{Code: 1, Message: wipErr.Error()}, nil)

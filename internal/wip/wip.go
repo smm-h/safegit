@@ -27,7 +27,7 @@ type WipInfo struct {
 }
 
 // Create snapshots the listed files to a wip ref and reverts them in the working tree.
-func Create(safegitDir string, files []string) (*WipInfo, error) {
+func Create(ctx context.Context, safegitDir string, files []string) (*WipInfo, error) {
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no files specified")
 	}
@@ -57,13 +57,11 @@ func Create(safegitDir string, files []string) (*WipInfo, error) {
 	}
 
 	// Build a tree: seed tmp index from HEAD, add the listed files
-	tmpIndexPath, cleanup, err := createTmpIndex(safegitDir)
+	tmpIndexPath, cleanup, err := createTmpIndex(ctx, safegitDir)
 	if err != nil {
 		return nil, fmt.Errorf("creating tmp index: %w", err)
 	}
 	defer cleanup()
-
-	ctx := context.Background()
 
 	// Add files (working tree content) into the tmp index
 	for _, f := range files {
@@ -75,13 +73,13 @@ func Create(safegitDir string, files []string) (*WipInfo, error) {
 	}
 
 	// Write tree
-	treeSHA, err := git.WriteTree(tmpIndexPath)
+	treeSHA, err := git.WriteTree(ctx, tmpIndexPath)
 	if err != nil {
 		return nil, fmt.Errorf("write-tree: %w", err)
 	}
 
 	// Get HEAD for parent
-	headSHA, err := git.RevParse("HEAD")
+	headSHA, err := git.RevParse(ctx, "HEAD")
 	if err != nil {
 		return nil, fmt.Errorf("resolving HEAD: %w", err)
 	}
@@ -94,14 +92,14 @@ func Create(safegitDir string, files []string) (*WipInfo, error) {
 		msgLines = append(msgLines, "file: "+f)
 	}
 	msg := strings.Join(msgLines, "\n")
-	commitSHA, err := git.CommitTree(treeSHA, headSHA, msg)
+	commitSHA, err := git.CommitTree(ctx, treeSHA, headSHA, msg)
 	if err != nil {
 		return nil, fmt.Errorf("commit-tree: %w", err)
 	}
 
 	// Create ref
 	ref := "refs/safegit/wip/" + id
-	if err := git.UpdateRef(ref, commitSHA, ""); err != nil {
+	if err := git.UpdateRef(ctx, ref, commitSHA, ""); err != nil {
 		return nil, fmt.Errorf("creating ref %s: %w", ref, err)
 	}
 
@@ -137,17 +135,17 @@ func Create(safegitDir string, files []string) (*WipInfo, error) {
 }
 
 // Restore applies a wip back to the working tree and deletes the ref.
-func Restore(safegitDir, wipID string) ([]string, error) {
+func Restore(ctx context.Context, safegitDir, wipID string) ([]string, error) {
 	ref := "refs/safegit/wip/" + wipID
 
 	// Verify ref exists
-	wipSHA, err := git.RevParse(ref)
+	wipSHA, err := git.RevParse(ctx, ref)
 	if err != nil {
 		return nil, fmt.Errorf("wip %s not found (ref %s does not exist)", wipID, ref)
 	}
 
 	// Read file list from wip commit message
-	files, err := parseFilesFromCommit(wipSHA)
+	files, err := parseFilesFromCommit(ctx, wipSHA)
 	if err != nil {
 		return nil, fmt.Errorf("parsing wip commit: %w", err)
 	}
@@ -155,7 +153,6 @@ func Restore(safegitDir, wipID string) ([]string, error) {
 	// Restore files from the wip commit's tree to the working tree.
 	// No clean-check needed: wip-locks prevent commits to these files,
 	// so the only changes since wip-create are the user's own edits.
-	ctx := context.Background()
 	checkoutArgs := append([]string{"checkout", wipSHA, "--"}, files...)
 	_, _, err = git.Run(ctx, checkoutArgs...)
 	if err != nil {
@@ -186,8 +183,7 @@ func Restore(safegitDir, wipID string) ([]string, error) {
 }
 
 // List enumerates all active wips by scanning refs/safegit/wip/ refs.
-func List(safegitDir string) ([]WipInfo, error) {
-	ctx := context.Background()
+func List(ctx context.Context, safegitDir string) ([]WipInfo, error) {
 	out, _, err := git.Run(ctx, "for-each-ref", "--format=%(refname) %(objectname)", "refs/safegit/wip/")
 	if err != nil {
 		return nil, fmt.Errorf("listing wip refs: %w", err)
@@ -209,7 +205,7 @@ func List(safegitDir string) ([]WipInfo, error) {
 		id := strings.TrimPrefix(ref, "refs/safegit/wip/")
 
 		// Parse files from commit message
-		files, _ := parseFilesFromCommit(sha)
+		files, _ := parseFilesFromCommit(ctx, sha)
 
 		// Get commit timestamp
 		tsOut, _, _ := git.Run(ctx, "log", "-1", "--format=%aI", sha)
@@ -245,7 +241,7 @@ func IsLocked(safegitDir, filePath string) (bool, string, error) {
 }
 
 // OrphanLocks finds lock files whose wip ref no longer exists.
-func OrphanLocks(safegitDir string) ([]string, error) {
+func OrphanLocks(ctx context.Context, safegitDir string) ([]string, error) {
 	locksDir := filepath.Join(safegitDir, "wip-locks")
 	entries, err := os.ReadDir(locksDir)
 	if err != nil {
@@ -271,7 +267,7 @@ func OrphanLocks(safegitDir string) ([]string, error) {
 		}
 		// Check if ref still exists
 		ref := "refs/safegit/wip/" + wipID
-		_, err = git.RevParse(ref)
+		_, err = git.RevParse(ctx, ref)
 		if err != nil {
 			orphans = append(orphans, e.Name())
 		}
@@ -280,8 +276,8 @@ func OrphanLocks(safegitDir string) ([]string, error) {
 }
 
 // CleanOrphanLocks removes lock files whose wip ref no longer exists.
-func CleanOrphanLocks(safegitDir string) (int, error) {
-	orphans, err := OrphanLocks(safegitDir)
+func CleanOrphanLocks(ctx context.Context, safegitDir string) (int, error) {
+	orphans, err := OrphanLocks(ctx, safegitDir)
 	if err != nil {
 		return 0, err
 	}
@@ -306,7 +302,7 @@ func generateID() (string, error) {
 }
 
 // createTmpIndex seeds a temporary index from HEAD. Returns path, cleanup func, error.
-func createTmpIndex(safegitDir string) (string, func(), error) {
+func createTmpIndex(ctx context.Context, safegitDir string) (string, func(), error) {
 	tmpDir := filepath.Join(safegitDir, "tmp")
 	var rndBytes [4]byte
 	if _, err := rand.Read(rndBytes[:]); err != nil {
@@ -318,7 +314,7 @@ func createTmpIndex(safegitDir string) (string, func(), error) {
 		return "", nil, err
 	}
 	indexPath := filepath.Join(dir, "index")
-	if err := git.ReadTree(indexPath, "HEAD"); err != nil {
+	if err := git.ReadTree(ctx, indexPath, "HEAD"); err != nil {
 		os.RemoveAll(dir)
 		return "", nil, err
 	}
@@ -347,8 +343,7 @@ func removeLockFile(safegitDir, filePath string) {
 // parseFilesFromCommit reads file paths from a wip commit message.
 // Supports both the new format ("file: " prefix per line) and the legacy
 // format ("files: " with comma-separated list) for backward compatibility.
-func parseFilesFromCommit(commitSHA string) ([]string, error) {
-	ctx := context.Background()
+func parseFilesFromCommit(ctx context.Context, commitSHA string) ([]string, error) {
 	out, _, err := git.Run(ctx, "log", "-1", "--format=%B", commitSHA)
 	if err != nil {
 		return nil, err

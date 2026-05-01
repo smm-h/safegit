@@ -75,7 +75,7 @@ type CommitResult struct {
 // Execute runs the full two-phase commit pipeline.
 // On CAS miss it retries from Phase A up to Config.Commit.CASMaxAttempts times.
 func (p *Pipeline) Execute(ctx context.Context, req CommitRequest) (*CommitResult, error) {
-	repoRoot, err := git.RepoRoot()
+	repoRoot, err := git.RepoRoot(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("resolving repo root: %w", err)
 	}
@@ -83,7 +83,7 @@ func (p *Pipeline) Execute(ctx context.Context, req CommitRequest) (*CommitResul
 	// Resolve target branch ref
 	ref := req.Branch
 	if ref == "" {
-		ref, err = git.HeadRef()
+		ref, err = git.HeadRef(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("resolving HEAD: %w", err)
 		}
@@ -108,7 +108,7 @@ func (p *Pipeline) Execute(ctx context.Context, req CommitRequest) (*CommitResul
 	}
 
 	// Validate and normalize file paths before entering the retry loop
-	absFiles, err := p.resolveFiles(repoRoot, filePaths, req.Force)
+	absFiles, err := p.resolveFiles(ctx, repoRoot, filePaths, req.Force)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +172,7 @@ func (p *Pipeline) tryCommit(
 	// commit landing between index creation and RevParse would cause us
 	// to create a commit whose tree is based on the old HEAD but whose
 	// parent is the new HEAD -- silently dropping the other agent's files.
-	parentSHA, err := git.RevParse(ref)
+	parentSHA, err := git.RevParse(ctx, ref)
 	isRootCommit := false
 	if err != nil {
 		// ref doesn't exist yet -- this is the initial commit (no parent)
@@ -186,7 +186,7 @@ func (p *Pipeline) tryCommit(
 	if isRootCommit {
 		tmpIdx, err = index.NewEmpty(p.SafegitDir)
 	} else {
-		tmpIdx, err = index.New(p.SafegitDir, parentSHA)
+		tmpIdx, err = index.New(ctx, p.SafegitDir, parentSHA)
 	}
 	if err != nil {
 		return nil, false, fmt.Errorf("creating tmp index: %w", err)
@@ -198,26 +198,26 @@ func (p *Pipeline) tryCommit(
 		hunks := fileSpecs[i].Hunks
 		if hunks != nil {
 			// Hunk-level staging
-			if err := stage.StageHunks(tmpIdx.IndexPath, absPath, hunks); err != nil {
+			if err := stage.StageHunks(ctx, tmpIdx.IndexPath, absPath, hunks); err != nil {
 				return nil, false, fmt.Errorf("staging hunks of %s: %w", absPath, err)
 			}
 		} else {
 			// Whole-file staging
-			if err := p.stageFile(tmpIdx.IndexPath, absPath); err != nil {
+			if err := p.stageFile(ctx, tmpIdx.IndexPath, absPath); err != nil {
 				return nil, false, fmt.Errorf("staging %s: %w", absPath, err)
 			}
 		}
 	}
 
 	// Step 3: Build tree
-	treeSHA, err := git.WriteTree(tmpIdx.IndexPath)
+	treeSHA, err := git.WriteTree(ctx, tmpIdx.IndexPath)
 	if err != nil {
 		return nil, false, &CommitError{Code: ExitWriteTree, Message: fmt.Sprintf("write-tree failed: %v", err)}
 	}
 
 	// Check for empty commit (tree unchanged). Root commits are never empty.
 	if !req.AllowEmpty && !isRootCommit {
-		parentTree, err := p.parentTreeSHA(parentSHA)
+		parentTree, err := p.parentTreeSHA(ctx, parentSHA)
 		if err != nil {
 			return nil, false, fmt.Errorf("resolving parent tree: %w", err)
 		}
@@ -227,7 +227,7 @@ func (p *Pipeline) tryCommit(
 	}
 
 	// Step 4: Build commit object
-	commitSHA, err := git.CommitTree(treeSHA, parentSHA, req.Message)
+	commitSHA, err := git.CommitTree(ctx, treeSHA, parentSHA, req.Message)
 	if err != nil {
 		return nil, false, &CommitError{Code: ExitCommitTree, Message: fmt.Sprintf("commit-tree failed: %v", err)}
 	}
@@ -255,7 +255,7 @@ func (p *Pipeline) tryCommit(
 	if lockTimeout <= 0 {
 		lockTimeout = 30 * time.Second
 	}
-	refLock, err := lock.Acquire(repo.SharedSafegitDir(p.SafegitDir), p.SafegitDir, ref, "commit", lockTimeout)
+	refLock, err := lock.Acquire(repo.SharedSafegitDir(ctx, p.SafegitDir), p.SafegitDir, ref, "commit", lockTimeout)
 	if err != nil {
 		return nil, false, fmt.Errorf("acquiring lock on %s: %w", ref, err)
 	}
@@ -264,12 +264,12 @@ func (p *Pipeline) tryCommit(
 	// Step 6: Re-resolve parent (CAS check)
 	if isRootCommit {
 		// For root commits, verify the ref still doesn't exist
-		if _, rerr := git.RevParse(ref); rerr == nil {
+		if _, rerr := git.RevParse(ctx, ref); rerr == nil {
 			// Someone else created the ref while we were building -- retry
 			return nil, true, nil
 		}
 	} else {
-		currentParent, err := git.RevParse(ref)
+		currentParent, err := git.RevParse(ctx, ref)
 		if err != nil {
 			return nil, false, fmt.Errorf("re-resolving %s for CAS: %w", ref, err)
 		}
@@ -279,7 +279,7 @@ func (p *Pipeline) tryCommit(
 	}
 
 	// Step 7: Update ref (CAS for normal commits; create for root commits)
-	if err := git.UpdateRef(ref, commitSHA, parentSHA); err != nil {
+	if err := git.UpdateRef(ctx, ref, commitSHA, parentSHA); err != nil {
 		if isTransientRefError(err) {
 			return nil, true, nil
 		}
@@ -289,8 +289,8 @@ func (p *Pipeline) tryCommit(
 	// Step 8: Sync main index to match HEAD so git status/diff work correctly.
 	// Only when committing to the current branch -- cross-branch commits must
 	// not clobber the main index.
-	if headRef, herr := git.HeadRef(); herr == nil && headRef == ref {
-		if err := git.SyncMainIndex("HEAD"); err != nil {
+	if headRef, herr := git.HeadRef(ctx); herr == nil && headRef == ref {
+		if err := git.SyncMainIndex(ctx, "HEAD"); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
 		}
 	}
@@ -317,7 +317,7 @@ func (p *Pipeline) tryCommit(
 }
 
 // resolveFiles validates and returns absolute paths for all requested files.
-func (p *Pipeline) resolveFiles(repoRoot string, files []string, force bool) ([]string, error) {
+func (p *Pipeline) resolveFiles(ctx context.Context, repoRoot string, files []string, force bool) ([]string, error) {
 	abs := make([]string, 0, len(files))
 	for _, f := range files {
 		var absPath string
@@ -340,7 +340,7 @@ func (p *Pipeline) resolveFiles(repoRoot string, files []string, force bool) ([]
 
 		if !exists {
 			// File doesn't exist on disk -- must be a tracked deletion
-			tracked, err := git.IsTracked(rel)
+			tracked, err := git.IsTracked(ctx, rel)
 			if err != nil {
 				return nil, fmt.Errorf("checking tracked status of %s: %w", f, err)
 			}
@@ -349,7 +349,7 @@ func (p *Pipeline) resolveFiles(repoRoot string, files []string, force bool) ([]
 			}
 		} else if !force {
 			// Check gitignore
-			ignored, _ := git.IsIgnored(rel)
+			ignored, _ := git.IsIgnored(ctx, rel)
 			if ignored {
 				return nil, fmt.Errorf("file %s is gitignored; use --force to override", f)
 			}
@@ -362,16 +362,16 @@ func (p *Pipeline) resolveFiles(repoRoot string, files []string, force bool) ([]
 
 // stageFile stages a single file into the tmp index.
 // Existing files are added; missing-but-tracked files are removed.
-func (p *Pipeline) stageFile(indexPath, absPath string) error {
+func (p *Pipeline) stageFile(ctx context.Context, indexPath, absPath string) error {
 	if _, err := os.Lstat(absPath); os.IsNotExist(err) {
-		return git.RmCached(indexPath, absPath)
+		return git.RmCached(ctx, indexPath, absPath)
 	}
-	return git.AddFile(indexPath, absPath)
+	return git.AddFile(ctx, indexPath, absPath)
 }
 
 // parentTreeSHA returns the tree SHA of a commit.
-func (p *Pipeline) parentTreeSHA(commitSHA string) (string, error) {
-	sha, err := git.RevParse(commitSHA + "^{tree}")
+func (p *Pipeline) parentTreeSHA(ctx context.Context, commitSHA string) (string, error) {
+	sha, err := git.RevParse(ctx, commitSHA+"^{tree}")
 	if err != nil {
 		return "", err
 	}

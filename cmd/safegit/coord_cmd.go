@@ -16,7 +16,8 @@ import (
 // coordGuard runs coord.Check and prints a refusal if dirty (unless force).
 // Returns exit code 5 if dirty, 0 if clean, or 1 on error.
 func coordGuard(flags globalFlags, sgDir, operation string) int {
-	dirty, err := coord.Check(sgDir)
+	ctx := context.Background()
+	dirty, err := coord.Check(ctx, sgDir)
 	if err != nil {
 		if flags.format == formatJSON {
 			emitJSON(operation, nil, &jsonError{Code: 1, Message: err.Error()}, nil)
@@ -49,7 +50,8 @@ func coordGuard(flags globalFlags, sgDir, operation string) int {
 
 // syncMainIndex runs git read-tree HEAD to keep the main index in sync after tree mutations.
 func syncMainIndex(flags globalFlags, op string) {
-	if err := git.SyncMainIndex("HEAD"); err != nil {
+	ctx := context.Background()
+	if err := git.SyncMainIndex(ctx, "HEAD"); err != nil {
 		if !flags.quiet {
 			fmt.Fprintf(os.Stderr, "warning: failed to sync main index after %s: %v\n", op, err)
 		}
@@ -75,7 +77,7 @@ func runCheckout(flags globalFlags, args []string) int {
 
 	// Capture old HEAD for oplog
 	ctx := context.Background()
-	oldHead, _ := git.RevParse("HEAD")
+	oldHead, _ := git.RevParse(ctx, "HEAD")
 
 	stdout, stderr, err := git.Run(ctx, append([]string{"checkout"}, args...)...)
 	if stdout != "" {
@@ -90,7 +92,7 @@ func runCheckout(flags globalFlags, args []string) int {
 
 	syncMainIndex(flags, "checkout")
 
-	newHead, _ := git.RevParse("HEAD")
+	newHead, _ := git.RevParse(ctx, "HEAD")
 	_ = oplog.Append(sgDir, oplog.Entry{
 		Op: "checkout",
 		Extra: map[string]interface{}{
@@ -211,7 +213,7 @@ func runMerge(flags globalFlags, args []string) int {
 
 	syncMainIndex(flags, "merge")
 
-	resultSHA, _ := git.RevParse("HEAD")
+	resultSHA, _ := git.RevParse(ctx, "HEAD")
 	_ = oplog.Append(sgDir, oplog.Entry{
 		Op: "merge",
 		Extra: map[string]interface{}{

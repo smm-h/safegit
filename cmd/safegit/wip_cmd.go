@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -18,7 +19,8 @@ func runWip(flags globalFlags, args []string) {
 
 	// "wip list" subcommand
 	if len(args) > 0 && args[0] == "list" {
-		wips, err := wip.List(sgDir)
+		ctx := context.Background()
+		wips, err := wip.List(ctx, sgDir)
 		if err != nil {
 			die(flags, "wip",1, err.Error())
 		}
@@ -41,7 +43,8 @@ func runWip(flags globalFlags, args []string) {
 		die(flags, "wip",2, "usage: safegit wip <file1> [<file2> ...] | safegit wip list")
 	}
 
-	result, err := wip.Create(sgDir, args)
+	ctx := context.Background()
+	result, err := wip.Create(ctx, sgDir, args)
 	if err != nil {
 		die(flags, "wip",1, err.Error())
 	}
@@ -69,8 +72,9 @@ func runUnwip(flags globalFlags, args []string) {
 		die(flags, "wip",2, "usage: safegit unwip <wip-id>")
 	}
 
+	ctx := context.Background()
 	wipID := args[0]
-	restored, err := wip.Restore(sgDir, wipID)
+	restored, err := wip.Restore(ctx, sgDir, wipID)
 	if err != nil {
 		die(flags, "wip",1, err.Error())
 	}

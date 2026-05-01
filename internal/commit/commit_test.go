@@ -24,7 +24,7 @@ func newPipeline(sgDir string) *Pipeline {
 // commitLandsOnBranch verifies that ref points to sha.
 func commitLandsOnBranch(t *testing.T, ref, sha string) {
 	t.Helper()
-	got, err := git.RevParse(ref)
+	got, err := git.RevParse(context.Background(), ref)
 	if err != nil {
 		t.Fatalf("rev-parse %s: %v", ref, err)
 	}
@@ -296,7 +296,7 @@ func TestDryRun(t *testing.T) {
 	}
 
 	// Capture the branch tip before the dry run
-	beforeSHA, err := git.RevParse("refs/heads/main")
+	beforeSHA, err := git.RevParse(context.Background(), "refs/heads/main")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestDryRun(t *testing.T) {
 		t.Errorf("SHA = %q, want 40-char hex", result.SHA)
 	}
 
-	afterSHA, err := git.RevParse("refs/heads/main")
+	afterSHA, err := git.RevParse(context.Background(), "refs/heads/main")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -678,7 +678,7 @@ func TestCommitRefusesWipLocked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := wip.Create(sgDir, []string{"seed.txt"})
+	_, err := wip.Create(context.Background(), sgDir, []string{"seed.txt"})
 	if err != nil {
 		t.Fatalf("wip.Create: %v", err)
 	}

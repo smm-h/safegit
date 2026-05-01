@@ -1,6 +1,7 @@
 package stage
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -52,13 +53,13 @@ func TestExtractHunks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tmpIdx, err := index.New(sgDir, "HEAD")
+	tmpIdx, err := index.New(context.Background(), sgDir, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tmpIdx.Cleanup()
 
-	header, hunks, err := ExtractHunks(tmpIdx.IndexPath, "seed.txt")
+	header, hunks, err := ExtractHunks(context.Background(), tmpIdx.IndexPath, "seed.txt")
 	if err != nil {
 		t.Fatalf("ExtractHunks: %v", err)
 	}
@@ -164,14 +165,14 @@ func TestStageSpecificHunks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tmpIdx, err := index.New(sgDir, "HEAD")
+	tmpIdx, err := index.New(context.Background(), sgDir, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tmpIdx.Cleanup()
 
 	// Verify we get multiple hunks
-	_, hunks, err := ExtractHunks(tmpIdx.IndexPath, "multi.txt")
+	_, hunks, err := ExtractHunks(context.Background(), tmpIdx.IndexPath, "multi.txt")
 	if err != nil {
 		t.Fatalf("ExtractHunks: %v", err)
 	}
@@ -181,12 +182,12 @@ func TestStageSpecificHunks(t *testing.T) {
 
 	// Stage only hunk 1 and the last hunk
 	selectedHunks := []int{1, len(hunks)}
-	if err := StageHunks(tmpIdx.IndexPath, "multi.txt", selectedHunks); err != nil {
+	if err := StageHunks(context.Background(), tmpIdx.IndexPath, "multi.txt", selectedHunks); err != nil {
 		t.Fatalf("StageHunks: %v", err)
 	}
 
 	// After staging hunks 1 and last, the remaining diff should only show the middle hunk(s)
-	_, remainingHunks, err := ExtractHunks(tmpIdx.IndexPath, "multi.txt")
+	_, remainingHunks, err := ExtractHunks(context.Background(), tmpIdx.IndexPath, "multi.txt")
 	if err != nil {
 		t.Fatalf("ExtractHunks after partial stage: %v", err)
 	}
@@ -223,13 +224,13 @@ func TestBinaryFileReject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tmpIdx, err := index.New(sgDir, "HEAD")
+	tmpIdx, err := index.New(context.Background(), sgDir, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tmpIdx.Cleanup()
 
-	_, _, err = ExtractHunks(tmpIdx.IndexPath, "binary.bin")
+	_, _, err = ExtractHunks(context.Background(), tmpIdx.IndexPath, "binary.bin")
 	if err == nil {
 		t.Fatal("expected error for binary file, got nil")
 	}

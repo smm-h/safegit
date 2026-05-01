@@ -1,6 +1,7 @@
 package wip
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,7 +21,7 @@ func TestCreateAndList(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	info, err := Create(sgDir, []string{"wip-file.txt"})
+	info, err := Create(context.Background(), sgDir, []string{"wip-file.txt"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -41,7 +42,7 @@ func TestCreateAndList(t *testing.T) {
 	}
 
 	// Verify it appears in list
-	wips, err := List(sgDir)
+	wips, err := List(context.Background(), sgDir)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -65,7 +66,7 @@ func TestRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	info, err := Create(sgDir, []string{"seed.txt"})
+	info, err := Create(context.Background(), sgDir, []string{"seed.txt"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -80,7 +81,7 @@ func TestRestore(t *testing.T) {
 	}
 
 	// Restore the wip
-	restored, err := Restore(sgDir, info.ID)
+	restored, err := Restore(context.Background(), sgDir, info.ID)
 	if err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
@@ -98,7 +99,7 @@ func TestRestore(t *testing.T) {
 	}
 
 	// Wip ref should be gone
-	wips, err := List(sgDir)
+	wips, err := List(context.Background(), sgDir)
 	if err != nil {
 		t.Fatalf("List after restore: %v", err)
 	}
@@ -122,7 +123,7 @@ func TestLockConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := Create(sgDir, []string{"seed.txt"})
+	_, err := Create(context.Background(), sgDir, []string{"seed.txt"})
 	if err != nil {
 		t.Fatalf("first Create: %v", err)
 	}
@@ -132,7 +133,7 @@ func TestLockConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = Create(sgDir, []string{"seed.txt"})
+	_, err = Create(context.Background(), sgDir, []string{"seed.txt"})
 	if err == nil {
 		t.Fatal("expected error for lock conflict, got nil")
 	}
@@ -150,7 +151,7 @@ func TestRestoreAfterModification(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	info, err := Create(sgDir, []string{"seed.txt"})
+	info, err := Create(context.Background(), sgDir, []string{"seed.txt"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -161,7 +162,7 @@ func TestRestoreAfterModification(t *testing.T) {
 	}
 
 	// Restore should succeed and overwrite with wip content
-	restored, err := Restore(sgDir, info.ID)
+	restored, err := Restore(context.Background(), sgDir, info.ID)
 	if err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
@@ -188,7 +189,7 @@ func TestOrphanLocks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	orphans, err := OrphanLocks(sgDir)
+	orphans, err := OrphanLocks(context.Background(), sgDir)
 	if err != nil {
 		t.Fatalf("OrphanLocks: %v", err)
 	}
@@ -197,7 +198,7 @@ func TestOrphanLocks(t *testing.T) {
 	}
 
 	// Clean them
-	cleaned, err := CleanOrphanLocks(sgDir)
+	cleaned, err := CleanOrphanLocks(context.Background(), sgDir)
 	if err != nil {
 		t.Fatalf("CleanOrphanLocks: %v", err)
 	}
@@ -206,7 +207,7 @@ func TestOrphanLocks(t *testing.T) {
 	}
 
 	// Verify no more orphans
-	orphans, err = OrphanLocks(sgDir)
+	orphans, err = OrphanLocks(context.Background(), sgDir)
 	if err != nil {
 		t.Fatalf("OrphanLocks after clean: %v", err)
 	}
@@ -219,7 +220,7 @@ func TestListEmpty(t *testing.T) {
 	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
 	testutil.Chdir(t, dir)
 
-	wips, err := List(sgDir)
+	wips, err := List(context.Background(), sgDir)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -256,7 +257,7 @@ func TestMultipleFiles(t *testing.T) {
 		}
 	}
 
-	info, err := Create(sgDir, []string{"a.txt", "b.txt"})
+	info, err := Create(context.Background(), sgDir, []string{"a.txt", "b.txt"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -276,7 +277,7 @@ func TestMultipleFiles(t *testing.T) {
 	}
 
 	// Restore
-	restored, err := Restore(sgDir, info.ID)
+	restored, err := Restore(context.Background(), sgDir, info.ID)
 	if err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
@@ -301,7 +302,7 @@ func TestRestoreNonexistent(t *testing.T) {
 	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
 	testutil.Chdir(t, dir)
 
-	_, err := Restore(sgDir, "deadbeef")
+	_, err := Restore(context.Background(), sgDir, "deadbeef")
 	if err == nil {
 		t.Fatal("expected error for nonexistent wip, got nil")
 	}
@@ -320,7 +321,7 @@ func TestIsLockedAfterCreate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	info, err := Create(sgDir, []string{"seed.txt"})
+	info, err := Create(context.Background(), sgDir, []string{"seed.txt"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}

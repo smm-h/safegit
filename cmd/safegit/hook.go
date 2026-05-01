@@ -201,12 +201,12 @@ func hookInstall(flags globalFlags, args []string) int {
 
 // synthesizeHookStdin builds hook stdin from the current branch's state.
 func synthesizeHookStdin(ctx context.Context) ([]byte, error) {
-	headRef, err := git.HeadRef()
+	headRef, err := git.HeadRef(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("cannot determine current branch (detached HEAD?)")
 	}
 
-	localSHA, err := git.RevParse(headRef)
+	localSHA, err := git.RevParse(ctx, headRef)
 	if err != nil {
 		return nil, fmt.Errorf("resolving %s: %w", headRef, err)
 	}

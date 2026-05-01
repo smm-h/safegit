@@ -20,11 +20,10 @@ type DirtyState struct {
 }
 
 // Check inspects the working tree and wip state. Returns nil if clean.
-func Check(safegitDir string) (*DirtyState, error) {
+func Check(ctx context.Context, safegitDir string) (*DirtyState, error) {
 	var ds DirtyState
 
 	// 1. Parse git status --porcelain for modified/untracked files
-	ctx := context.Background()
 	stdout, _, err := git.Run(ctx, "status", "--porcelain", "--untracked-files=normal")
 	if err != nil {
 		return nil, fmt.Errorf("running git status: %w", err)
@@ -56,7 +55,7 @@ func Check(safegitDir string) (*DirtyState, error) {
 		}
 		// Read the wip commit message to find which files it covers
 		ref := "refs/safegit/wip/" + wipID
-		files := wipFilesFromRef(ref)
+		files := wipFilesFromRef(ctx, ref)
 		entry := ref
 		if files != "" {
 			entry = ref + "  (" + files + ")"
@@ -99,9 +98,8 @@ func (d *DirtyState) Refuse(operation string) string {
 
 // wipFilesFromRef reads file paths from a wip commit message.
 // Supports both new ("file: " per line) and legacy ("files: " comma-separated) formats.
-func wipFilesFromRef(ref string) string {
-	ctx := context.Background()
-	sha, err := git.RevParse(ref)
+func wipFilesFromRef(ctx context.Context, ref string) string {
+	sha, err := git.RevParse(ctx, ref)
 	if err != nil {
 		return ""
 	}
