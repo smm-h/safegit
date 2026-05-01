@@ -219,8 +219,8 @@ func (c *Config) Validate() error {
 		{"log.maxSizeMB", c.Log.MaxSizeMB},
 	}
 	for _, ch := range checks {
-		if ch.val < 0 {
-			return fmt.Errorf("%s must not be negative (got %d)", ch.name, ch.val)
+		if ch.val <= 0 {
+			return fmt.Errorf("%s must be positive (got %d)", ch.name, ch.val)
 		}
 	}
 	return nil
