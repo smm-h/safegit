@@ -18,6 +18,21 @@ import (
 	"time"
 )
 
+// stdout and stderr are the default output writers for hook execution.
+// Tests can override them via SetOutput to capture output.
+var (
+	stdout io.Writer = os.Stdout
+	stderr io.Writer = os.Stderr
+)
+
+// SetOutput overrides the package-level stdout and stderr writers.
+// Returns a restore function that resets them to their previous values.
+func SetOutput(out, err io.Writer) func() {
+	prevOut, prevErr := stdout, stderr
+	stdout, stderr = out, err
+	return func() { stdout, stderr = prevOut, prevErr }
+}
+
 // HookResult holds the outcome of running a single hook.
 type HookResult struct {
 	Name     string        `json:"name"`
@@ -40,7 +55,7 @@ func Discover(gitDir string) ([]string, error) {
 		if isExecutable(info) {
 			hooks = append(hooks, single)
 		} else {
-			fmt.Fprintf(os.Stderr, "warning: %s exists but is not executable, skipping\n", single)
+			fmt.Fprintf(stderr, "warning: %s exists but is not executable, skipping\n", single)
 		}
 	}
 
@@ -78,7 +93,7 @@ func Discover(gitDir string) ([]string, error) {
 		if isExecutable(info) {
 			hooks = append(hooks, p)
 		} else {
-			fmt.Fprintf(os.Stderr, "warning: %s is not executable, skipping\n", p)
+			fmt.Fprintf(stderr, "warning: %s is not executable, skipping\n", p)
 		}
 	}
 
@@ -107,7 +122,7 @@ func Run(ctx context.Context, gitDir string, stdin []byte, timeoutSec int, env [
 	return results, nil
 }
 
-// runOne executes a single hook, streaming stdout/stderr to os.Stdout/os.Stderr.
+// runOne executes a single hook, streaming stdout/stderr to the package-level writers.
 // Respects timeout: SIGTERM then SIGKILL after 5s grace.
 func runOne(ctx context.Context, hookPath string, stdin []byte, timeoutSec int, env []string) HookResult {
 	name := filepath.Base(hookPath)
@@ -115,7 +130,7 @@ func runOne(ctx context.Context, hookPath string, stdin []byte, timeoutSec int, 
 
 	cmd := exec.Command(hookPath)
 	cmd.Stdin = strings.NewReader(string(stdin))
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = stderr
 	cmd.Dir = filepath.Dir(hookPath)
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
@@ -147,16 +162,16 @@ func runOne(ctx context.Context, hookPath string, stdin []byte, timeoutSec int, 
 				timeoutCh <- override
 			} else {
 				timeoutCh <- 0
-				fmt.Fprint(os.Stdout, firstLine)
+				fmt.Fprint(stdout, firstLine)
 			}
 		} else {
 			timeoutCh <- 0
 			if firstLine != "" {
-				fmt.Fprint(os.Stdout, firstLine)
+				fmt.Fprint(stdout, firstLine)
 			}
 		}
 		// Stream remaining stdout
-		io.Copy(os.Stdout, reader)
+		io.Copy(stdout, reader)
 	}()
 
 	// Determine effective timeout: use override if received quickly, else default
