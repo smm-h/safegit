@@ -384,8 +384,9 @@ func TestKillMidCommit(t *testing.T) {
 	lockDir := filepath.Join(dir, ".git", "safegit", "locks", "refs", "heads")
 	os.MkdirAll(lockDir, 0755)
 	lockFile := filepath.Join(lockDir, "main.lock")
-	lockContent := fmt.Sprintf("pid=%d\nts=%s\nop=commit\nhost=test\n",
-		helperPID, time.Now().UTC().Format(time.RFC3339Nano))
+	hostname, _ := os.Hostname()
+	lockContent := fmt.Sprintf("pid=%d\nts=%s\nop=commit\nhost=%s\n",
+		helperPID, time.Now().UTC().Format(time.RFC3339Nano), hostname)
 	if err := os.WriteFile(lockFile, []byte(lockContent), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -499,8 +500,9 @@ func TestStaleLockReplace(t *testing.T) {
 	lockDir := filepath.Join(dir, ".git", "safegit", "locks", "refs", "heads")
 	os.MkdirAll(lockDir, 0755)
 	lockFile := filepath.Join(lockDir, "main.lock")
-	lockContent := fmt.Sprintf("pid=%d\nts=%s\nop=commit\nhost=test\n",
-		deadPID, time.Now().Add(-1*time.Hour).UTC().Format(time.RFC3339Nano))
+	hostname2, _ := os.Hostname()
+	lockContent := fmt.Sprintf("pid=%d\nts=%s\nop=commit\nhost=%s\n",
+		deadPID, time.Now().Add(-1*time.Hour).UTC().Format(time.RFC3339Nano), hostname2)
 	os.WriteFile(lockFile, []byte(lockContent), 0644)
 
 	// Time the commit -- should be fast (immediate stale detection + replacement)
