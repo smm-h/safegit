@@ -150,9 +150,14 @@ func Restore(ctx context.Context, safegitDir, wipID string) ([]string, error) {
 		return nil, fmt.Errorf("parsing wip commit: %w", err)
 	}
 
-	// Restore files from the wip commit's tree to the working tree.
-	// No clean-check needed: wip-locks prevent commits to these files,
-	// so the only changes since wip-create are the user's own edits.
+	// Before restoring, verify no file has been modified since the wip was
+	// created. Compare working tree against the wip snapshot (not HEAD).
+	// If any file differs, another agent (or the same agent) edited it after
+	// wipping, and blindly overwriting would destroy that work.
+	if err := verifyUnchangedSinceWip(ctx, wipSHA, files); err != nil {
+		return nil, err
+	}
+
 	checkoutArgs := append([]string{"checkout", wipSHA, "--"}, files...)
 	_, _, err = git.Run(ctx, checkoutArgs...)
 	if err != nil {
@@ -338,6 +343,40 @@ func writeLockFile(safegitDir, filePath, wipID string) error {
 func removeLockFile(safegitDir, filePath string) {
 	lp := lockFilePath(safegitDir, filePath)
 	os.Remove(lp)
+}
+
+// verifyUnchangedSinceWip checks that each file's working-tree content
+// matches the wip snapshot. If any file differs, someone edited it after
+// the wip was created, and restoring would destroy that work.
+func verifyUnchangedSinceWip(ctx context.Context, wipSHA string, files []string) error {
+	var modified []string
+	for _, f := range files {
+		// Get the wip snapshot content
+		wipContent, _, err := git.Run(ctx, "show", wipSHA+":"+f)
+		if err != nil {
+			continue
+		}
+
+		// Read current working tree content
+		diskContent, err := os.ReadFile(f)
+		if err != nil {
+			if os.IsNotExist(err) {
+				// File was deleted since wip -- that's a modification
+				modified = append(modified, f+" (deleted)")
+				continue
+			}
+			continue
+		}
+
+		if string(diskContent) != wipContent {
+			modified = append(modified, f)
+		}
+	}
+	if len(modified) > 0 {
+		return fmt.Errorf("refusing to restore: files modified since wip: %s (edits would be lost)",
+			strings.Join(modified, ", "))
+	}
+	return nil
 }
 
 // parseFilesFromCommit reads file paths from a wip commit message.

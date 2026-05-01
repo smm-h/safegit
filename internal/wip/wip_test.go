@@ -142,7 +142,7 @@ func TestLockConflict(t *testing.T) {
 	}
 }
 
-func TestRestoreAfterModification(t *testing.T) {
+func TestRestoreRefusedAfterModification(t *testing.T) {
 	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
 	testutil.Chdir(t, dir)
 
@@ -156,27 +156,27 @@ func TestRestoreAfterModification(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Modify seed.txt again after wip
+	// Modify seed.txt again after wip (simulates another agent editing)
 	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("different changes\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Restore should succeed and overwrite with wip content
-	restored, err := Restore(context.Background(), sgDir, info.ID)
-	if err != nil {
-		t.Fatalf("Restore: %v", err)
+	// Restore should refuse (file modified since wip)
+	_, err = Restore(context.Background(), sgDir, info.ID)
+	if err == nil {
+		t.Fatal("expected error for modified file, got nil")
 	}
-	if len(restored) != 1 {
-		t.Errorf("restored = %v, want 1 file", restored)
+	if !strings.Contains(err.Error(), "modified since wip") {
+		t.Errorf("error = %q, want to contain 'modified since wip'", err.Error())
 	}
 
-	// seed.txt should have the wip content
+	// seed.txt should still have the post-wip edits (not overwritten)
 	content, err := os.ReadFile(filepath.Join(dir, "seed.txt"))
 	if err != nil {
 		t.Fatalf("reading seed.txt: %v", err)
 	}
-	if string(content) != "wip content\n" {
-		t.Errorf("seed.txt = %q, want %q", string(content), "wip content\n")
+	if string(content) != "different changes\n" {
+		t.Errorf("seed.txt = %q, want %q (edits should be preserved)", string(content), "different changes\n")
 	}
 }
 
