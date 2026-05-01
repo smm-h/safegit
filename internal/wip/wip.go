@@ -32,6 +32,13 @@ func Create(safegitDir string, files []string) (*WipInfo, error) {
 		return nil, fmt.Errorf("no files specified")
 	}
 
+	// Reject filenames with newlines (they break the commit message format)
+	for _, f := range files {
+		if strings.ContainsRune(f, '\n') {
+			return nil, fmt.Errorf("filename %q contains a newline (unsupported)", f)
+		}
+	}
+
 	// Validate none of the files are already wip-locked
 	for _, f := range files {
 		locked, wipID, err := IsLocked(safegitDir, f)
