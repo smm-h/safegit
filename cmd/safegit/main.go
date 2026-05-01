@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -25,7 +26,19 @@ import (
 )
 
 // Set via -ldflags "-X main.version=..." at build time.
-var version = "dev"
+// Falls back to the module version embedded by go install.
+var version = ""
+
+func init() {
+	if version != "" {
+		return
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "(devel)" {
+		version = info.Main.Version
+	} else {
+		version = "dev"
+	}
+}
 
 // output format for the entire CLI
 type outputFormat int
