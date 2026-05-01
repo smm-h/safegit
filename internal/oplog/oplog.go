@@ -45,7 +45,7 @@ func Append(safegitDir string, entry Entry) error {
 		return fmt.Errorf("marshaling log entry: %w", err)
 	}
 
-	line := append(data, '\n')
+	line := append(data[:len(data):len(data)], '\n')
 	if len(line) > maxLineBytes {
 		return fmt.Errorf("log entry exceeds %d bytes (%d bytes); truncate message or extra fields", maxLineBytes, len(line))
 	}
