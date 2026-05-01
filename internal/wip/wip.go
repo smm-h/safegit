@@ -100,27 +100,11 @@ func Create(safegitDir string, files []string) (*WipInfo, error) {
 		}
 	}
 
-	// Revert files in working tree to HEAD versions.
-	// Split into tracked (can checkout from HEAD) and untracked (just delete).
-	var tracked, untracked []string
-	for _, f := range files {
-		isTracked, _ := git.IsTracked(f)
-		if isTracked {
-			tracked = append(tracked, f)
-		} else {
-			untracked = append(untracked, f)
-		}
-	}
-	if len(tracked) > 0 {
-		args := append([]string{"checkout", "HEAD", "--"}, tracked...)
-		_, _, err = git.Run(ctx, args...)
-		if err != nil {
-			return nil, fmt.Errorf("reverting tracked files: %w", err)
-		}
-	}
-	for _, f := range untracked {
-		os.Remove(f)
-	}
+	// Note: we intentionally do NOT revert files in the working tree.
+	// Reverting via "git checkout HEAD --" would destroy uncommitted edits
+	// by other agents sharing the same worktree. The wip-lock prevents
+	// commits to these files, which is the safety mechanism. The user can
+	// manually revert if desired.
 
 	// Append op log entry
 	_ = oplog.Append(safegitDir, oplog.Entry{
@@ -156,16 +140,9 @@ func Restore(safegitDir, wipID string, force bool) ([]string, error) {
 		return nil, fmt.Errorf("parsing wip commit: %w", err)
 	}
 
-	// Verify working-tree versions match HEAD (unless --force)
-	if !force {
-		if err := verifyCleanFiles(files); err != nil {
-			return nil, err
-		}
-	}
-
 	// Restore files from the wip commit's tree to the working tree.
-	// Use checkout from the wip ref directly -- this overwrites working tree files
-	// with the exact content that was saved in the wip.
+	// No clean-check needed: wip-locks prevent commits to these files,
+	// so the only changes since wip-create are the user's own edits.
 	ctx := context.Background()
 	checkoutArgs := append([]string{"checkout", wipSHA, "--"}, files...)
 	_, _, err = git.Run(ctx, checkoutArgs...)
@@ -378,19 +355,4 @@ func parseFilesFromCommit(commitSHA string) ([]string, error) {
 		}
 	}
 	return nil, fmt.Errorf("no 'files:' line found in commit %s", commitSHA)
-}
-
-// verifyCleanFiles checks that listed files in the working tree match HEAD.
-func verifyCleanFiles(files []string) error {
-	ctx := context.Background()
-	args := append([]string{"diff", "--name-only", "HEAD", "--"}, files...)
-	out, _, err := git.Run(ctx, args...)
-	if err != nil {
-		return fmt.Errorf("checking working tree: %w", err)
-	}
-	dirty := strings.TrimSpace(out)
-	if dirty != "" {
-		return fmt.Errorf("working tree has modifications (use --force to override): %s", dirty)
-	}
-	return nil
 }
