@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3
+
+- Fix goreleaser config: add `main: ./cmd/safegit` so release binaries build correctly
+- Drop Windows from build targets (Unix-only syscalls in lock, oplog, index, hooks packages)
+- Fix push JSON output: hook failures now emit `ok: false` with error details
+- Fix CI: skip stress tests with `-short` to prevent flaky failures
+
 ## 0.1.2
 
 - Fix Windows build: extract NFS filesystem check into platform-specific files

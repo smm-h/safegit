@@ -127,7 +127,7 @@ func runPush(flags globalFlags, args []string) int {
 		for _, hr := range hookResults {
 			if hr.TimedOut {
 				if flags.format == formatJSON {
-					emitJSON("push", pushResult{Remote: remote, Refs: refs, HooksRun: hookResults}, nil, nil)
+					emitJSON("push", nil, &jsonError{Code: exitPushHookTimeout, Message: fmt.Sprintf("hook %s timed out after %v", hr.Name, hr.Duration)}, nil)
 				} else {
 					fmt.Fprintf(os.Stderr, "hook %s timed out after %v\n", hr.Name, hr.Duration)
 				}
@@ -135,7 +135,7 @@ func runPush(flags globalFlags, args []string) int {
 			}
 			if hr.ExitCode != 0 {
 				if flags.format == formatJSON {
-					emitJSON("push", pushResult{Remote: remote, Refs: refs, HooksRun: hookResults}, nil, nil)
+					emitJSON("push", nil, &jsonError{Code: exitPushHookFailed, Message: fmt.Sprintf("hook %s failed (exit %d)", hr.Name, hr.ExitCode)}, nil)
 				} else {
 					fmt.Fprintf(os.Stderr, "hook %s failed (exit %d)\n", hr.Name, hr.ExitCode)
 				}
