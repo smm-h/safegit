@@ -268,9 +268,12 @@ func (p *Pipeline) tryCommit(
 	}
 
 	// Step 10: Sync main index to match HEAD so git status/diff work correctly.
-	// Non-fatal: the commit already landed, so a read-tree failure is just a warning.
-	if err := git.SyncMainIndex("HEAD"); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
+	// Only when committing to the current branch -- cross-branch commits must
+	// not clobber the main index.
+	if headRef, herr := git.HeadRef(); herr == nil && headRef == ref {
+		if err := git.SyncMainIndex("HEAD"); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
+		}
 	}
 
 	// Step 11: Lock released by defer
