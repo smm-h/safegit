@@ -122,6 +122,11 @@ func Run(ctx context.Context, gitDir string, stdin []byte, timeoutSec int, env [
 	return results, nil
 }
 
+// RunSingle executes a single hook by path.
+func RunSingle(ctx context.Context, hookPath string, stdin []byte, timeoutSec int, env []string) HookResult {
+	return runOne(ctx, hookPath, stdin, timeoutSec, env)
+}
+
 // runOne executes a single hook, streaming stdout/stderr to the package-level writers.
 // Respects timeout: SIGTERM then SIGKILL after 5s grace.
 func runOne(ctx context.Context, hookPath string, stdin []byte, timeoutSec int, env []string) HookResult {

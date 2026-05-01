@@ -126,37 +126,18 @@ func hookRun(flags globalFlags, args []string) int {
 			return 1
 		}
 
-		// Run just that one hook by temporarily injecting it
 		fmt.Printf("running hook: %s\n", name)
-		results, rErr := hooks.Run(ctx, gitDir, hookStdin, timeoutSec, hookEnv)
-		if rErr != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", rErr)
-			return 1
+		r := hooks.RunSingle(ctx, hookPath, hookStdin, timeoutSec, hookEnv)
+		if r.TimedOut {
+			fmt.Fprintf(os.Stderr, "hook %s timed out\n", name)
+			return 21
 		}
-
-		// Find the specific result
-		for _, r := range results {
-			if r.Name == name {
-				if r.TimedOut {
-					fmt.Fprintf(os.Stderr, "hook %s timed out\n", name)
-					return 21
-				}
-				if r.ExitCode != 0 {
-					fmt.Fprintf(os.Stderr, "hook %s failed (exit %d)\n", name, r.ExitCode)
-					return 20
-				}
-				fmt.Printf("hook %s passed (%v)\n", name, r.Duration)
-				return 0
-			}
-			// If an earlier hook in the chain failed, report it
-			if r.ExitCode != 0 {
-				fmt.Fprintf(os.Stderr, "hook %s failed before reaching %s\n", r.Name, name)
-				return 20
-			}
+		if r.ExitCode != 0 {
+			fmt.Fprintf(os.Stderr, "hook %s failed (exit %d)\n", name, r.ExitCode)
+			return 20
 		}
-
-		fmt.Fprintf(os.Stderr, "hook %q was not reached during execution\n", name)
-		return 1
+		fmt.Printf("hook %s passed (%v)\n", name, r.Duration)
+		return 0
 	}
 
 	// No name -- run all hooks
