@@ -280,6 +280,9 @@ func (p *Pipeline) tryCommit(
 
 	// Step 7: Update ref (CAS for normal commits; create for root commits)
 	if err := git.UpdateRef(ref, commitSHA, parentSHA); err != nil {
+		if isTransientRefError(err) {
+			return nil, true, nil
+		}
 		return nil, false, fmt.Errorf("update-ref failed: %w", err)
 	}
 
@@ -373,4 +376,15 @@ func (p *Pipeline) parentTreeSHA(commitSHA string) (string, error) {
 		return "", err
 	}
 	return sha, nil
+}
+
+// isTransientRefError returns true if the error from git update-ref is a
+// transient lock contention issue (git's own ref lock, not safegit's) that
+// should be retried rather than treated as a hard failure.
+func isTransientRefError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "cannot lock ref") || strings.Contains(msg, "Unable to create")
 }
