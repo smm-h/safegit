@@ -80,7 +80,7 @@ func TestRestore(t *testing.T) {
 	}
 
 	// Restore the wip
-	restored, err := Restore(sgDir, info.ID, false)
+	restored, err := Restore(sgDir, info.ID)
 	if err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestRestoreAfterModification(t *testing.T) {
 	}
 
 	// Restore should succeed and overwrite with wip content
-	restored, err := Restore(sgDir, info.ID, false)
+	restored, err := Restore(sgDir, info.ID)
 	if err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestMultipleFiles(t *testing.T) {
 	}
 
 	// Restore
-	restored, err := Restore(sgDir, info.ID, false)
+	restored, err := Restore(sgDir, info.ID)
 	if err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestRestoreNonexistent(t *testing.T) {
 	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
 	testutil.Chdir(t, dir)
 
-	_, err := Restore(sgDir, "deadbeef", false)
+	_, err := Restore(sgDir, "deadbeef")
 	if err == nil {
 		t.Fatal("expected error for nonexistent wip, got nil")
 	}
