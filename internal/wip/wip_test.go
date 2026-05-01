@@ -87,9 +87,9 @@ func TestCreateAndList(t *testing.T) {
 		t.Errorf("Ref = %q, want refs/safegit/wip/%s", info.Ref, info.ID)
 	}
 
-	// Untracked file should be deleted after wip (not in HEAD)
-	if _, err := os.Stat(filepath.Join(dir, "wip-file.txt")); !os.IsNotExist(err) {
-		t.Error("wip-file.txt should be deleted after Create (not tracked in HEAD)")
+	// File should still exist after wip (no longer reverted to avoid clobbering other agents)
+	if _, err := os.Stat(filepath.Join(dir, "wip-file.txt")); os.IsNotExist(err) {
+		t.Error("wip-file.txt should still exist after Create")
 	}
 
 	// Verify it appears in list
@@ -122,13 +122,13 @@ func TestRestore(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// After create, seed.txt should be reverted to HEAD
+	// After create, seed.txt should still have the modified content (no revert)
 	content, err := os.ReadFile(filepath.Join(dir, "seed.txt"))
 	if err != nil {
 		t.Fatalf("reading seed.txt after create: %v", err)
 	}
-	if string(content) != "seed\n" {
-		t.Errorf("seed.txt after create = %q, want %q", string(content), "seed\n")
+	if string(content) != "modified seed\n" {
+		t.Errorf("seed.txt after create = %q, want %q", string(content), "modified seed\n")
 	}
 
 	// Restore the wip
@@ -193,7 +193,7 @@ func TestLockConflict(t *testing.T) {
 	}
 }
 
-func TestRestoreForce(t *testing.T) {
+func TestRestoreAfterModification(t *testing.T) {
 	dir, _, sgDir := initTestRepo(t)
 	chdir(t, dir)
 
@@ -207,30 +207,21 @@ func TestRestoreForce(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Modify seed.txt again (so working tree differs from HEAD)
+	// Modify seed.txt again after wip
 	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("different changes\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Restore without force should fail
-	_, err = Restore(sgDir, info.ID, false)
-	if err == nil {
-		t.Fatal("expected error for dirty working tree, got nil")
-	}
-	if !strings.Contains(err.Error(), "modifications") {
-		t.Errorf("error = %q, want to contain 'modifications'", err.Error())
-	}
-
-	// Restore with force should succeed
-	restored, err := Restore(sgDir, info.ID, true)
+	// Restore should succeed and overwrite with wip content
+	restored, err := Restore(sgDir, info.ID, false)
 	if err != nil {
-		t.Fatalf("Restore --force: %v", err)
+		t.Fatalf("Restore: %v", err)
 	}
 	if len(restored) != 1 {
 		t.Errorf("restored = %v, want 1 file", restored)
 	}
 
-	// seed.txt should have the wip content (overwriting the local changes)
+	// seed.txt should have the wip content
 	content, err := os.ReadFile(filepath.Join(dir, "seed.txt"))
 	if err != nil {
 		t.Fatalf("reading seed.txt: %v", err)
@@ -325,14 +316,14 @@ func TestMultipleFiles(t *testing.T) {
 		t.Errorf("Files = %v, want 2 files", info.Files)
 	}
 
-	// Both should be reverted
+	// Both should still have modified content (no revert)
 	for _, name := range []string{"a.txt", "b.txt"} {
 		content, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			t.Fatalf("reading %s: %v", name, err)
 		}
-		if string(content) != "original\n" {
-			t.Errorf("%s = %q, want %q", name, string(content), "original\n")
+		if string(content) != "modified\n" {
+			t.Errorf("%s = %q, want %q", name, string(content), "modified\n")
 		}
 	}
 
