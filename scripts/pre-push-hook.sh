@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Pre-push hook: verify CHANGELOG.md has an entry for the current version.
+# Pre-push hook: verify changelog entry and run stress tests.
 # Install: cp scripts/pre-push-hook.sh .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+# Skip stress tests: SKIP_STRESS=1 git push
 
 set -euo pipefail
 
@@ -29,6 +30,14 @@ if ! grep -q "^## $VERSION" CHANGELOG.md; then
   echo "Error: CHANGELOG.md has no entry for version $VERSION."
   echo "Add a '## $VERSION' section before pushing."
   exit 1
+fi
+
+# Run stress tests (concurrency safety regression check)
+if [ "${SKIP_STRESS:-}" != "1" ]; then
+  if [ -f scripts/stress ]; then
+    echo "Running stress tests (skip with SKIP_STRESS=1)..."
+    scripts/stress 2
+  fi
 fi
 
 # Check scaffolding freshness
