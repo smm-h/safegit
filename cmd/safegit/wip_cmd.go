@@ -66,11 +66,11 @@ func runUnwip(flags globalFlags, args []string) {
 	sgDir := repo.SafegitDir(gitDir)
 
 	if len(args) == 0 {
-		die(flags, "wip",2, "usage: safegit unwip <wip-id> [--force]")
+		die(flags, "wip",2, "usage: safegit unwip <wip-id>")
 	}
 
 	wipID := args[0]
-	restored, err := wip.Restore(sgDir, wipID, flags.force)
+	restored, err := wip.Restore(sgDir, wipID)
 	if err != nil {
 		die(flags, "wip",1, err.Error())
 	}

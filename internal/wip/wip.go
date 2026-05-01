@@ -137,7 +137,7 @@ func Create(safegitDir string, files []string) (*WipInfo, error) {
 }
 
 // Restore applies a wip back to the working tree and deletes the ref.
-func Restore(safegitDir, wipID string, force bool) ([]string, error) {
+func Restore(safegitDir, wipID string) ([]string, error) {
 	ref := "refs/safegit/wip/" + wipID
 
 	// Verify ref exists
