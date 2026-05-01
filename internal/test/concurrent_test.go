@@ -88,8 +88,9 @@ func newRepo(t *testing.T) string {
 		t.Fatalf("safegit init failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
 
-	// Bump CAS max attempts high for concurrent tests to avoid exhaustion
-	runSafegit(t, dir, "config", "commit.casMaxAttempts", "50")
+	// Bump CAS max attempts high for concurrent tests to avoid exhaustion.
+	// 200 is enough for TestStress100 (100 parallel commits) with headroom.
+	runSafegit(t, dir, "config", "commit.casMaxAttempts", "200")
 
 	return dir
 }

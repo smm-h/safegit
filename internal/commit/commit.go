@@ -6,6 +6,7 @@ package commit
 import (
 	"context"
 	"fmt"
+	mrand "math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -151,7 +152,8 @@ func (p *Pipeline) Execute(ctx context.Context, req CommitRequest) (*CommitResul
 		if !retry {
 			return result, nil
 		}
-		// CAS miss -- loop back to Phase A with fresh state
+		// CAS miss -- jitter before retry to break thundering-herd stampedes
+		casRetryJitter()
 	}
 
 	return nil, &CommitError{
@@ -383,6 +385,14 @@ func (p *Pipeline) parentTreeSHA(ctx context.Context, commitSHA string) (string,
 		return "", err
 	}
 	return sha, nil
+}
+
+// casRetryJitter sleeps for a random 1-10ms to break thundering-herd
+// stampedes where all CAS-miss processes retry Phase A simultaneously
+// and resolve the same parent.
+func casRetryJitter() {
+	jitter := time.Duration(1+mrand.Intn(10)) * time.Millisecond
+	time.Sleep(jitter)
 }
 
 // isTransientRefError returns true if the error from git update-ref is a
