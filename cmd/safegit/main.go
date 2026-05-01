@@ -64,8 +64,8 @@ type jsonResponse struct {
 	OK       bool        `json:"ok"`
 	Command  string      `json:"command"`
 	Data     interface{} `json:"data,omitempty"`
-	Error    *jsonError  `json:"error"`
-	Warnings []string    `json:"warnings"`
+	Error    *jsonError  `json:"error,omitempty"`
+	Warnings []string    `json:"warnings,omitempty"`
 }
 
 type jsonError struct {
