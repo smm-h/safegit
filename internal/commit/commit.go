@@ -173,12 +173,21 @@ func (p *Pipeline) tryCommit(
 	// to create a commit whose tree is based on the old HEAD but whose
 	// parent is the new HEAD -- silently dropping the other agent's files.
 	parentSHA, err := git.RevParse(ref)
+	isRootCommit := false
 	if err != nil {
-		return nil, false, fmt.Errorf("resolving parent %s: %w", ref, err)
+		// ref doesn't exist yet -- this is the initial commit (no parent)
+		parentSHA = ""
+		isRootCommit = true
 	}
 
-	// Step 1: Create per-invocation tmp index seeded from the resolved parent
-	tmpIdx, err := index.New(p.SafegitDir, parentSHA)
+	// Step 1: Create per-invocation tmp index. For root commits, use an
+	// empty tree; otherwise seed from the resolved parent.
+	var tmpIdx *index.TmpIndex
+	if isRootCommit {
+		tmpIdx, err = index.NewEmpty(p.SafegitDir)
+	} else {
+		tmpIdx, err = index.New(p.SafegitDir, parentSHA)
+	}
 	if err != nil {
 		return nil, false, fmt.Errorf("creating tmp index: %w", err)
 	}
@@ -206,8 +215,8 @@ func (p *Pipeline) tryCommit(
 		return nil, false, &CommitError{Code: ExitWriteTree, Message: fmt.Sprintf("write-tree failed: %v", err)}
 	}
 
-	// Check for empty commit (tree unchanged)
-	if !req.AllowEmpty {
+	// Check for empty commit (tree unchanged). Root commits are never empty.
+	if !req.AllowEmpty && !isRootCommit {
 		parentTree, err := p.parentTreeSHA(parentSHA)
 		if err != nil {
 			return nil, false, fmt.Errorf("resolving parent tree: %w", err)
@@ -253,18 +262,25 @@ func (p *Pipeline) tryCommit(
 	defer refLock.Release()
 
 	// Step 8: Re-resolve parent (CAS check)
-	currentParent, err := git.RevParse(ref)
-	if err != nil {
-		return nil, false, fmt.Errorf("re-resolving %s for CAS: %w", ref, err)
-	}
-	if currentParent != parentSHA {
-		// CAS miss: ref moved since Phase A -- retry
-		return nil, true, nil
+	if isRootCommit {
+		// For root commits, verify the ref still doesn't exist
+		if _, rerr := git.RevParse(ref); rerr == nil {
+			// Someone else created the ref while we were building -- retry
+			return nil, true, nil
+		}
+	} else {
+		currentParent, err := git.RevParse(ref)
+		if err != nil {
+			return nil, false, fmt.Errorf("re-resolving %s for CAS: %w", ref, err)
+		}
+		if currentParent != parentSHA {
+			return nil, true, nil
+		}
 	}
 
-	// Step 9: Update ref with CAS
+	// Step 9: Update ref (CAS for normal commits; create for root commits)
 	if err := git.UpdateRef(ref, commitSHA, parentSHA); err != nil {
-		return nil, false, fmt.Errorf("update-ref CAS failed: %w", err)
+		return nil, false, fmt.Errorf("update-ref failed: %w", err)
 	}
 
 	// Step 10: Sync main index to match HEAD so git status/diff work correctly.
