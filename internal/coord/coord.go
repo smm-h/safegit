@@ -23,10 +23,11 @@ type DirtyState struct {
 func Check(ctx context.Context, safegitDir string) (*DirtyState, error) {
 	var ds DirtyState
 
-	// 1. Parse git status --porcelain for modified/untracked files
-	stdout, _, err := git.Run(ctx, "status", "--porcelain", "--untracked-files=normal")
+	// 1. Check for tracked modifications by diffing working tree against HEAD directly.
+	// This avoids relying on the main .git/index which may be stale after safegit commits.
+	stdout, _, err := git.Run(ctx, "diff", "HEAD", "--name-status")
 	if err != nil {
-		return nil, fmt.Errorf("running git status: %w", err)
+		return nil, fmt.Errorf("running git diff HEAD: %w", err)
 	}
 	for _, line := range strings.Split(stdout, "\n") {
 		if strings.TrimSpace(line) == "" {
@@ -35,7 +36,20 @@ func Check(ctx context.Context, safegitDir string) (*DirtyState, error) {
 		ds.ModifiedFiles = append(ds.ModifiedFiles, line)
 	}
 
-	// 2. Scan wip-locks/ directory for active locks
+	// 2. Check for untracked files
+	untracked, _, err := git.Run(ctx, "ls-files", "--others", "--exclude-standard")
+	if err != nil {
+		return nil, fmt.Errorf("running git ls-files: %w", err)
+	}
+	for _, line := range strings.Split(untracked, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		ds.ModifiedFiles = append(ds.ModifiedFiles, "? "+line)
+	}
+
+	// 3. Scan wip-locks/ directory for active locks
 	wipLocksDir := filepath.Join(safegitDir, "wip-locks")
 	entries, err := os.ReadDir(wipLocksDir)
 	if err != nil && !os.IsNotExist(err) {
