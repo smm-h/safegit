@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.5
+
+- Add CAS retry jitter (1-10ms random sleep) to break thundering-herd stampedes under heavy concurrency
+- Prevent potential slice mutation in oplog.Append
+- pre-push hook now supports Go projects with VERSION file
+- CI matrix expanded to macOS and Go 1.25
+- Integration tests for cherry-pick, tag, stash passthrough and worktree lock sharing
+
 ## 0.1.4
 
 - Thread context.Context through all git helpers and callers (enables cancellation and clean shutdown)
