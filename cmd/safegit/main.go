@@ -436,29 +436,7 @@ func runCommit(flags globalFlags, args []string) {
 
 	msg := strings.Join(messages, "\n")
 
-	// Parse file:hunks syntax (e.g. "file.txt:1,3" or "file.txt:2-4")
-	fileSpecs := make([]commit.FileSpec, 0, len(files))
-	for _, f := range files {
-		spec := commit.FileSpec{}
-		if colonIdx := strings.LastIndex(f, ":"); colonIdx > 0 {
-			// Check if what's after the colon looks like a hunk spec (digits, commas, dashes)
-			suffix := f[colonIdx+1:]
-			if isHunkSpec(suffix) {
-				hunks, err := stage.ParseHunkSpec(suffix)
-				if err != nil {
-					die(flags, "commit",2, fmt.Sprintf("invalid hunk spec in %q: %v", f, err))
-				}
-				spec.Path = f[:colonIdx]
-				spec.Hunks = hunks
-			} else {
-				// Colon is part of the filename (e.g. Windows path or something)
-				spec.Path = f
-			}
-		} else {
-			spec.Path = f
-		}
-		fileSpecs = append(fileSpecs, spec)
-	}
+	fileSpecs := parseFileSpecs(files, flags, "commit")
 
 	sgDir := repo.SafegitDir(gitDir)
 	cfg, err := loadConfig(flags, gitDir)
@@ -544,27 +522,7 @@ func runAmend(flags globalFlags, args []string) {
 		msg = strings.Join(messages, "\n")
 	}
 
-	// Parse file:hunks syntax
-	fileSpecs := make([]commit.FileSpec, 0, len(files))
-	for _, f := range files {
-		spec := commit.FileSpec{}
-		if colonIdx := strings.LastIndex(f, ":"); colonIdx > 0 {
-			suffix := f[colonIdx+1:]
-			if isHunkSpec(suffix) {
-				hunks, err := stage.ParseHunkSpec(suffix)
-				if err != nil {
-					die(flags, "amend",2, fmt.Sprintf("invalid hunk spec in %q: %v", f, err))
-				}
-				spec.Path = f[:colonIdx]
-				spec.Hunks = hunks
-			} else {
-				spec.Path = f
-			}
-		} else {
-			spec.Path = f
-		}
-		fileSpecs = append(fileSpecs, spec)
-	}
+	fileSpecs := parseFileSpecs(files, flags, "amend")
 
 	sgDir := repo.SafegitDir(gitDir)
 	cfg, err := loadConfig(flags, gitDir)
@@ -1145,6 +1103,34 @@ func runGC(flags globalFlags) {
 			fmt.Println("log rotated (old log saved as log.1)")
 		}
 	}
+}
+
+// parseFileSpecs converts raw file arguments (possibly with hunk suffixes like
+// "file.txt:1,3") into commit.FileSpec structs. Dies on malformed hunk specs.
+func parseFileSpecs(files []string, flags globalFlags, cmd string) []commit.FileSpec {
+	specs := make([]commit.FileSpec, 0, len(files))
+	for _, f := range files {
+		spec := commit.FileSpec{}
+		if colonIdx := strings.LastIndex(f, ":"); colonIdx > 0 {
+			// Check if what's after the colon looks like a hunk spec (digits, commas, dashes)
+			suffix := f[colonIdx+1:]
+			if isHunkSpec(suffix) {
+				hunks, err := stage.ParseHunkSpec(suffix)
+				if err != nil {
+					die(flags, cmd, 2, fmt.Sprintf("invalid hunk spec in %q: %v", f, err))
+				}
+				spec.Path = f[:colonIdx]
+				spec.Hunks = hunks
+			} else {
+				// Colon is part of the filename (e.g. Windows path or something)
+				spec.Path = f
+			}
+		} else {
+			spec.Path = f
+		}
+		specs = append(specs, spec)
+	}
+	return specs
 }
 
 // isHunkSpec returns true if s looks like a hunk specifier (digits, commas, dashes only).
