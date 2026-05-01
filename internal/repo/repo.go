@@ -175,6 +175,9 @@ func LoadConfig(gitDir string) (*Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing config.json: %w", err)
 	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config.json: %w", err)
+	}
 	return &cfg, nil
 }
 
@@ -188,7 +191,30 @@ func LoadConfigFrom(path string) (*Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
 	return &cfg, nil
+}
+
+// Validate checks that all config values are within acceptable ranges.
+func (c *Config) Validate() error {
+	checks := []struct {
+		name string
+		val  int
+	}{
+		{"commit.casMaxAttempts", c.Commit.CASMaxAttempts},
+		{"lock.acquireTimeoutSeconds", c.Lock.AcquireTimeoutSeconds},
+		{"hooks.preprepush.timeoutSeconds", c.Hooks.PrePrePush.TimeoutSeconds},
+		{"push.retryAttempts", c.Push.RetryAttempts},
+		{"log.maxSizeMB", c.Log.MaxSizeMB},
+	}
+	for _, ch := range checks {
+		if ch.val < 0 {
+			return fmt.Errorf("%s must not be negative (got %d)", ch.name, ch.val)
+		}
+	}
+	return nil
 }
 
 // SaveConfigTo writes config to an arbitrary path.
