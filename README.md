@@ -68,7 +68,8 @@ index, stages the requested files into it, and builds the tree object -- all
 without touching the shared `.git/index`. Phase B acquires a per-ref lock,
 reads the current tip, creates the commit with that parent, and updates the ref
 using CAS. If the ref moved between read and write, Phase B retries from the
-new tip (re-parenting the commit) up to a configurable number of attempts.
+new tip (re-parenting the commit) with random jitter to avoid thundering-herd
+stampedes under heavy concurrency.
 
 See [design.md](design.md) for the full architecture specification.
 
