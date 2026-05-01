@@ -396,42 +396,42 @@ func runCommit(flags globalFlags, args []string) {
 			pastSeparator = true
 		case "-m":
 			if i+1 >= len(args) {
-				commitDie(flags, 2, "-m requires an argument")
+				die(flags, "commit",2, "-m requires an argument")
 			}
 			i++
 			messages = append(messages, args[i])
 		case "-F":
 			if i+1 >= len(args) {
-				commitDie(flags, 2, "-F requires an argument")
+				die(flags, "commit",2, "-F requires an argument")
 			}
 			i++
 			messageFile = args[i]
 		case "--branch":
 			if i+1 >= len(args) {
-				commitDie(flags, 2, "--branch requires an argument")
+				die(flags, "commit",2, "--branch requires an argument")
 			}
 			i++
 			branch = args[i]
 		case "--allow-empty":
 			allowEmpty = true
 		default:
-			commitDie(flags, 2, fmt.Sprintf("unknown flag: %s", args[i]))
+			die(flags, "commit",2, fmt.Sprintf("unknown flag: %s", args[i]))
 		}
 	}
 
 	if messageFile != "" {
 		data, err := os.ReadFile(messageFile)
 		if err != nil {
-			commitDie(flags, 1, fmt.Sprintf("reading message file: %v", err))
+			die(flags, "commit",1, fmt.Sprintf("reading message file: %v", err))
 		}
 		messages = append(messages, strings.TrimRight(string(data), "\n"))
 	}
 
 	if len(messages) == 0 {
-		commitDie(flags, 2, "commit message required (-m or -F)")
+		die(flags, "commit",2, "commit message required (-m or -F)")
 	}
 	if len(files) == 0 {
-		commitDie(flags, 2, "no files specified (use -- file1 file2 ...)")
+		die(flags, "commit",2, "no files specified (use -- file1 file2 ...)")
 	}
 
 	msg := strings.Join(messages, "\n")
@@ -446,7 +446,7 @@ func runCommit(flags globalFlags, args []string) {
 			if isHunkSpec(suffix) {
 				hunks, err := stage.ParseHunkSpec(suffix)
 				if err != nil {
-					commitDie(flags, 2, fmt.Sprintf("invalid hunk spec in %q: %v", f, err))
+					die(flags, "commit",2, fmt.Sprintf("invalid hunk spec in %q: %v", f, err))
 				}
 				spec.Path = f[:colonIdx]
 				spec.Hunks = hunks
@@ -463,7 +463,7 @@ func runCommit(flags globalFlags, args []string) {
 	sgDir := repo.SafegitDir(gitDir)
 	cfg, err := loadConfig(flags, gitDir)
 	if err != nil {
-		commitDie(flags, 1, fmt.Sprintf("loading config: %v", err))
+		die(flags, "commit",1, fmt.Sprintf("loading config: %v", err))
 	}
 
 	p := &commit.Pipeline{SafegitDir: sgDir, Config: *cfg}
@@ -526,17 +526,17 @@ func runAmend(flags globalFlags, args []string) {
 			pastSeparator = true
 		case "-m":
 			if i+1 >= len(args) {
-				amendDie(flags, 2, "-m requires an argument")
+				die(flags, "amend",2, "-m requires an argument")
 			}
 			i++
 			messages = append(messages, args[i])
 		default:
-			amendDie(flags, 2, fmt.Sprintf("unknown flag: %s", args[i]))
+			die(flags, "amend",2, fmt.Sprintf("unknown flag: %s", args[i]))
 		}
 	}
 
 	if len(files) == 0 {
-		amendDie(flags, 2, "no files specified (use -- file1 file2 ...)")
+		die(flags, "amend",2, "no files specified (use -- file1 file2 ...)")
 	}
 
 	var msg string
@@ -553,7 +553,7 @@ func runAmend(flags globalFlags, args []string) {
 			if isHunkSpec(suffix) {
 				hunks, err := stage.ParseHunkSpec(suffix)
 				if err != nil {
-					amendDie(flags, 2, fmt.Sprintf("invalid hunk spec in %q: %v", f, err))
+					die(flags, "amend",2, fmt.Sprintf("invalid hunk spec in %q: %v", f, err))
 				}
 				spec.Path = f[:colonIdx]
 				spec.Hunks = hunks
@@ -569,7 +569,7 @@ func runAmend(flags globalFlags, args []string) {
 	sgDir := repo.SafegitDir(gitDir)
 	cfg, err := loadConfig(flags, gitDir)
 	if err != nil {
-		amendDie(flags, 1, fmt.Sprintf("loading config: %v", err))
+		die(flags, "amend",1, fmt.Sprintf("loading config: %v", err))
 	}
 
 	p := &commit.Pipeline{SafegitDir: sgDir, Config: *cfg}
@@ -625,17 +625,17 @@ func runReword(flags globalFlags, args []string) {
 		switch args[i] {
 		case "-m":
 			if i+1 >= len(args) {
-				rewordDie(flags, 2, "-m requires an argument")
+				die(flags, "reword",2, "-m requires an argument")
 			}
 			i++
 			messages = append(messages, args[i])
 		default:
-			rewordDie(flags, 2, fmt.Sprintf("unknown flag: %s", args[i]))
+			die(flags, "reword",2, fmt.Sprintf("unknown flag: %s", args[i]))
 		}
 	}
 
 	if len(messages) == 0 {
-		rewordDie(flags, 2, "commit message required (-m)")
+		die(flags, "reword",2, "commit message required (-m)")
 	}
 
 	msg := strings.Join(messages, "\n")
@@ -643,7 +643,7 @@ func runReword(flags globalFlags, args []string) {
 	sgDir := repo.SafegitDir(gitDir)
 	cfg, err := loadConfig(flags, gitDir)
 	if err != nil {
-		rewordDie(flags, 1, fmt.Sprintf("loading config: %v", err))
+		die(flags, "reword",1, fmt.Sprintf("loading config: %v", err))
 	}
 
 	p := &commit.Pipeline{SafegitDir: sgDir, Config: *cfg}
@@ -672,31 +672,10 @@ func runReword(flags globalFlags, args []string) {
 	}
 }
 
-// amendDie prints an error and exits for the amend subcommand.
-func amendDie(flags globalFlags, code int, msg string) {
+// die prints an error for the given subcommand and exits with code.
+func die(flags globalFlags, cmd string, code int, msg string) {
 	if flags.format == formatJSON {
-		emitJSON("amend", nil, &jsonError{Code: code, Message: msg}, nil)
-	} else {
-		fmt.Fprintf(os.Stderr, "error: %s\n", msg)
-	}
-	os.Exit(code)
-}
-
-// rewordDie prints an error and exits for the reword subcommand.
-func rewordDie(flags globalFlags, code int, msg string) {
-	if flags.format == formatJSON {
-		emitJSON("reword", nil, &jsonError{Code: code, Message: msg}, nil)
-	} else {
-		fmt.Fprintf(os.Stderr, "error: %s\n", msg)
-	}
-	os.Exit(code)
-}
-
-
-// commitDie prints an error and exits for the commit subcommand.
-func commitDie(flags globalFlags, code int, msg string) {
-	if flags.format == formatJSON {
-		emitJSON("commit", nil, &jsonError{Code: code, Message: msg}, nil)
+		emitJSON(cmd, nil, &jsonError{Code: code, Message: msg}, nil)
 	} else {
 		fmt.Fprintf(os.Stderr, "error: %s\n", msg)
 	}
@@ -719,7 +698,7 @@ func firstLine(s string) string {
 func runWip(flags globalFlags, args []string) {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
-		wipDie(flags, 4, err.Error())
+		die(flags, "wip",4, err.Error())
 	}
 	sgDir := repo.SafegitDir(gitDir)
 
@@ -727,7 +706,7 @@ func runWip(flags globalFlags, args []string) {
 	if len(args) > 0 && args[0] == "list" {
 		wips, err := wip.List(sgDir)
 		if err != nil {
-			wipDie(flags, 1, err.Error())
+			die(flags, "wip",1, err.Error())
 		}
 		if flags.format == formatJSON {
 			emitJSON("wip list", map[string]interface{}{"wips": wips}, nil, nil)
@@ -745,12 +724,12 @@ func runWip(flags globalFlags, args []string) {
 
 	// "wip <file1> [<file2> ...]" -- create a wip
 	if len(args) == 0 {
-		wipDie(flags, 2, "usage: safegit wip <file1> [<file2> ...] | safegit wip list")
+		die(flags, "wip",2, "usage: safegit wip <file1> [<file2> ...] | safegit wip list")
 	}
 
 	result, err := wip.Create(sgDir, args)
 	if err != nil {
-		wipDie(flags, 1, err.Error())
+		die(flags, "wip",1, err.Error())
 	}
 
 	if flags.format == formatJSON {
@@ -768,18 +747,18 @@ func runWip(flags globalFlags, args []string) {
 func runUnwip(flags globalFlags, args []string) {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
-		wipDie(flags, 4, err.Error())
+		die(flags, "wip",4, err.Error())
 	}
 	sgDir := repo.SafegitDir(gitDir)
 
 	if len(args) == 0 {
-		wipDie(flags, 2, "usage: safegit unwip <wip-id> [--force]")
+		die(flags, "wip",2, "usage: safegit unwip <wip-id> [--force]")
 	}
 
 	wipID := args[0]
 	restored, err := wip.Restore(sgDir, wipID, flags.force)
 	if err != nil {
-		wipDie(flags, 1, err.Error())
+		die(flags, "wip",1, err.Error())
 	}
 
 	if flags.format == formatJSON {
@@ -793,15 +772,6 @@ func runUnwip(flags globalFlags, args []string) {
 	}
 }
 
-// wipDie prints an error and exits for wip/unwip subcommands.
-func wipDie(flags globalFlags, code int, msg string) {
-	if flags.format == formatJSON {
-		emitJSON("wip", nil, &jsonError{Code: code, Message: msg}, nil)
-	} else {
-		fmt.Fprintf(os.Stderr, "error: %s\n", msg)
-	}
-	os.Exit(code)
-}
 
 func runDoctor(flags globalFlags) {
 	gitDir := mustGitDir(flags)

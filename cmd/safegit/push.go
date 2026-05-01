@@ -39,13 +39,13 @@ type pushResult struct {
 func runPush(flags globalFlags, args []string) int {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
-		pushDie(flags, 1, err.Error())
+		die(flags, "push",1, err.Error())
 		return 1
 	}
 
 	cfg, err := loadConfig(flags, gitDir)
 	if err != nil {
-		pushDie(flags, 1, fmt.Sprintf("loading config: %v", err))
+		die(flags, "push",1, fmt.Sprintf("loading config: %v", err))
 		return 1
 	}
 
@@ -79,19 +79,19 @@ func runPush(flags globalFlags, args []string) int {
 	ctx := context.Background()
 	remoteURL, err := resolveRemoteURL(ctx, remote)
 	if err != nil {
-		pushDie(flags, 1, fmt.Sprintf("resolving remote URL: %v", err))
+		die(flags, "push",1, fmt.Sprintf("resolving remote URL: %v", err))
 		return 1
 	}
 
 	// Resolve refs to push
 	refs, err := resolveRefsForPush(ctx, remote, refspecs)
 	if err != nil {
-		pushDie(flags, 1, fmt.Sprintf("resolving refs: %v", err))
+		die(flags, "push",1, fmt.Sprintf("resolving refs: %v", err))
 		return 1
 	}
 
 	if len(refs) == 0 {
-		pushDie(flags, 1, "nothing to push (no matching refs)")
+		die(flags, "push",1, "nothing to push (no matching refs)")
 		return 1
 	}
 
@@ -119,7 +119,7 @@ func runPush(flags globalFlags, args []string) int {
 
 		hookResults, err = hooks.Run(ctx, gitDir, hookStdin, timeoutSec, hookEnv)
 		if err != nil {
-			pushDie(flags, 1, fmt.Sprintf("running hooks: %v", err))
+			die(flags, "push",1, fmt.Sprintf("running hooks: %v", err))
 			return 1
 		}
 
@@ -386,13 +386,6 @@ func shortRef(ref string) string {
 	return ref
 }
 
-func pushDie(flags globalFlags, code int, msg string) {
-	if flags.format == formatJSON {
-		emitJSON("push", nil, &jsonError{Code: code, Message: msg}, nil)
-	} else {
-		fmt.Fprintf(os.Stderr, "error: %s\n", msg)
-	}
-}
 
 // MarshalJSON for HookResult to format Duration as a string.
 func (r pushResult) MarshalJSON() ([]byte, error) {
