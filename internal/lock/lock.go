@@ -72,6 +72,7 @@ func Acquire(locksBaseDir, safegitDir, ref, op string, timeout time.Duration) (*
 	for {
 		err := tryCreate(lp, op)
 		if err == nil {
+			registerCleanup(lp)
 			return &RefLock{Ref: ref, LockPath: lp}, nil
 		}
 
@@ -135,6 +136,7 @@ func tryCreate(path, op string) error {
 
 // Release removes the lock file.
 func (l *RefLock) Release() error {
+	unregisterCleanup(l.LockPath)
 	return os.Remove(l.LockPath)
 }
 
