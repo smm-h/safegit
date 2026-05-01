@@ -182,12 +182,19 @@ func runPush(flags globalFlags, args []string) int {
 
 	// Log to oplog
 	sgDir := repo.SafegitDir(gitDir)
+	refDetails := make([]map[string]string, len(refs))
+	for i, r := range refs {
+		refDetails[i] = map[string]string{
+			"localRef": r.LocalRef, "localSha": r.LocalSHA,
+			"remoteRef": r.RemoteRef, "remoteSha": r.RemoteSHA,
+		}
+	}
 	_ = oplog.Append(sgDir, oplog.Entry{
 		Op: "push",
 		Extra: map[string]interface{}{
-			"remote":    remote,
-			"refCount":  len(refs),
-			"hooksRun":  len(hookResults),
+			"remote":   remote,
+			"refs":     refDetails,
+			"hooksRun": len(hookResults),
 		},
 	})
 
