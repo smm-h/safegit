@@ -162,8 +162,8 @@ func runPush(flags globalFlags, args []string) int {
 			break
 		}
 		if attempt < retryAttempts {
-			// Exponential backoff: 1s, 4s, 16s
-			backoff := time.Duration(1<<(2*(attempt-1))) * time.Second
+			// Exponential backoff: 1s, 2s, 4s
+			backoff := time.Duration(1<<(attempt-1)) * time.Second
 			if !flags.quiet {
 				fmt.Fprintf(os.Stderr, "transport error, retrying in %v (attempt %d/%d)...\n", backoff, attempt+1, retryAttempts)
 			}
