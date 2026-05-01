@@ -97,7 +97,8 @@ func (d *DirtyState) Refuse(operation string) string {
 	return b.String()
 }
 
-// wipFilesFromRef reads the "files:" line from a wip commit message.
+// wipFilesFromRef reads file paths from a wip commit message.
+// Supports both new ("file: " per line) and legacy ("files: " comma-separated) formats.
 func wipFilesFromRef(ref string) string {
 	ctx := context.Background()
 	sha, err := git.RevParse(ref)
@@ -108,6 +109,17 @@ func wipFilesFromRef(ref string) string {
 	if err != nil {
 		return ""
 	}
+	var files []string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "file: ") {
+			files = append(files, strings.TrimPrefix(line, "file: "))
+		}
+	}
+	if len(files) > 0 {
+		return strings.Join(files, ", ")
+	}
+	// Legacy format
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "files: ") {
