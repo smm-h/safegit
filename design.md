@@ -436,11 +436,7 @@ JSON: each wraps the git porcelain v2 output and translates to structured form (
 
 ### 5.3 Staging
 
-Staging is folded into `safegit commit` (the tmp index is built on the fly). The standalone `safegit stage` command exists for previewing and validating a stage operation against the working tree without committing -- it builds the tmp index, runs the apply, prints the resulting tree SHA, and deletes the tmp index. It is primarily a debugging / dry-run aid.
-
-- **`safegit stage <file> [--hunks ...] [--patch <p>] [--interactive] [--delete] [--intent-to-add] [--force]`** -- see Section 3.
-    - JSON: `{"file": "...", "hunksApplied": [1,3], "treeSha": "..."}`.
-- **`safegit unstage <file> [--hunks ...]`** -- inverse (operates on a tmp index seeded from a hypothetical state; mostly for symmetry).
+Staging is folded into `safegit commit` via the `file:hunk-spec` syntax (e.g., `safegit commit -m "msg" -- file.txt:1,3`). There is no standalone `safegit stage` or `safegit unstage` command. The design below describes the original plan; in practice, hunk selection is specified inline at commit time.
 
 ### 5.4 Committing
 
@@ -522,7 +518,7 @@ For each, the design must specify both detection AND recovery. Recovery is autom
 
 - **Symptom:** `git push` exits non-zero with a transport error after the pre-pre-push hooks have already run.
 - **Detection:** non-zero exit from inner `git push`.
-- **Recovery:** safegit retries the push up to `push.retryAttempts` (default 3) with exponential backoff (1s, 4s, 16s) for transient errors (DNS, connection reset, TLS handshake). NOT retried: HTTP 401/403, "non-fast-forward", "remote rejected". Pre-pre-push hooks are NOT re-run on retry (they already validated the local state). Op log records each attempt.
+- **Recovery:** safegit retries the push up to `push.retryAttempts` (default 3) with exponential backoff (1s, 2s, 4s) for transient errors (DNS, connection reset, TLS handshake). NOT retried: HTTP 401/403, "non-fast-forward", "remote rejected". Pre-pre-push hooks are NOT re-run on retry (they already validated the local state). Op log records each attempt.
 
 ### 6.5 Disk full during object write
 

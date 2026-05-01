@@ -6,6 +6,7 @@ package index
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -94,6 +95,7 @@ func GarbageCollect(safegitDir string) (removed int, err error) {
 		return 0, fmt.Errorf("reading tmp dir: %w", err)
 	}
 
+	var errs []error
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -107,14 +109,17 @@ func GarbageCollect(safegitDir string) (removed int, err error) {
 		if !processAlive(pid) {
 			dirPath := filepath.Join(tmpBase, entry.Name())
 			if rmErr := os.RemoveAll(dirPath); rmErr != nil {
-				err = fmt.Errorf("removing %s: %w", dirPath, rmErr)
+				errs = append(errs, fmt.Errorf("removing %s: %w", dirPath, rmErr))
 				continue
 			}
 			removed++
 		}
 	}
 
-	return removed, err
+	if len(errs) > 0 {
+		return removed, errors.Join(errs...)
+	}
+	return removed, nil
 }
 
 // GarbageCollectDryRun reports orphan tmp directories without removing them.

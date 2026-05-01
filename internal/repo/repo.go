@@ -156,12 +156,20 @@ func EnsureInitialized(gitDir string) error {
 }
 
 // Uninstall removes the .git/safegit/ directory entirely.
+// In worktree setups, also cleans up the shared lock directory.
 func Uninstall(gitDir string) error {
 	sgDir := SafegitDir(gitDir)
 	if _, err := os.Stat(sgDir); os.IsNotExist(err) {
 		return errors.New("safegit is not initialized (nothing to remove)")
 	}
-	return os.RemoveAll(sgDir)
+	if err := os.RemoveAll(sgDir); err != nil {
+		return err
+	}
+	sharedDir := SharedSafegitDir(gitDir)
+	if sharedDir != sgDir {
+		os.RemoveAll(filepath.Join(sharedDir, "locks"))
+	}
+	return nil
 }
 
 // LoadConfig reads and parses config.json from the safegit directory.
