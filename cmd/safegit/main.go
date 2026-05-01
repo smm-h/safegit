@@ -123,6 +123,8 @@ func main() {
 		os.Exit(runConfig(flags, cmdArgs))
 	case "unlock":
 		os.Exit(runUnlock(flags, cmdArgs))
+	case "undo":
+		runUndo(flags, cmdArgs)
 	case "branch":
 		os.Exit(runBranch(flags, cmdArgs))
 	case "help", "--help", "-h":
@@ -240,6 +242,7 @@ Commands:
   commit      Stage and commit files atomically (per-invocation index)
   amend       Amend the tip commit with new files (CAS-safe)
   reword      Rewrite the tip commit message (CAS-safe)
+  undo        Reverse the last commit/amend/reword using the oplog
   wip         Save/restore work-in-progress snapshots
   checkout    Checkout a ref (guarded: checks for uncommitted work)
   pull        Fetch + merge (guarded, default --ff-only)
