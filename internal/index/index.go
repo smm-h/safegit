@@ -4,6 +4,7 @@
 package index
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -25,7 +26,7 @@ type TmpIndex struct {
 
 // New creates a temporary index directory and seeds the index from the given treeish.
 // The directory name is <pid>-<random> where random is 4 bytes hex.
-func New(safegitDir string, treeish string) (*TmpIndex, error) {
+func New(ctx context.Context, safegitDir string, treeish string) (*TmpIndex, error) {
 	tmpBase := filepath.Join(safegitDir, "tmp")
 
 	// Generate 4 random bytes -> 8 hex chars
@@ -45,7 +46,7 @@ func New(safegitDir string, treeish string) (*TmpIndex, error) {
 	indexPath := filepath.Join(dir, "index")
 
 	// Seed from the given treeish via git read-tree
-	if err := git.ReadTree(indexPath, treeish); err != nil {
+	if err := git.ReadTree(ctx, indexPath, treeish); err != nil {
 		// Clean up on failure
 		os.RemoveAll(dir)
 		return nil, fmt.Errorf("seeding index from %s: %w", treeish, err)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -50,8 +51,10 @@ func runUndo(flags globalFlags, args []string) {
 		die(flags, cmd, 1, fmt.Sprintf("loading config: %v", err))
 	}
 
+	ctx := context.Background()
+
 	// Resolve current branch
-	ref, err := git.HeadRef()
+	ref, err := git.HeadRef(ctx)
 	if err != nil || ref == "" {
 		die(flags, cmd, 1, "HEAD is detached; undo requires a branch")
 	}
@@ -102,7 +105,7 @@ func runUndo(flags globalFlags, args []string) {
 
 	// Acquire lock on the ref
 	timeout := time.Duration(cfg.Lock.AcquireTimeoutSeconds) * time.Second
-	sharedDir := repo.SharedSafegitDir(gitDir)
+	sharedDir := repo.SharedSafegitDir(ctx, gitDir)
 	lk, err := lock.Acquire(sharedDir, sgDir, ref, "undo", timeout)
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("acquiring lock: %v", err))
@@ -110,12 +113,12 @@ func runUndo(flags globalFlags, args []string) {
 	defer lk.Release()
 
 	// CAS update the ref
-	if err := git.UpdateRef(ref, targetSHA, currentSHA); err != nil {
+	if err := git.UpdateRef(ctx, ref, targetSHA, currentSHA); err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("update-ref failed (ref may have moved): %v", err))
 	}
 
 	// Sync main index so git status/diff reflect the change
-	if err := git.SyncMainIndex(targetSHA); err != nil {
+	if err := git.SyncMainIndex(ctx, targetSHA); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
 	}
 

@@ -1,6 +1,7 @@
 package index
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,7 +30,7 @@ func TestNew(t *testing.T) {
 	// Must chdir to the repo for git commands to work
 	testutil.Chdir(t, filepath.Dir(gitDir))
 
-	idx, err := New(sgDir, "HEAD")
+	idx, err := New(context.Background(), sgDir, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +59,7 @@ func TestCleanup(t *testing.T) {
 
 	testutil.Chdir(t, filepath.Dir(gitDir))
 
-	idx, err := New(sgDir, "HEAD")
+	idx, err := New(context.Background(), sgDir, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}

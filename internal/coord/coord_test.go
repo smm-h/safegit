@@ -1,6 +1,7 @@
 package coord
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +16,7 @@ func TestCleanRepo(t *testing.T) {
 	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
 	testutil.Chdir(t, dir)
 
-	ds, err := Check(sgDir)
+	ds, err := Check(context.Background(), sgDir)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -33,7 +34,7 @@ func TestDirtyModified(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ds, err := Check(sgDir)
+	ds, err := Check(context.Background(), sgDir)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -66,7 +67,7 @@ func TestDirtyUntracked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ds, err := Check(sgDir)
+	ds, err := Check(context.Background(), sgDir)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -94,13 +95,13 @@ func TestDirtyWipLock(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("wip content\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	info, err := wip.Create(sgDir, []string{"seed.txt"})
+	info, err := wip.Create(context.Background(), sgDir, []string{"seed.txt"})
 	if err != nil {
 		t.Fatalf("wip.Create: %v", err)
 	}
 
 	// After wip.Create, working tree is clean, but wip-lock exists
-	ds, err := Check(sgDir)
+	ds, err := Check(context.Background(), sgDir)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}

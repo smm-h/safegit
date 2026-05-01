@@ -238,12 +238,12 @@ func resolveRefsForPush(ctx context.Context, remote string, refspecs []string) (
 	}
 
 	// No refspecs -- push current branch
-	headRef, err := git.HeadRef()
+	headRef, err := git.HeadRef(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("cannot determine current branch (detached HEAD?)")
 	}
 
-	localSHA, err := git.RevParse(headRef)
+	localSHA, err := git.RevParse(ctx, headRef)
 	if err != nil {
 		return nil, fmt.Errorf("resolving %s: %w", headRef, err)
 	}
@@ -281,7 +281,7 @@ func resolveRefspec(ctx context.Context, remote, spec string) (pushRefInfo, erro
 	localRef := localPart
 	if !strings.HasPrefix(localRef, "refs/") {
 		// Try refs/heads/ first
-		if sha, err := git.RevParse("refs/heads/" + localRef); err == nil {
+		if sha, err := git.RevParse(ctx, "refs/heads/"+localRef); err == nil {
 			return pushRefInfo{
 				LocalRef:  "refs/heads/" + localRef,
 				LocalSHA:  sha,
@@ -290,7 +290,7 @@ func resolveRefspec(ctx context.Context, remote, spec string) (pushRefInfo, erro
 			}, nil
 		}
 		// Fall back to raw rev-parse
-		sha, err := git.RevParse(localRef)
+		sha, err := git.RevParse(ctx, localRef)
 		if err != nil {
 			return pushRefInfo{}, fmt.Errorf("cannot resolve local ref %q", localPart)
 		}
@@ -303,7 +303,7 @@ func resolveRefspec(ctx context.Context, remote, spec string) (pushRefInfo, erro
 		}, nil
 	}
 
-	sha, err := git.RevParse(localRef)
+	sha, err := git.RevParse(ctx, localRef)
 	if err != nil {
 		return pushRefInfo{}, fmt.Errorf("cannot resolve local ref %q", localPart)
 	}

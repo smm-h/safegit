@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,6 +22,7 @@ type checkResult struct {
 }
 
 func runDoctor(flags globalFlags) {
+	ctx := context.Background()
 	gitDir := mustGitDir(flags)
 
 	var checks []checkResult
@@ -52,7 +54,7 @@ func runDoctor(flags globalFlags) {
 
 	// Check 3: Stale locks (scan the shared safegit dir so worktree locks are found)
 	if repo.IsInitialized(gitDir) {
-		sharedDir := repo.SharedSafegitDir(gitDir)
+		sharedDir := repo.SharedSafegitDir(ctx, gitDir)
 		locksDir := filepath.Join(sharedDir, "locks", "refs", "heads")
 		staleCount := 0
 		entries, err := os.ReadDir(locksDir)
@@ -80,7 +82,7 @@ func runDoctor(flags globalFlags) {
 
 	// Check 4: Orphan wip-locks
 	if repo.IsInitialized(gitDir) {
-		orphans, err := wip.OrphanLocks(sgDir)
+		orphans, err := wip.OrphanLocks(ctx, sgDir)
 		if err != nil {
 			checks = append(checks, checkResult{Name: "wip_locks", Status: "warn", Detail: err.Error()})
 		} else if len(orphans) > 0 {
@@ -112,12 +114,12 @@ func runDoctor(flags globalFlags) {
 
 	// Check 6: Raw git bypass detection -- compare oplog's last ref-update against actual tip
 	if repo.IsInitialized(gitDir) {
-		ref, refErr := git.HeadRef()
+		ref, refErr := git.HeadRef(ctx)
 		if refErr == nil && ref != "" {
 			lastEntry, entryErr := oplog.LastRefUpdate(sgDir, ref)
 			if entryErr == nil && lastEntry != nil {
 				if sha := oplog.TipSHA(lastEntry.Extra); sha != "" {
-					tipSHA, tipErr := git.RevParse(ref)
+					tipSHA, tipErr := git.RevParse(ctx, ref)
 					if tipErr == nil && tipSHA != sha {
 						checks = append(checks, checkResult{
 							Name:   "bypass_detect",
@@ -170,7 +172,7 @@ func runDoctor(flags globalFlags) {
 
 	// Check 9: Unsupported features (.gitmodules, LFS)
 	{
-		repoRoot, rootErr := git.RepoRoot()
+		repoRoot, rootErr := git.RepoRoot(ctx)
 		if rootErr == nil {
 			var unsupported []string
 			if _, err := os.Stat(filepath.Join(repoRoot, ".gitmodules")); err == nil {

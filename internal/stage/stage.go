@@ -25,8 +25,7 @@ type Hunk struct {
 
 // ExtractHunks diffs the working tree against a tmp index for a single file.
 // Returns the diff header lines and parsed hunks.
-func ExtractHunks(indexPath, file string) (header []string, hunks []Hunk, err error) {
-	ctx := context.Background()
+func ExtractHunks(ctx context.Context, indexPath, file string) (header []string, hunks []Hunk, err error) {
 	env := []string{"GIT_INDEX_FILE=" + indexPath}
 	// --no-color --no-ext-diff --no-renames ensures stable, parseable output
 	out, _, diffErr := git.RunWithEnv(ctx, env, "diff", "--no-color", "--no-ext-diff", "--no-renames", "--", file)
@@ -174,8 +173,7 @@ func BuildPatch(header []string, hunks []Hunk, selected []int) ([]byte, error) {
 
 // ApplyPatch applies a patch to a tmp index using git apply --cached.
 // Falls back to --3way on first failure.
-func ApplyPatch(indexPath string, patch []byte) error {
-	ctx := context.Background()
+func ApplyPatch(ctx context.Context, indexPath string, patch []byte) error {
 	env := []string{"GIT_INDEX_FILE=" + indexPath}
 
 	// First attempt: standard apply
@@ -207,8 +205,8 @@ func gitApply(ctx context.Context, env []string, patch []byte, threeWay bool) er
 
 // StageHunks stages only specific hunks of a file into a tmp index.
 // hunkIndices are 1-based.
-func StageHunks(indexPath, file string, hunkIndices []int) error {
-	header, hunks, err := ExtractHunks(indexPath, file)
+func StageHunks(ctx context.Context, indexPath, file string, hunkIndices []int) error {
+	header, hunks, err := ExtractHunks(ctx, indexPath, file)
 	if err != nil {
 		return fmt.Errorf("extracting hunks: %w", err)
 	}
@@ -228,7 +226,7 @@ func StageHunks(indexPath, file string, hunkIndices []int) error {
 		return fmt.Errorf("building patch: %w", err)
 	}
 
-	return ApplyPatch(indexPath, patch)
+	return ApplyPatch(ctx, indexPath, patch)
 }
 
 // ParseHunkSpec parses a hunk specifier string like "1,3,5" or "2-4" or "1,3-5".

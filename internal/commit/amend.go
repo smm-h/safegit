@@ -40,7 +40,7 @@ type AmendResult struct {
 // Uses tmp index seeded from HEAD, stages files, builds a new commit with
 // parent = HEAD^ and lock-and-CAS updates the ref.
 func (p *Pipeline) Amend(ctx context.Context, req AmendRequest) (*AmendResult, error) {
-	repoRoot, err := git.RepoRoot()
+	repoRoot, err := git.RepoRoot(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("resolving repo root: %w", err)
 	}
@@ -48,7 +48,7 @@ func (p *Pipeline) Amend(ctx context.Context, req AmendRequest) (*AmendResult, e
 	// Resolve target branch ref
 	ref := req.Branch
 	if ref == "" {
-		ref, err = git.HeadRef()
+		ref, err = git.HeadRef(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("resolving HEAD: %w", err)
 		}
@@ -67,7 +67,7 @@ func (p *Pipeline) Amend(ctx context.Context, req AmendRequest) (*AmendResult, e
 		filePaths[i] = fs.Path
 	}
 
-	absFiles, err := p.resolveFiles(repoRoot, filePaths, req.Force)
+	absFiles, err := p.resolveFiles(ctx, repoRoot, filePaths, req.Force)
 	if err != nil {
 		return nil, err
 	}
@@ -121,13 +121,13 @@ func (p *Pipeline) tryAmend(
 
 	// Snapshot current tip SHA (the commit we're replacing).
 	// Use ref (not "HEAD") so cross-branch amend resolves the correct tip.
-	headSHA, err := git.RevParse(ref)
+	headSHA, err := git.RevParse(ctx, ref)
 	if err != nil {
 		return nil, false, fmt.Errorf("resolving %s: %w", ref, err)
 	}
 
 	// Get parent of tip (ref^). Root commits cannot be amended.
-	parentSHA, err := git.RevParse(ref + "^")
+	parentSHA, err := git.RevParse(ctx, ref+"^")
 	if err != nil {
 		return nil, false, fmt.Errorf("cannot amend: %s is a root commit (no parent)", ref)
 	}
@@ -135,7 +135,7 @@ func (p *Pipeline) tryAmend(
 	// Determine message: use provided or reuse existing
 	message := req.Message
 	if message == "" {
-		msg, err := git.CommitMessage(ref)
+		msg, err := git.CommitMessage(ctx, ref)
 		if err != nil {
 			return nil, false, fmt.Errorf("reading %s commit message: %w", ref, err)
 		}
@@ -146,7 +146,7 @@ func (p *Pipeline) tryAmend(
 	// Use headSHA (resolved above) instead of ref to avoid a TOCTOU race:
 	// if the ref moves between RevParse and index creation, the tree would be
 	// based on a different commit than headSHA, silently dropping files.
-	tmpIdx, err := index.New(p.SafegitDir, headSHA)
+	tmpIdx, err := index.New(ctx, p.SafegitDir, headSHA)
 	if err != nil {
 		return nil, false, fmt.Errorf("creating tmp index: %w", err)
 	}
@@ -155,24 +155,24 @@ func (p *Pipeline) tryAmend(
 	for i, absPath := range absFiles {
 		hunks := req.FileSpecs[i].Hunks
 		if hunks != nil {
-			if err := stage.StageHunks(tmpIdx.IndexPath, absPath, hunks); err != nil {
+			if err := stage.StageHunks(ctx, tmpIdx.IndexPath, absPath, hunks); err != nil {
 				return nil, false, fmt.Errorf("staging hunks of %s: %w", absPath, err)
 			}
 		} else {
-			if err := p.stageFile(tmpIdx.IndexPath, absPath); err != nil {
+			if err := p.stageFile(ctx, tmpIdx.IndexPath, absPath); err != nil {
 				return nil, false, fmt.Errorf("staging %s: %w", absPath, err)
 			}
 		}
 	}
 
 	// Build new tree
-	treeSHA, err := git.WriteTree(tmpIdx.IndexPath)
+	treeSHA, err := git.WriteTree(ctx, tmpIdx.IndexPath)
 	if err != nil {
 		return nil, false, &CommitError{Code: ExitWriteTree, Message: fmt.Sprintf("write-tree failed: %v", err)}
 	}
 
 	// Create new commit with parent = HEAD^ (replacing HEAD)
-	commitSHA, err := git.CommitTree(treeSHA, parentSHA, message)
+	commitSHA, err := git.CommitTree(ctx, treeSHA, parentSHA, message)
 	if err != nil {
 		return nil, false, &CommitError{Code: ExitCommitTree, Message: fmt.Sprintf("commit-tree failed: %v", err)}
 	}
@@ -193,14 +193,14 @@ func (p *Pipeline) tryAmend(
 	if lockTimeout <= 0 {
 		lockTimeout = 30 * time.Second
 	}
-	refLock, err := lock.Acquire(repo.SharedSafegitDir(p.SafegitDir), p.SafegitDir, ref, "amend", lockTimeout)
+	refLock, err := lock.Acquire(repo.SharedSafegitDir(ctx, p.SafegitDir), p.SafegitDir, ref, "amend", lockTimeout)
 	if err != nil {
 		return nil, false, fmt.Errorf("acquiring lock on %s: %w", ref, err)
 	}
 	defer refLock.Release()
 
 	// CAS: ref must still point at headSHA (the commit we're replacing)
-	currentTip, err := git.RevParse(ref)
+	currentTip, err := git.RevParse(ctx, ref)
 	if err != nil {
 		return nil, false, fmt.Errorf("re-resolving %s for CAS: %w", ref, err)
 	}
@@ -209,7 +209,7 @@ func (p *Pipeline) tryAmend(
 	}
 
 	// Update ref: old = headSHA, new = commitSHA
-	if err := git.UpdateRef(ref, commitSHA, headSHA); err != nil {
+	if err := git.UpdateRef(ctx, ref, commitSHA, headSHA); err != nil {
 		if isTransientRefError(err) {
 			return nil, true, nil
 		}
@@ -217,8 +217,8 @@ func (p *Pipeline) tryAmend(
 	}
 
 	// Sync main index only when amending the current branch
-	if headRef, herr := git.HeadRef(); herr == nil && headRef == ref {
-		if err := git.SyncMainIndex("HEAD"); err != nil {
+	if headRef, herr := git.HeadRef(ctx); herr == nil && headRef == ref {
+		if err := git.SyncMainIndex(ctx, "HEAD"); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
 		}
 	}
@@ -273,7 +273,7 @@ func (p *Pipeline) Reword(ctx context.Context, req RewordRequest) (*RewordResult
 	ref := req.Branch
 	if ref == "" {
 		var err error
-		ref, err = git.HeadRef()
+		ref, err = git.HeadRef(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("resolving HEAD: %w", err)
 		}
@@ -310,22 +310,22 @@ func (p *Pipeline) tryReword(
 	attempt int,
 ) (*RewordResult, bool, error) {
 
-	headSHA, err := git.RevParse(ref)
+	headSHA, err := git.RevParse(ctx, ref)
 	if err != nil {
 		return nil, false, fmt.Errorf("resolving %s: %w", ref, err)
 	}
 
-	treeSHA, err := git.RevParse(ref + "^{tree}")
+	treeSHA, err := git.RevParse(ctx, ref+"^{tree}")
 	if err != nil {
 		return nil, false, fmt.Errorf("resolving %s tree: %w", ref, err)
 	}
 
-	parentSHA, err := git.RevParse(ref + "^")
+	parentSHA, err := git.RevParse(ctx, ref+"^")
 	if err != nil {
 		parentSHA = ""
 	}
 
-	commitSHA, err := git.CommitTree(treeSHA, parentSHA, req.Message)
+	commitSHA, err := git.CommitTree(ctx, treeSHA, parentSHA, req.Message)
 	if err != nil {
 		return nil, false, &CommitError{Code: ExitCommitTree, Message: fmt.Sprintf("commit-tree failed: %v", err)}
 	}
@@ -344,13 +344,13 @@ func (p *Pipeline) tryReword(
 	if lockTimeout <= 0 {
 		lockTimeout = 30 * time.Second
 	}
-	refLock, err := lock.Acquire(repo.SharedSafegitDir(p.SafegitDir), p.SafegitDir, ref, "reword", lockTimeout)
+	refLock, err := lock.Acquire(repo.SharedSafegitDir(ctx, p.SafegitDir), p.SafegitDir, ref, "reword", lockTimeout)
 	if err != nil {
 		return nil, false, fmt.Errorf("acquiring lock on %s: %w", ref, err)
 	}
 	defer refLock.Release()
 
-	currentTip, err := git.RevParse(ref)
+	currentTip, err := git.RevParse(ctx, ref)
 	if err != nil {
 		return nil, false, fmt.Errorf("re-resolving %s for CAS: %w", ref, err)
 	}
@@ -358,15 +358,15 @@ func (p *Pipeline) tryReword(
 		return nil, true, nil
 	}
 
-	if err := git.UpdateRef(ref, commitSHA, headSHA); err != nil {
+	if err := git.UpdateRef(ctx, ref, commitSHA, headSHA); err != nil {
 		if isTransientRefError(err) {
 			return nil, true, nil
 		}
 		return nil, false, fmt.Errorf("update-ref CAS failed: %w", err)
 	}
 
-	if headRef, herr := git.HeadRef(); herr == nil && headRef == ref {
-		if err := git.SyncMainIndex("HEAD"); err != nil {
+	if headRef, herr := git.HeadRef(ctx); herr == nil && headRef == ref {
+		if err := git.SyncMainIndex(ctx, "HEAD"); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
 		}
 	}

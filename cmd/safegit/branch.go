@@ -33,7 +33,7 @@ func runBranch(flags globalFlags, args []string) int {
 		name := positional[0]
 
 		// Check if deleting the current branch -- that would mutate tree
-		headRef, _ := git.HeadRef()
+		headRef, _ := git.HeadRef(ctx)
 		if headRef == "refs/heads/"+name {
 			gitDir := mustGitDir(flags)
 			if err := repo.EnsureInitialized(gitDir); err != nil {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -36,7 +37,7 @@ func runUnlock(flags globalFlags, args []string) int {
 		ref = "refs/heads/" + ref
 	}
 
-	sharedDir := repo.SharedSafegitDir(gitDir)
+	sharedDir := repo.SharedSafegitDir(context.Background(), gitDir)
 
 	// Check if lock exists (locks live under the shared safegit dir)
 	lp := filepath.Join(sharedDir, "locks", ref+".lock")
