@@ -88,6 +88,19 @@ to change one.
 Configuration is stored in `.git/safegit/config.json`. Remove the entire
 `.git/safegit/` directory to return to vanilla git.
 
+## Known limitations
+
+- **Same-machine concurrency only.** Lock staleness detection uses PID liveness
+  checks and hostname comparison. On network filesystems (NFS, CIFS), `safegit
+  doctor` warns about reduced lock atomicity guarantees. Cross-machine lock
+  reclaim is refused when the hostname doesn't match.
+- **PID reuse.** On Linux, safegit compares process start time against lock
+  creation time via `/proc` to detect PID reuse. On other platforms, a reused
+  PID could keep an orphan lock alive until the lock timeout expires. Use
+  `safegit unlock --force` to clear a stuck lock.
+- **Submodules and LFS are not supported.** `safegit init` refuses on repos with
+  `.gitmodules` or `filter=lfs` in `.gitattributes` (use `--force` to override).
+
 ## License
 
 MIT
