@@ -247,7 +247,7 @@ type RewordResult struct {
 }
 
 // Reword rewrites only the commit message of the tip of the current branch.
-// Tree and parent remain unchanged.
+// Tree and parent remain unchanged. Retries on CAS miss.
 func (p *Pipeline) Reword(ctx context.Context, req RewordRequest) (*RewordResult, error) {
 	if req.Message == "" {
 		return nil, fmt.Errorf("reword requires a message (-m)")
@@ -258,27 +258,52 @@ func (p *Pipeline) Reword(ctx context.Context, req RewordRequest) (*RewordResult
 		return nil, fmt.Errorf("resolving HEAD: %w", err)
 	}
 
-	headSHA, err := git.RevParse("HEAD")
-	if err != nil {
-		return nil, fmt.Errorf("resolving HEAD: %w", err)
+	maxAttempts := p.Config.Commit.CASMaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = 5
 	}
 
-	// Get tree and parent from current HEAD
-	treeSHA, err := git.RevParse("HEAD^{tree}")
-	if err != nil {
-		return nil, fmt.Errorf("resolving HEAD tree: %w", err)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		result, retry, err := p.tryReword(ctx, ref, req, attempt)
+		if err != nil {
+			return nil, err
+		}
+		if !retry {
+			return result, nil
+		}
 	}
 
-	parentSHA, err := git.RevParse("HEAD^")
+	return nil, &CommitError{
+		Code:    ExitCASExhausted,
+		Message: fmt.Sprintf("CAS convergence failure after %d attempts on %s", maxAttempts, ref),
+	}
+}
+
+func (p *Pipeline) tryReword(
+	ctx context.Context,
+	ref string,
+	req RewordRequest,
+	attempt int,
+) (*RewordResult, bool, error) {
+
+	headSHA, err := git.RevParse(ref)
 	if err != nil {
-		// Could be a root commit (no parent)
+		return nil, false, fmt.Errorf("resolving %s: %w", ref, err)
+	}
+
+	treeSHA, err := git.RevParse(ref + "^{tree}")
+	if err != nil {
+		return nil, false, fmt.Errorf("resolving %s tree: %w", ref, err)
+	}
+
+	parentSHA, err := git.RevParse(ref + "^")
+	if err != nil {
 		parentSHA = ""
 	}
 
-	// Create new commit with same tree and parent, new message
 	commitSHA, err := git.CommitTree(treeSHA, parentSHA, req.Message)
 	if err != nil {
-		return nil, &CommitError{Code: ExitCommitTree, Message: fmt.Sprintf("commit-tree failed: %v", err)}
+		return nil, false, &CommitError{Code: ExitCommitTree, Message: fmt.Sprintf("commit-tree failed: %v", err)}
 	}
 
 	if req.DryRun {
@@ -288,39 +313,35 @@ func (p *Pipeline) Reword(ctx context.Context, req RewordRequest) (*RewordResult
 			Parent: parentSHA,
 			Tree:   treeSHA,
 			OldSHA: headSHA,
-		}, nil
+		}, false, nil
 	}
 
-	// Lock and CAS update
 	lockTimeout := time.Duration(p.Config.Lock.AcquireTimeoutSeconds) * time.Second
 	if lockTimeout <= 0 {
 		lockTimeout = 30 * time.Second
 	}
 	refLock, err := lock.Acquire(p.SafegitDir, ref, "reword", lockTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("acquiring lock on %s: %w", ref, err)
+		return nil, false, fmt.Errorf("acquiring lock on %s: %w", ref, err)
 	}
 	defer refLock.Release()
 
-	// CAS check
 	currentTip, err := git.RevParse(ref)
 	if err != nil {
-		return nil, fmt.Errorf("re-resolving %s for CAS: %w", ref, err)
+		return nil, false, fmt.Errorf("re-resolving %s for CAS: %w", ref, err)
 	}
 	if currentTip != headSHA {
-		return nil, fmt.Errorf("branch tip moved (expected %s, got %s); aborting reword", headSHA[:8], currentTip[:8])
+		return nil, true, nil
 	}
 
 	if err := git.UpdateRef(ref, commitSHA, headSHA); err != nil {
-		return nil, fmt.Errorf("update-ref CAS failed: %w", err)
+		return nil, false, fmt.Errorf("update-ref CAS failed: %w", err)
 	}
 
-	// Sync main index
 	if err := git.SyncMainIndex("HEAD"); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
 	}
 
-	// Oplog
 	_ = oplog.Append(p.SafegitDir, oplog.Entry{
 		Op: "reword",
 		Extra: map[string]interface{}{
@@ -336,6 +357,6 @@ func (p *Pipeline) Reword(ctx context.Context, req RewordRequest) (*RewordResult
 		Parent: parentSHA,
 		Tree:   treeSHA,
 		OldSHA: headSHA,
-	}, nil
+	}, false, nil
 }
 
