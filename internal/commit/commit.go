@@ -331,7 +331,7 @@ func (p *Pipeline) resolveFiles(repoRoot string, files []string, force bool) ([]
 		}
 
 		exists := true
-		if _, err := os.Stat(absPath); os.IsNotExist(err) {
+		if _, err := os.Lstat(absPath); os.IsNotExist(err) {
 			exists = false
 		}
 
@@ -360,7 +360,7 @@ func (p *Pipeline) resolveFiles(repoRoot string, files []string, force bool) ([]
 // stageFile stages a single file into the tmp index.
 // Existing files are added; missing-but-tracked files are removed.
 func (p *Pipeline) stageFile(indexPath, absPath string) error {
-	if _, err := os.Stat(absPath); os.IsNotExist(err) {
+	if _, err := os.Lstat(absPath); os.IsNotExist(err) {
 		return git.RmCached(indexPath, absPath)
 	}
 	return git.AddFile(indexPath, absPath)
