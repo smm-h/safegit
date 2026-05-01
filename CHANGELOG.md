@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.2
+
+- Fix Windows build: extract NFS filesystem check into platform-specific files
+- Fix `splitDiffChunks` panic on empty diff output
+- Fix `safegit hook run <name>` now runs only the named hook, not all hooks
+- Fix amend on root commit gives a clear error instead of cryptic git output
+- Fix JSON mode for diff/log/show: strip user-supplied --color/--format/--pretty flags
+- Fix uninstall now cleans shared worktree lock directory
+- Fix GC reports all removal errors instead of just the last one
+- Fix amend/reword SyncMainIndex guarded for cross-branch operations
+- Fix transient `git update-ref` lock failures are retried instead of hard-failing
+- Remove stale NEXT.md
+- Update design.md: push backoff values, stage/unstage status, lock mechanism
+
 ## 0.1.1
 
 ### New features
