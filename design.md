@@ -96,7 +96,7 @@ Required fields: `ts`, `pid`, `op`. Other fields are op-specific. Writes use `O_
 
 ### 1.4 Lock file format
 
-Lock files (`locks/refs/heads/<branch>.lock`, `locks/objects.lock`) are short text files written atomically via `tmpfile + rename(2)`:
+Lock files (`locks/refs/heads/<branch>.lock`) are short text files created atomically via `O_CREAT|O_EXCL` (exclusive create):
 
 ```
 pid=12345
@@ -160,7 +160,7 @@ At this point we have a valid commit object in the object DB but no ref points t
 ### 2.2 Phase B -- serialized (per-ref lock + CAS)
 
 7. **Acquire ref lock.** Attempt to atomically create `locks/refs/heads/<branch>.lock` via `O_CREAT|O_EXCL`. On success, we hold the lock.
-8. **On lock contention,** enqueue our `(pid, ts)` line to `queue/refs/heads/<branch>.q` (append). Then `inotify`/`kqueue` watch the lock file for deletion. On platforms without filesystem notification, fall back to short polling (see 2.4). When awoken, attempt acquisition again. Stale-holder check: if the holder's `pid` is dead (per Section 1.4 + `kill -0` / `/proc` check), atomically replace the lock (via `tmpfile + rename(2)` overwrite, with an extra `flock` over the parent dir to avoid races between concurrent stale-replacers).
+8. **On lock contention,** poll with exponential backoff (10ms, 20ms, 50ms, 100ms, 200ms, 500ms, capped at 1s) until the lock is released or the timeout expires. On each poll, check if the lock holder is dead via `kill(pid, 0)`; if so, remove the stale lock and retry creation.
 9. **Re-resolve parent.** Once we hold the lock, re-read `refs/heads/<branch>`. If it changed since step 5, we have a CAS miss.
     - **If parent unchanged:** proceed to step 10.
     - **If parent changed:** release the lock, GOTO step 5 (rebuild the commit with the new parent). After 5 attempts (configurable: `commit.casMaxAttempts`, default 5), exit with code 7 ("could not converge on branch tip; another writer is making faster progress; retry manually").
@@ -473,7 +473,7 @@ These commands all pass through the coordination layer in Section 8. They refuse
 
 See Section 7 for semantics.
 
-- **`safegit wip <file>...`** -- snapshot the listed files to a wip ref, revert them in the working tree.
+- **`safegit wip <file>...`** -- snapshot the listed files to a wip ref. Files are NOT reverted in the working tree (to avoid clobbering other agents' edits). The wip-lock prevents commits to those files.
 - **`safegit unwip <wip-id>`** -- restore a wip back to the working tree.
 - **`safegit wip list [--format json]`** -- list active wips.
 
@@ -510,7 +510,7 @@ For each, the design must specify both detection AND recovery. Recovery is autom
 
 - **Symptom:** `locks/refs/heads/<branch>.lock` exists with a dead `pid`.
 - **Detection:** any commit acquisition attempt reads the lock, parses `pid` and `host`, calls `kill -0 pid` (Unix) or checks `/proc/<pid>` (Linux). If `host` differs from local `hostname`, treat as alive (cross-machine fence; see 6.6).
-- **Recovery:** atomic replace via `tmpfile + rename(2)`, with a parent-dir `flock(2)` to serialize concurrent stale-replacers. The new holder logs a `lock_recovered` op log entry.
+- **Recovery:** the stale lock file is removed via `os.Remove`, then a new lock is created with `O_CREAT|O_EXCL`. The new holder logs a `lock_recovered` op log entry. Corrupt or zero-length lock files (from crashes mid-create) are treated as stale.
 
 ### 6.3 Two invocations commit to same branch simultaneously
 
@@ -605,13 +605,7 @@ files: file1, file2, ..."
     ```
 
 6. Write per-file lock files: for each listed file, `.git/safegit/wip-locks/<sha256(path)[:16]>` containing `<wip-id>`.
-7. Revert the listed files in the working tree:
-
-    ```
-    git checkout HEAD -- <file1> <file2> ...
-    ```
-
-    Other files in the working tree are untouched.
+7. Files are NOT reverted in the working tree. The wip-lock prevents commits to these files, which is the safety mechanism. The user can manually revert if desired.
 8. Append `wip` op log entry (Section 1.3).
 9. Return `<wip-id>` to the caller.
 
