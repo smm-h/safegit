@@ -36,24 +36,30 @@ var backoffSteps = []time.Duration{
 
 // lockDir returns the path to the lock directory for a given ref.
 // ref is expected to be like "refs/heads/main" -> locks dir is locks/refs/heads/.
-func lockDir(safegitDir, ref string) string {
-	return filepath.Join(safegitDir, "locks", filepath.Dir(ref))
+// locksBaseDir is the safegit directory that contains the "locks/" subtree;
+// for worktrees this should be the shared (common) safegit dir.
+func lockDir(locksBaseDir, ref string) string {
+	return filepath.Join(locksBaseDir, "locks", filepath.Dir(ref))
 }
 
 // lockPath returns the full path to the lock file for a ref.
-// e.g. refs/heads/main -> .git/safegit/locks/refs/heads/main.lock
-func lockPath(safegitDir, ref string) string {
-	dir := lockDir(safegitDir, ref)
+// e.g. refs/heads/main -> <locksBaseDir>/locks/refs/heads/main.lock
+func lockPath(locksBaseDir, ref string) string {
+	dir := lockDir(locksBaseDir, ref)
 	base := filepath.Base(ref) + ".lock"
 	return filepath.Join(dir, base)
 }
 
 // Acquire attempts to acquire a lock on the given ref.
+// locksBaseDir is the safegit directory whose "locks/" subtree holds lock files;
+// for worktrees this should be the shared (common) safegit dir so that all
+// worktrees serialize on the same lock. safegitDir is the worktree-local
+// safegit dir used for oplog writes (stale-lock recovery events).
 // It uses O_CREAT|O_EXCL for atomic creation. If the lock is held by a dead
 // process, it is automatically replaced. Uses exponential backoff polling
 // bounded by timeout.
-func Acquire(safegitDir, ref, op string, timeout time.Duration) (*RefLock, error) {
-	lp := lockPath(safegitDir, ref)
+func Acquire(locksBaseDir, safegitDir, ref, op string, timeout time.Duration) (*RefLock, error) {
+	lp := lockPath(locksBaseDir, ref)
 
 	// Ensure the lock directory exists
 	if err := os.MkdirAll(filepath.Dir(lp), 0755); err != nil {
@@ -152,8 +158,10 @@ func IsStale(lockPath string) (bool, error) {
 }
 
 // ForceRelease unconditionally removes the lock file for a ref.
-func ForceRelease(safegitDir, ref string) error {
-	lp := lockPath(safegitDir, ref)
+// locksBaseDir is the safegit directory whose "locks/" subtree holds lock files;
+// for worktrees this should be the shared (common) safegit dir.
+func ForceRelease(locksBaseDir, ref string) error {
+	lp := lockPath(locksBaseDir, ref)
 	err := os.Remove(lp)
 	if os.IsNotExist(err) {
 		return fmt.Errorf("no lock held on %s", ref)

@@ -64,6 +64,22 @@ func SafegitDir(gitDir string) string {
 	return filepath.Join(gitDir, "safegit")
 }
 
+// SharedSafegitDir returns the safegit directory under the common .git dir.
+// For normal repos this is identical to SafegitDir(gitDir). For worktrees it
+// returns <common-git-dir>/safegit so that lock files are shared across all
+// worktrees, ensuring proper serialization of ref updates.
+func SharedSafegitDir(gitDir string) string {
+	commonDir, err := git.CommonGitDir()
+	if err != nil {
+		return SafegitDir(gitDir)
+	}
+	abs, err := filepath.Abs(commonDir)
+	if err != nil {
+		return SafegitDir(gitDir)
+	}
+	return filepath.Join(abs, "safegit")
+}
+
 // IsInitialized checks whether .git/safegit/ exists and has config.json.
 func IsInitialized(gitDir string) bool {
 	configPath := filepath.Join(SafegitDir(gitDir), "config.json")
@@ -97,6 +113,15 @@ func Init(gitDir string, force bool) error {
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			return fmt.Errorf("creating directory %s: %w", d, err)
+		}
+	}
+
+	// If running inside a worktree, also create the shared locks dir under
+	// the common .git dir so that ref locks are visible to all worktrees.
+	sharedDir := SharedSafegitDir(gitDir)
+	if sharedDir != sgDir {
+		if err := os.MkdirAll(filepath.Join(sharedDir, "locks", "refs", "heads"), 0755); err != nil {
+			return fmt.Errorf("creating shared locks directory %s: %w", sharedDir, err)
 		}
 	}
 
