@@ -134,10 +134,12 @@ func (l *RefLock) Release() error {
 
 // IsStale checks whether the process that holds the lock file is dead.
 // Returns (true, nil) if the lock is stale and can be reclaimed.
+// A corrupt or zero-length lock file (no parseable PID) is treated as stale.
 func IsStale(lockPath string) (bool, error) {
 	pid, err := parsePID(lockPath)
 	if err != nil {
-		return false, err
+		// Corrupt lock (e.g. zero-length from a crash mid-create) -- treat as stale
+		return true, nil
 	}
 
 	// kill(pid, 0) checks existence without sending a signal
