@@ -193,7 +193,7 @@ func (p *Pipeline) tryCommit(
 	}
 	defer tmpIdx.Cleanup()
 
-	// Step 3: Stage files into tmp index (with optional hunk selection)
+	// Step 2: Stage files into tmp index (with optional hunk selection)
 	for i, absPath := range absFiles {
 		hunks := fileSpecs[i].Hunks
 		if hunks != nil {
@@ -209,7 +209,7 @@ func (p *Pipeline) tryCommit(
 		}
 	}
 
-	// Step 4: Build tree
+	// Step 3: Build tree
 	treeSHA, err := git.WriteTree(tmpIdx.IndexPath)
 	if err != nil {
 		return nil, false, &CommitError{Code: ExitWriteTree, Message: fmt.Sprintf("write-tree failed: %v", err)}
@@ -226,7 +226,7 @@ func (p *Pipeline) tryCommit(
 		}
 	}
 
-	// Step 6: Build commit object
+	// Step 4: Build commit object
 	commitSHA, err := git.CommitTree(treeSHA, parentSHA, req.Message)
 	if err != nil {
 		return nil, false, &CommitError{Code: ExitCommitTree, Message: fmt.Sprintf("commit-tree failed: %v", err)}
@@ -250,7 +250,7 @@ func (p *Pipeline) tryCommit(
 
 	// --- Phase B: serialized (per-ref lock + CAS) ---
 
-	// Step 7: Acquire ref lock
+	// Step 5: Acquire ref lock
 	lockTimeout := time.Duration(p.Config.Lock.AcquireTimeoutSeconds) * time.Second
 	if lockTimeout <= 0 {
 		lockTimeout = 30 * time.Second
@@ -261,7 +261,7 @@ func (p *Pipeline) tryCommit(
 	}
 	defer refLock.Release()
 
-	// Step 8: Re-resolve parent (CAS check)
+	// Step 6: Re-resolve parent (CAS check)
 	if isRootCommit {
 		// For root commits, verify the ref still doesn't exist
 		if _, rerr := git.RevParse(ref); rerr == nil {
@@ -278,12 +278,12 @@ func (p *Pipeline) tryCommit(
 		}
 	}
 
-	// Step 9: Update ref (CAS for normal commits; create for root commits)
+	// Step 7: Update ref (CAS for normal commits; create for root commits)
 	if err := git.UpdateRef(ref, commitSHA, parentSHA); err != nil {
 		return nil, false, fmt.Errorf("update-ref failed: %w", err)
 	}
 
-	// Step 10: Sync main index to match HEAD so git status/diff work correctly.
+	// Step 8: Sync main index to match HEAD so git status/diff work correctly.
 	// Only when committing to the current branch -- cross-branch commits must
 	// not clobber the main index.
 	if headRef, herr := git.HeadRef(); herr == nil && headRef == ref {
@@ -292,9 +292,7 @@ func (p *Pipeline) tryCommit(
 		}
 	}
 
-	// Step 11: Lock released by defer
-
-	// Step 12: Append op log
+	// Step 9: Append op log (lock released by defer)
 	_ = oplog.Append(p.SafegitDir, oplog.Entry{
 		Op: "commit",
 		Extra: map[string]interface{}{
@@ -305,8 +303,6 @@ func (p *Pipeline) tryCommit(
 			"attempts": attempt,
 		},
 	})
-
-	// Step 12: Cleanup handled by defer
 
 	return &CommitResult{
 		SHA:      commitSHA,
