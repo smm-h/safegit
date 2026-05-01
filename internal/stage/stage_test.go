@@ -9,28 +9,18 @@ import (
 
 	"github.com/smm-h/safegit/internal/index"
 	"github.com/smm-h/safegit/internal/repo"
+	"github.com/smm-h/safegit/internal/testutil"
 )
 
-// initTestRepo creates a temp git repo with an initial commit and safegit initialized.
-// Returns (repoDir, safegitDir).
-func initTestRepo(t *testing.T) (string, string) {
+// initStageTestRepo creates a repo with a multi-line seed file for hunk testing.
+// Uses testutil.InitRepo for the base setup, then replaces seed.txt content with
+// multiple lines needed by hunk-related tests.
+func initStageTestRepo(t *testing.T) (string, string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
 
-	cmds := [][]string{
-		{"git", "init", "--initial-branch=main"},
-		{"git", "config", "user.email", "test@test.com"},
-		{"git", "config", "user.name", "Test"},
-	}
-	for _, args := range cmds {
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v failed: %v\n%s", args, err, out)
-		}
-	}
-
-	// Create a seed file with multiple lines for hunk testing
+	// Overwrite seed.txt with multi-line content for hunk testing, then amend
+	// the initial commit so the baseline has the richer content.
 	seedContent := "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n"
 	seedPath := filepath.Join(dir, "seed.txt")
 	if err := os.WriteFile(seedPath, []byte(seedContent), 0644); err != nil {
@@ -38,36 +28,21 @@ func initTestRepo(t *testing.T) (string, string) {
 	}
 	for _, args := range [][]string{
 		{"git", "add", "seed.txt"},
-		{"git", "commit", "-m", "initial"},
+		{"git", "commit", "--amend", "-m", "initial"},
 	} {
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir = dir
 		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v failed: %v\n%s", args, err, out)
+			t.Fatalf("%v: %v\n%s", args, err, out)
 		}
 	}
 
-	gitDir := filepath.Join(dir, ".git")
-	if err := repo.Init(gitDir, false); err != nil {
-		t.Fatalf("safegit init: %v", err)
-	}
-	sgDir := repo.SafegitDir(gitDir)
 	return dir, sgDir
 }
 
-// chdir changes into dir for the duration of the test.
-func chdir(t *testing.T, dir string) {
-	t.Helper()
-	old, _ := os.Getwd()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chdir(old) })
-}
-
 func TestExtractHunks(t *testing.T) {
-	dir, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, sgDir := initStageTestRepo(t)
+	testutil.Chdir(t, dir)
 
 	// Modify the file to create multiple hunks:
 	// Change line 2 (near top) and line 9 (near bottom) -- with enough
@@ -157,8 +132,8 @@ func TestBuildPatch(t *testing.T) {
 }
 
 func TestStageSpecificHunks(t *testing.T) {
-	dir, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	// Create a file with enough lines to produce distinct hunks
 	// Original has lines 1-10. Modify lines 1, 5, and 10 to get 3 hunks
@@ -223,8 +198,8 @@ func TestStageSpecificHunks(t *testing.T) {
 }
 
 func TestBinaryFileReject(t *testing.T) {
-	dir, sgDir := initTestRepo(t)
-	chdir(t, dir)
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
 
 	// Create a binary file (with null bytes)
 	binContent := []byte{0x00, 0x01, 0x02, 0xFF, 0xFE, 0x00, 0x50, 0x4E, 0x47}

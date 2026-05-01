@@ -7,34 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/smm-h/safegit/internal/testutil"
 )
 
-// initTestRepo creates a temp git repo with an initial commit and returns its path.
-func initTestRepo(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-
-	cmds := [][]string{
-		{"git", "init", "--initial-branch=main"},
-		{"git", "config", "user.email", "test@test.com"},
-		{"git", "config", "user.name", "Test"},
-		{"git", "commit", "--allow-empty", "-m", "initial"},
-	}
-	for _, args := range cmds {
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%v failed: %v\n%s", args, err, out)
-		}
-	}
-	return dir
-}
-
 func TestRun(t *testing.T) {
-	dir := initTestRepo(t)
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(dir)
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
 
 	stdout, _, err := Run(context.Background(), "rev-parse", "--show-toplevel")
 	if err != nil {
@@ -50,10 +29,8 @@ func TestRun(t *testing.T) {
 }
 
 func TestRunWithEnv(t *testing.T) {
-	dir := initTestRepo(t)
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(dir)
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
 
 	// GIT_AUTHOR_NAME should be visible in commit output
 	stdout, _, err := RunWithEnv(context.Background(),
@@ -70,10 +47,8 @@ func TestRunWithEnv(t *testing.T) {
 }
 
 func TestRepoRoot(t *testing.T) {
-	dir := initTestRepo(t)
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(dir)
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
 
 	root, err := RepoRoot()
 	if err != nil {
@@ -87,10 +62,8 @@ func TestRepoRoot(t *testing.T) {
 }
 
 func TestHeadRef(t *testing.T) {
-	dir := initTestRepo(t)
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(dir)
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
 
 	ref, err := HeadRef()
 	if err != nil {
@@ -102,10 +75,8 @@ func TestHeadRef(t *testing.T) {
 }
 
 func TestRevParse(t *testing.T) {
-	dir := initTestRepo(t)
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(dir)
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
 
 	sha, err := RevParse("HEAD")
 	if err != nil {
@@ -117,10 +88,8 @@ func TestRevParse(t *testing.T) {
 }
 
 func TestReadTreeAndWriteTree(t *testing.T) {
-	dir := initTestRepo(t)
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(dir)
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
 
 	// Create a file, add it, commit it so HEAD has a non-empty tree
 	os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hello"), 0644)
@@ -147,10 +116,8 @@ func TestReadTreeAndWriteTree(t *testing.T) {
 }
 
 func TestCommitTree(t *testing.T) {
-	dir := initTestRepo(t)
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(dir)
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
 
 	// Get the tree SHA from HEAD
 	headSHA, _ := RevParse("HEAD")
@@ -167,10 +134,8 @@ func TestCommitTree(t *testing.T) {
 }
 
 func TestUpdateRef(t *testing.T) {
-	dir := initTestRepo(t)
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(dir)
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
 
 	headSHA, _ := RevParse("HEAD")
 	treeSHA, _, _ := Run(context.Background(), "rev-parse", "HEAD^{tree}")
@@ -198,10 +163,8 @@ func TestUpdateRef(t *testing.T) {
 }
 
 func TestGitDir(t *testing.T) {
-	dir := initTestRepo(t)
-	oldDir, _ := os.Getwd()
-	defer os.Chdir(oldDir)
-	os.Chdir(dir)
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
 
 	gitDir, err := GitDir()
 	if err != nil {
