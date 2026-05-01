@@ -9,6 +9,8 @@ if [ -f package.json ]; then
   VERSION=$(node -e "console.log(require('./package.json').version)" 2>/dev/null) || exit 0
 elif [ -f pyproject.toml ]; then
   VERSION=$(grep -m1 '^version' pyproject.toml | sed 's/.*"\(.*\)".*/\1/') || exit 0
+elif [ -f VERSION ]; then
+  VERSION=$(tr -d '[:space:]' < VERSION) || exit 0
 else
   exit 0
 fi
