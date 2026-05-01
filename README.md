@@ -102,7 +102,8 @@ Configuration is stored in `.git/safegit/config.json`. Remove the entire
 - **Submodules and LFS are not supported.** `safegit init` refuses on repos with
   `.gitmodules` or `filter=lfs` in `.gitattributes` (use `--force` to override).
 - **Linux and macOS only.** Windows is not supported (Unix-only syscalls for
-  locking, signals, process management).
+  locking, signals, process management). WSL (Windows Subsystem for Linux) works
+  since it runs the Linux binary natively.
 
 ## License
 
