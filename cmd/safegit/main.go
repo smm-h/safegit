@@ -823,16 +823,16 @@ func runDoctor(flags globalFlags) {
 
 	sgDir := repo.SafegitDir(gitDir)
 
-	// Check 2: Orphan tmp dirs
+	// Check 2: Orphan tmp dirs (report only, don't delete -- use gc for cleanup)
 	if repo.IsInitialized(gitDir) {
-		orphans, err := index.GarbageCollect(sgDir)
+		orphans, err := index.GarbageCollectDryRun(sgDir)
 		if err != nil {
 			checks = append(checks, checkResult{Name: "tmp_dirs", Status: "warn", Detail: err.Error()})
-		} else if orphans > 0 {
+		} else if len(orphans) > 0 {
 			checks = append(checks, checkResult{
 				Name:   "tmp_dirs",
 				Status: "warn",
-				Detail: fmt.Sprintf("cleaned %d orphan tmp dir(s)", orphans),
+				Detail: fmt.Sprintf("%d orphan tmp dir(s) found (run 'safegit gc' to clean)", len(orphans)),
 			})
 		} else {
 			checks = append(checks, checkResult{Name: "tmp_dirs", Status: "ok"})
