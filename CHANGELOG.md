@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.1.1
+
+### New features
+- `safegit undo` reverses the last commit, amend, or reword using the oplog
+- `safegit amend --branch` and `safegit reword --branch` for cross-branch operation
+- Passthrough for `stash`, `cherry-pick`, `revert` (with coordination guards) and `tag`
+- Push oplog now records individual ref SHAs for auditing
+- Ref locks shared across git worktrees via `git rev-parse --git-common-dir`
+- Initial commit support: `safegit commit` works in empty repos with no prior commits
+- Version string auto-detected via `debug.ReadBuildInfo` for `go install` users
+
+### Bug fixes
+- Cross-branch commit no longer clobbers the main `.git/index`
+- Cross-branch amend/reword no longer clobbers the main `.git/index`
+- Amend now checks wip-locks (previously bypassed the protection entirely)
+- Reword retries on CAS miss instead of hard-failing
+- Amend uses the target ref instead of literal `HEAD` (fixes TOCTOU)
+- Zero-length lock files (from crashes) are now treated as stale and recovered
+- Transient `git update-ref` lock failures are retried instead of hard-failing
+- Doctor no longer deletes orphan tmp dirs (reports only; use `gc` to clean)
+- Broken symlinks detected correctly via `os.Lstat` instead of `os.Stat`
+- Filenames containing colons no longer misidentified as hunk specs
+- Push retry backoff reduced from 1s/4s/16s to 1s/2s/4s
+- Detached HEAD produces a clear error message instead of an opaque git error
+
+### Breaking changes
+- **Wip no longer reverts files in the working tree.** Previously, `safegit wip` would snapshot files and revert them to HEAD. Now it only snapshots and creates wip-locks. This prevents clobbering another agent's uncommitted edits in a shared worktree. Users who need to revert files after wip should do so manually.
+- **Wip commit message format changed** from `files: a.txt, b.txt` (comma-separated) to one `file: <path>` line per file. This fixes parsing failures for filenames containing commas. Old wip commits using the legacy format are still supported for restore.
+- `safegit unwip` no longer accepts `--force` (the clean-check it bypassed was removed)
+
+### Code quality
+- Split `main.go` (1800 lines) into 10 focused files
+- Consolidated 5 duplicated `*Die` functions into a single `die()` helper
+- Extracted shared hunk-spec parsing into `parseFileSpecs()`
+- JSON output no longer emits `"error": null` and `"warnings": null` on success
+- All git passthrough commands now route through `git.RunPassthrough` for `--no-optional-locks`
+- Shared test helpers extracted into `internal/testutil`
+
+### Testing
+- Added unit tests for CLI flag parsing, hunk specs, and helpers
+- Added tests for amend CAS retry, cross-branch index preservation, and empty repo commits
+- Made hooks output configurable for test capture via `hooks.SetOutput`
+- Bug experiment scripts in `scripts/experiments/` for regression verification
+
 ## 0.1.0
 
 - Two-phase commit pipeline with per-invocation tmp indexes and CAS retry
