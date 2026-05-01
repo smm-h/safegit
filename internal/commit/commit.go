@@ -92,6 +92,13 @@ func (p *Pipeline) Execute(ctx context.Context, req CommitRequest) (*CommitResul
 		ref = "refs/heads/" + ref
 	}
 
+	// When --branch is explicit, require it to exist to prevent orphan branches from typos
+	if req.Branch != "" {
+		if _, err := git.RevParse(ctx, ref); err != nil {
+			return nil, fmt.Errorf("branch %q does not exist (use 'safegit branch %s' to create it)", req.Branch, req.Branch)
+		}
+	}
+
 	// Resolve FileSpecs from Files if FileSpecs not set
 	fileSpecs := req.FileSpecs
 	if len(fileSpecs) == 0 {

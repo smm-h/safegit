@@ -57,6 +57,12 @@ func (p *Pipeline) Amend(ctx context.Context, req AmendRequest) (*AmendResult, e
 		ref = "refs/heads/" + ref
 	}
 
+	if req.Branch != "" {
+		if _, err := git.RevParse(ctx, ref); err != nil {
+			return nil, fmt.Errorf("branch %q does not exist", req.Branch)
+		}
+	}
+
 	if len(req.FileSpecs) == 0 {
 		return nil, fmt.Errorf("no files specified for amend")
 	}
@@ -280,6 +286,12 @@ func (p *Pipeline) Reword(ctx context.Context, req RewordRequest) (*RewordResult
 	}
 	if !strings.HasPrefix(ref, "refs/") {
 		ref = "refs/heads/" + ref
+	}
+
+	if req.Branch != "" {
+		if _, err := git.RevParse(ctx, ref); err != nil {
+			return nil, fmt.Errorf("branch %q does not exist", req.Branch)
+		}
 	}
 
 	maxAttempts := p.Config.Commit.CASMaxAttempts
