@@ -79,9 +79,14 @@ func Create(safegitDir string, files []string) (*WipInfo, error) {
 		return nil, fmt.Errorf("resolving HEAD: %w", err)
 	}
 
-	// Create wip commit with structured message
-	filesLine := strings.Join(files, ", ")
-	msg := fmt.Sprintf("safegit wip %s\nfiles: %s", id, filesLine)
+	// Create wip commit with structured message (one file: line per file
+	// to handle filenames containing commas)
+	var msgLines []string
+	msgLines = append(msgLines, fmt.Sprintf("safegit wip %s", id))
+	for _, f := range files {
+		msgLines = append(msgLines, "file: "+f)
+	}
+	msg := strings.Join(msgLines, "\n")
 	commitSHA, err := git.CommitTree(treeSHA, headSHA, msg)
 	if err != nil {
 		return nil, fmt.Errorf("commit-tree: %w", err)
@@ -332,20 +337,31 @@ func removeLockFile(safegitDir, filePath string) {
 	os.Remove(lp)
 }
 
-// parseFilesFromCommit reads the "files:" line from a wip commit message.
+// parseFilesFromCommit reads file paths from a wip commit message.
+// Supports both the new format ("file: " prefix per line) and the legacy
+// format ("files: " with comma-separated list) for backward compatibility.
 func parseFilesFromCommit(commitSHA string) ([]string, error) {
 	ctx := context.Background()
 	out, _, err := git.Run(ctx, "log", "-1", "--format=%B", commitSHA)
 	if err != nil {
 		return nil, err
 	}
+	var files []string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "file: ") {
+			files = append(files, strings.TrimPrefix(line, "file: "))
+		}
+	}
+	if len(files) > 0 {
+		return files, nil
+	}
+	// Legacy format: "files: a.txt, b.txt"
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "files: ") {
 			raw := strings.TrimPrefix(line, "files: ")
-			parts := strings.Split(raw, ", ")
-			var files []string
-			for _, p := range parts {
+			for _, p := range strings.Split(raw, ", ") {
 				p = strings.TrimSpace(p)
 				if p != "" {
 					files = append(files, p)
@@ -354,5 +370,5 @@ func parseFilesFromCommit(commitSHA string) ([]string, error) {
 			return files, nil
 		}
 	}
-	return nil, fmt.Errorf("no 'files:' line found in commit %s", commitSHA)
+	return nil, fmt.Errorf("no file list found in commit %s", commitSHA)
 }
