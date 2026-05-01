@@ -51,9 +51,10 @@ func runDoctor(flags globalFlags) {
 		}
 	}
 
-	// Check 3: Stale locks
+	// Check 3: Stale locks (scan the shared safegit dir so worktree locks are found)
 	if repo.IsInitialized(gitDir) {
-		locksDir := filepath.Join(sgDir, "locks", "refs", "heads")
+		sharedDir := repo.SharedSafegitDir(gitDir)
+		locksDir := filepath.Join(sharedDir, "locks", "refs", "heads")
 		staleCount := 0
 		entries, err := os.ReadDir(locksDir)
 		if err == nil {

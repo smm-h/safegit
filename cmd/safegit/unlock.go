@@ -36,10 +36,10 @@ func runUnlock(flags globalFlags, args []string) int {
 		ref = "refs/heads/" + ref
 	}
 
-	sgDir := repo.SafegitDir(gitDir)
+	sharedDir := repo.SharedSafegitDir(gitDir)
 
-	// Check if lock exists
-	lp := filepath.Join(sgDir, "locks", ref+".lock")
+	// Check if lock exists (locks live under the shared safegit dir)
+	lp := filepath.Join(sharedDir, "locks", ref+".lock")
 	if _, err := os.Stat(lp); os.IsNotExist(err) {
 		msg := fmt.Sprintf("no lock held on %s", ref)
 		if flags.format == formatJSON {
@@ -74,7 +74,7 @@ func runUnlock(flags globalFlags, args []string) int {
 	}
 
 	// Release the lock
-	if err := lock.ForceRelease(sgDir, ref); err != nil {
+	if err := lock.ForceRelease(sharedDir, ref); err != nil {
 		if flags.format == formatJSON {
 			emitJSON("unlock", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
 		} else {

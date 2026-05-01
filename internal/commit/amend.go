@@ -12,6 +12,7 @@ import (
 	"github.com/smm-h/safegit/internal/index"
 	"github.com/smm-h/safegit/internal/lock"
 	"github.com/smm-h/safegit/internal/oplog"
+	"github.com/smm-h/safegit/internal/repo"
 	"github.com/smm-h/safegit/internal/stage"
 	"github.com/smm-h/safegit/internal/wip"
 )
@@ -192,7 +193,7 @@ func (p *Pipeline) tryAmend(
 	if lockTimeout <= 0 {
 		lockTimeout = 30 * time.Second
 	}
-	refLock, err := lock.Acquire(p.SafegitDir, ref, "amend", lockTimeout)
+	refLock, err := lock.Acquire(repo.SharedSafegitDir(p.SafegitDir), p.SafegitDir, ref, "amend", lockTimeout)
 	if err != nil {
 		return nil, false, fmt.Errorf("acquiring lock on %s: %w", ref, err)
 	}
@@ -338,7 +339,7 @@ func (p *Pipeline) tryReword(
 	if lockTimeout <= 0 {
 		lockTimeout = 30 * time.Second
 	}
-	refLock, err := lock.Acquire(p.SafegitDir, ref, "reword", lockTimeout)
+	refLock, err := lock.Acquire(repo.SharedSafegitDir(p.SafegitDir), p.SafegitDir, ref, "reword", lockTimeout)
 	if err != nil {
 		return nil, false, fmt.Errorf("acquiring lock on %s: %w", ref, err)
 	}

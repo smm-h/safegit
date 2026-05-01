@@ -203,6 +203,19 @@ func RunPassthrough(ctx context.Context, args ...string) error {
 	return cmd.Run()
 }
 
+// CommonGitDir returns the path to the shared .git directory.
+// For normal repos this equals GitDir(); for worktrees it returns the main
+// .git dir that is shared across all worktrees. Lock files should live here
+// so that worktrees committing to the same branch serialize correctly.
+func CommonGitDir() (string, error) {
+	ctx := context.Background()
+	out, _, err := Run(ctx, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // IsIgnored checks whether a file matches a gitignore rule.
 func IsIgnored(filePath string) (bool, error) {
 	ctx := context.Background()

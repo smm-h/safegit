@@ -102,7 +102,8 @@ func runUndo(flags globalFlags, args []string) {
 
 	// Acquire lock on the ref
 	timeout := time.Duration(cfg.Lock.AcquireTimeoutSeconds) * time.Second
-	lk, err := lock.Acquire(sgDir, ref, "undo", timeout)
+	sharedDir := repo.SharedSafegitDir(gitDir)
+	lk, err := lock.Acquire(sharedDir, sgDir, ref, "undo", timeout)
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("acquiring lock: %v", err))
 	}

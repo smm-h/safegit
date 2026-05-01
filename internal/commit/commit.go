@@ -255,7 +255,7 @@ func (p *Pipeline) tryCommit(
 	if lockTimeout <= 0 {
 		lockTimeout = 30 * time.Second
 	}
-	refLock, err := lock.Acquire(p.SafegitDir, ref, "commit", lockTimeout)
+	refLock, err := lock.Acquire(repo.SharedSafegitDir(p.SafegitDir), p.SafegitDir, ref, "commit", lockTimeout)
 	if err != nil {
 		return nil, false, fmt.Errorf("acquiring lock on %s: %w", ref, err)
 	}
