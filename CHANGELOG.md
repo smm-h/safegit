@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.4
+
+- Thread context.Context through all git helpers and callers (enables cancellation and clean shutdown)
+- Signal handler cleans up lock files on SIGINT/SIGTERM (prevents 30s stale-lock timeout on macOS)
+- `--branch` now errors if the target branch does not exist (prevents orphan branches from typos)
+- Config validation rejects zero values (consistent with `safegit config` CLI behavior)
+- Coord guard diffs against HEAD directly instead of relying on the main index (eliminates false dirty-tree refusals)
+- Mark unimplemented design.md features: inotify/kqueue wakeup, queue files, standalone stage/unstage
+
 ## 0.1.3
 
 - Fix goreleaser config: add `main: ./cmd/safegit` so release binaries build correctly
