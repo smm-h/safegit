@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.6
+
+- Fix: `safegit unwip` now refuses to restore when files were modified since the wip was created, preventing silent data loss from overwriting another agent's edits
+- Fix: platform-specific NFS detection refined into separate linux/darwin/windows files (replaces combined doctor_unix.go)
+- Fix: goreleaser ldflags inject version string into release binaries
+- Add Dockerfile for building safegit from source
+- Add CONTRIBUTING.md with build, test, and release instructions
+- Reorganize docs: design.md moved to todo/.done/, future features extracted to todo/future-features.md, req.md and research.md moved to docs/
+
 ## 0.1.5
 
 - Add CAS retry jitter (1-10ms random sleep) to break thundering-herd stampedes under heavy concurrency
@@ -26,6 +35,8 @@
 
 ## 0.1.2
 
+- Harden lock staleness: check hostname and /proc start-time to detect PID reuse across reboots
+- Validate config values at load time (reject negatives and zero durations)
 - Fix Windows build: extract NFS filesystem check into platform-specific files
 - Fix `splitDiffChunks` panic on empty diff output
 - Fix `safegit hook run <name>` now runs only the named hook, not all hooks
@@ -34,7 +45,7 @@
 - Fix uninstall now cleans shared worktree lock directory
 - Fix GC reports all removal errors instead of just the last one
 - Fix amend/reword SyncMainIndex guarded for cross-branch operations
-- Fix transient `git update-ref` lock failures are retried instead of hard-failing
+- Add known limitations section to README (cross-machine, PID reuse, submodules)
 - Remove stale NEXT.md
 - Update design.md: push backoff values, stage/unstage status, lock mechanism
 
