@@ -53,6 +53,29 @@ func New(safegitDir string, treeish string) (*TmpIndex, error) {
 	return &TmpIndex{Dir: dir, IndexPath: indexPath}, nil
 }
 
+// NewEmpty creates a temporary index directory with an empty index (no tree).
+// Used for root commits in repos with no prior commits.
+func NewEmpty(safegitDir string) (*TmpIndex, error) {
+	tmpBase := filepath.Join(safegitDir, "tmp")
+
+	var rndBytes [4]byte
+	if _, err := rand.Read(rndBytes[:]); err != nil {
+		return nil, fmt.Errorf("generating random suffix: %w", err)
+	}
+	rnd := hex.EncodeToString(rndBytes[:])
+
+	dirName := fmt.Sprintf("%d-%s", os.Getpid(), rnd)
+	dir := filepath.Join(tmpBase, dirName)
+
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("creating tmp index dir: %w", err)
+	}
+
+	indexPath := filepath.Join(dir, "index")
+	// Empty index: just create the dir, git add will initialize the index file
+	return &TmpIndex{Dir: dir, IndexPath: indexPath}, nil
+}
+
 // Cleanup removes the temporary index directory.
 func (t *TmpIndex) Cleanup() error {
 	return os.RemoveAll(t.Dir)
