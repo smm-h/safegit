@@ -10,6 +10,28 @@ import (
 	"github.com/smm-h/safegit/internal/stage"
 )
 
+// stripConflictingFlags removes flags that would break JSON-mode parsing.
+func stripConflictingFlags(args []string) []string {
+	var filtered []string
+	skip := false
+	for _, a := range args {
+		if skip {
+			skip = false
+			continue
+		}
+		lower := strings.ToLower(a)
+		if strings.HasPrefix(lower, "--color") || strings.HasPrefix(lower, "--format") ||
+			strings.HasPrefix(lower, "--pretty") {
+			if !strings.Contains(a, "=") {
+				skip = true // next arg is the value
+			}
+			continue
+		}
+		filtered = append(filtered, a)
+	}
+	return filtered
+}
+
 // --- status ---
 
 type statusEntry struct {
@@ -238,7 +260,8 @@ func runDiff(flags globalFlags, args []string) int {
 	}
 
 	ctx := context.Background()
-	gitArgs := append([]string{"diff", "--no-color", "--no-ext-diff"}, args...)
+	safeArgs := stripConflictingFlags(args)
+	gitArgs := append([]string{"diff", "--no-color", "--no-ext-diff"}, safeArgs...)
 	stdout, stderr, err := git.Run(ctx, gitArgs...)
 	if err != nil {
 		emitJSON("diff", nil, &jsonError{Code: 1, Message: strings.TrimSpace(stderr)}, nil)
@@ -270,7 +293,8 @@ func runLog(flags globalFlags, args []string) int {
 	ctx := context.Background()
 	// Use null byte as record separator for safe multi-line message parsing.
 	// %H = full SHA, %an <%ae> = author, %aI = ISO date, %B = full body
-	gitArgs := append([]string{"log", "--format=%H%n%an <%ae>%n%aI%n%B%x00"}, args...)
+	safeArgs := stripConflictingFlags(args)
+	gitArgs := append([]string{"log", "--format=%H%n%an <%ae>%n%aI%n%B%x00"}, safeArgs...)
 	stdout, stderr, err := git.Run(ctx, gitArgs...)
 	if err != nil {
 		emitJSON("log", nil, &jsonError{Code: 1, Message: strings.TrimSpace(stderr)}, nil)
@@ -349,7 +373,8 @@ func runShow(flags globalFlags, args []string) int {
 
 	// Use a unique delimiter to split commit metadata from diff output.
 	// The %x00 after %B marks end of metadata section.
-	gitArgs := append([]string{"show", "--format=%H%n%an <%ae>%n%aI%n%B%x00", "--no-color"}, args...)
+	safeArgs := stripConflictingFlags(args)
+	gitArgs := append([]string{"show", "--format=%H%n%an <%ae>%n%aI%n%B%x00", "--no-color"}, safeArgs...)
 	stdout, stderr, err := git.Run(ctx, gitArgs...)
 	if err != nil {
 		emitJSON("show", nil, &jsonError{Code: 1, Message: strings.TrimSpace(stderr)}, nil)
