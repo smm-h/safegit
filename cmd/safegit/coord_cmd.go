@@ -356,6 +356,32 @@ func runBisect(flags globalFlags, args []string) int {
 	return 0
 }
 
+// runGuardedPassthrough runs a coordination check, then passes through to git.
+func runGuardedPassthrough(flags globalFlags, gitCmd string, args []string) int {
+	gitDir := mustGitDir(flags)
+	if err := repo.EnsureInitialized(gitDir); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 4
+	}
+	sgDir := repo.SafegitDir(gitDir)
+
+	if code := coordGuard(flags, sgDir, gitCmd); code != 0 {
+		return code
+	}
+
+	code := runPassthrough(gitCmd, args)
+
+	syncMainIndex(flags, gitCmd)
+
+	_ = oplog.Append(sgDir, oplog.Entry{
+		Op: gitCmd,
+		Extra: map[string]interface{}{
+			"args": strings.Join(args, " "),
+		},
+	})
+	return code
+}
+
 // runPassthrough executes a git command directly, forwarding all args.
 // Used for read-only commands (status, diff, log, show).
 func runPassthrough(gitCmd string, args []string) int {

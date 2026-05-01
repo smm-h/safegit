@@ -127,6 +127,14 @@ func main() {
 		runUndo(flags, cmdArgs)
 	case "branch":
 		os.Exit(runBranch(flags, cmdArgs))
+	case "stash":
+		os.Exit(runGuardedPassthrough(flags, "stash", cmdArgs))
+	case "cherry-pick":
+		os.Exit(runGuardedPassthrough(flags, "cherry-pick", cmdArgs))
+	case "revert":
+		os.Exit(runGuardedPassthrough(flags, "revert", cmdArgs))
+	case "tag":
+		os.Exit(runPassthrough("tag", cmdArgs))
 	case "help", "--help", "-h":
 		printUsage(flags)
 	default:
@@ -258,6 +266,10 @@ Commands:
   diff        Show diffs (git passthrough)
   log         Show commit log (git passthrough)
   show        Show objects (git passthrough)
+  stash       Stash changes (guarded)
+  cherry-pick Cherry-pick commits (guarded)
+  revert      Revert commits (guarded)
+  tag         Manage tags (git passthrough)
   config      Show or set configuration values
   unlock      Release a stale ref lock (--force to override live holder)
   doctor      Health checks (initialized? orphan dirs? stale locks?)
