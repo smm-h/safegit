@@ -109,6 +109,7 @@ func (p *Pipeline) Amend(ctx context.Context, req AmendRequest) (*AmendResult, e
 		if !retry {
 			return result, nil
 		}
+		casRetryJitter()
 	}
 
 	return nil, &CommitError{
@@ -307,6 +308,7 @@ func (p *Pipeline) Reword(ctx context.Context, req RewordRequest) (*RewordResult
 		if !retry {
 			return result, nil
 		}
+		casRetryJitter()
 	}
 
 	return nil, &CommitError{
