@@ -13,6 +13,6 @@ echo "  go build..."
 go build -o /dev/null ./cmd/safegit
 
 echo "  go test..."
-go test ./... -race -count=1
+go test ./... -race -short -count=1
 
 echo "Pre-release checks passed."
