@@ -1031,3 +1031,249 @@ func TestShowJSON(t *testing.T) {
 		t.Error("expected at least 1 file in show output")
 	}
 }
+
+// TestUndo verifies that safegit undo rolls back the last commit, and that
+// a second undo with nothing undoable fails.
+func TestUndo(t *testing.T) {
+	dir := newRepo(t)
+
+	// Record HEAD before the commit
+	preCmd := exec.Command("git", "rev-parse", "HEAD")
+	preCmd.Dir = dir
+	preOut, err := preCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	preSHA := strings.TrimSpace(string(preOut))
+
+	// Create a file and commit it
+	if err := os.WriteFile(filepath.Join(dir, "undo.txt"), []byte("undo me\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegit(t, dir, "commit", "-m", "commit to undo", "--", "undo.txt")
+	if code != 0 {
+		t.Fatalf("commit failed (code %d): %s", code, stderr)
+	}
+
+	// Record HEAD after the commit
+	postCmd := exec.Command("git", "rev-parse", "HEAD")
+	postCmd.Dir = dir
+	postOut, err := postCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	postSHA := strings.TrimSpace(string(postOut))
+
+	if preSHA == postSHA {
+		t.Fatal("HEAD did not advance after commit")
+	}
+
+	// Run safegit undo
+	_, stderr, code = runSafegit(t, dir, "undo")
+	if code != 0 {
+		t.Fatalf("undo failed (code %d): %s", code, stderr)
+	}
+
+	// Verify HEAD rolled back to the pre-commit SHA
+	undoneCmd := exec.Command("git", "rev-parse", "HEAD")
+	undoneCmd.Dir = dir
+	undoneOut, err := undoneCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	undoneSHA := strings.TrimSpace(string(undoneOut))
+	if undoneSHA != preSHA {
+		t.Errorf("after undo HEAD = %s, want %s (pre-commit)", undoneSHA, preSHA)
+	}
+
+	// Verify the file is no longer in HEAD's tree
+	treeCmd := exec.Command("git", "ls-tree", "-r", "--name-only", "HEAD")
+	treeCmd.Dir = dir
+	treeOut, err := treeCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(treeOut), "undo.txt") {
+		t.Error("undo.txt still in HEAD tree after undo")
+	}
+
+	// Run undo again -- should fail (the last oplog entry is now an undo, not undoable)
+	_, _, code = runSafegit(t, dir, "undo")
+	if code == 0 {
+		t.Error("second undo should have failed, but exited 0")
+	}
+}
+
+// TestGuardedPassthrough_StashAndTag verifies:
+// - tag (unguarded passthrough) works on a clean tree
+// - tag -l shows the created tag
+// - stash (guarded passthrough) is refused with exit 5 on a dirty tree
+func TestGuardedPassthrough_StashAndTag(t *testing.T) {
+	dir := newRepo(t)
+
+	// Tag on a clean tree should succeed (tag is not guarded)
+	_, stderr, code := runSafegit(t, dir, "tag", "v-test")
+	if code != 0 {
+		t.Fatalf("tag creation failed (code %d): %s", code, stderr)
+	}
+
+	// tag -l should show the tag
+	stdout, _, code := runSafegit(t, dir, "tag", "-l")
+	if code != 0 {
+		t.Fatalf("tag -l failed (code %d)", code)
+	}
+	if !strings.Contains(stdout, "v-test") {
+		t.Errorf("tag -l output %q does not contain 'v-test'", stdout)
+	}
+
+	// Dirty the working tree
+	seedPath := filepath.Join(dir, "seed.txt")
+	if err := os.WriteFile(seedPath, []byte("dirty for stash\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// stash is guarded -- should refuse with exit code 5
+	_, _, code = runSafegit(t, dir, "stash")
+	if code != 5 {
+		t.Errorf("expected exit code 5 (coord guard refusal) for stash on dirty tree, got %d", code)
+	}
+}
+
+// TestDetachedHEAD_CommitRefused verifies that committing on a detached HEAD
+// fails, and that --branch <name> works around the detached state.
+func TestDetachedHEAD_CommitRefused(t *testing.T) {
+	dir := newRepo(t)
+
+	// Detach HEAD
+	cmd := exec.Command("git", "checkout", "--detach", "HEAD")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout --detach: %v\n%s", err, out)
+	}
+
+	// Create a file to commit
+	if err := os.WriteFile(filepath.Join(dir, "detached.txt"), []byte("detached\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Commit without --branch should fail (detached HEAD)
+	_, stderr, code := runSafegit(t, dir, "commit", "-m", "detached commit", "--", "detached.txt")
+	if code == 0 {
+		t.Fatal("commit on detached HEAD should have failed, but exited 0")
+	}
+	if !strings.Contains(strings.ToLower(stderr), "detached") {
+		// Also check stdout (JSON mode puts errors in stdout envelope)
+		// But we ran in human mode, so stderr is the right place.
+		t.Errorf("stderr %q does not mention 'detached'", stderr)
+	}
+
+	// Commit with --branch main should succeed
+	_, stderr, code = runSafegit(t, dir, "commit", "-m", "detached but targeted", "--branch", "main", "--", "detached.txt")
+	if code != 0 {
+		t.Fatalf("commit with --branch main on detached HEAD failed (code %d): %s", code, stderr)
+	}
+
+	// Verify the file landed on main
+	treeCmd := exec.Command("git", "ls-tree", "-r", "--name-only", "refs/heads/main")
+	treeCmd.Dir = dir
+	treeOut, err := treeCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(treeOut), "detached.txt") {
+		t.Error("detached.txt not found in main branch tree after --branch commit")
+	}
+}
+
+// TestUndoAmend verifies that safegit undo after an amend restores the
+// pre-amend commit: original file present, amend-added file absent.
+func TestUndoAmend(t *testing.T) {
+	dir := newRepo(t)
+
+	// Create file.txt and commit it
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("original\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegit(t, dir, "commit", "-m", "original commit", "--", "file.txt")
+	if code != 0 {
+		t.Fatalf("initial commit failed (code %d): %s", code, stderr)
+	}
+
+	// Record the original commit SHA (this is what undo should restore)
+	origCmd := exec.Command("git", "rev-parse", "HEAD")
+	origCmd.Dir = dir
+	origOut, err := origCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	origSHA := strings.TrimSpace(string(origOut))
+
+	// Create extra.txt and amend
+	if err := os.WriteFile(filepath.Join(dir, "extra.txt"), []byte("extra\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code := runSafegit(t, dir, "--format", "json", "amend", "--", "extra.txt")
+	if code != 0 {
+		t.Fatalf("amend failed (code %d): %s", code, stderr)
+	}
+
+	// Verify amend JSON has oldSha pointing to original commit
+	r := parseJSON(t, stdout)
+	if !r.OK {
+		t.Fatalf("amend returned ok=false: %s", stdout)
+	}
+	var amendData struct {
+		OldSHA string `json:"oldSha"`
+	}
+	if err := json.Unmarshal(r.Data, &amendData); err != nil {
+		t.Fatalf("parsing amend data: %v", err)
+	}
+	if amendData.OldSHA != origSHA {
+		t.Errorf("amend oldSha = %s, want %s (original commit)", amendData.OldSHA, origSHA)
+	}
+
+	// Verify HEAD moved (amend creates a new commit object)
+	amendedCmd := exec.Command("git", "rev-parse", "HEAD")
+	amendedCmd.Dir = dir
+	amendedOut, err := amendedCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	amendedSHA := strings.TrimSpace(string(amendedOut))
+	if amendedSHA == origSHA {
+		t.Fatal("HEAD did not change after amend")
+	}
+
+	// Run safegit undo
+	_, stderr, code = runSafegit(t, dir, "undo")
+	if code != 0 {
+		t.Fatalf("undo failed (code %d): %s", code, stderr)
+	}
+
+	// Verify HEAD rolled back to the original commit SHA
+	undoneCmd := exec.Command("git", "rev-parse", "HEAD")
+	undoneCmd.Dir = dir
+	undoneOut, err := undoneCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	undoneSHA := strings.TrimSpace(string(undoneOut))
+	if undoneSHA != origSHA {
+		t.Errorf("after undo HEAD = %s, want %s (original commit)", undoneSHA, origSHA)
+	}
+
+	// Verify file.txt is in tree but extra.txt is not
+	treeCmd := exec.Command("git", "ls-tree", "-r", "--name-only", "HEAD")
+	treeCmd.Dir = dir
+	treeOut, err := treeCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := string(treeOut)
+	if !strings.Contains(tree, "file.txt") {
+		t.Error("file.txt missing from HEAD tree after undo")
+	}
+	if strings.Contains(tree, "extra.txt") {
+		t.Error("extra.txt still in HEAD tree after undo (should have been removed)")
+	}
+}
