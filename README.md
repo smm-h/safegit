@@ -46,17 +46,20 @@ safegit push
 | `commit`  | Stage files and commit atomically using a per-invocation index |
 | `amend`   | Amend the tip commit with new files (CAS-safe) |
 | `reword`  | Rewrite the tip commit message (CAS-safe) |
+| `undo`    | Reverse the last commit, amend, or reword via oplog |
 | `wip`     | Save work-in-progress snapshots to refs |
 | `unwip`   | Restore a previously saved wip snapshot |
 | `push`    | Push with pre-pre-push hooks and retry logic |
+| `hook`    | Manage pre-pre-push hooks (list, run, install) |
 | `doctor`  | Health checks: initialization, stale locks, orphan dirs, bypass detection |
 | `gc`      | Garbage-collect dead tmp directories and rotate logs |
 | `config`  | Show or set configuration values |
 | `unlock`  | Release a stale ref lock |
 
-Read-only git commands (`status`, `diff`, `log`, `show`) and tree-mutating
-commands (`checkout`, `pull`, `merge`, `rebase`, `reset`) are passed through to
-git, with coordination guards on the mutating ones.
+Read-only git commands (`status`, `diff`, `log`, `show`, `branch`, `fetch`,
+`tag`) are passed through to git. Tree-mutating commands (`checkout`, `pull`,
+`merge`, `rebase`, `reset`, `bisect`, `stash`, `cherry-pick`, `revert`) are
+passed through with coordination guards.
 
 ## How it works
 
