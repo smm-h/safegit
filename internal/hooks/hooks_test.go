@@ -1,9 +1,11 @@
 package hooks
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -277,5 +279,56 @@ func TestInstall(t *testing.T) {
 	}
 	if !isExecutable(info) {
 		t.Error("installed hook should be executable")
+	}
+}
+
+func TestSetOutputCapturesHookOutput(t *testing.T) {
+	var outBuf, errBuf bytes.Buffer
+	restore := SetOutput(&outBuf, &errBuf)
+	defer restore()
+
+	gitDir := setupGitDir(t)
+	hookPath := filepath.Join(gitDir, "hooks", "pre-pre-push")
+	writeHook(t, hookPath, "#!/bin/sh\necho hello-from-hook\necho oops >&2\n")
+
+	ctx := context.Background()
+	results, err := Run(ctx, gitDir, []byte("refs/heads/main abc def456\n"), 30, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].ExitCode != 0 {
+		t.Fatalf("unexpected result: %+v", results)
+	}
+
+	if got := outBuf.String(); !strings.Contains(got, "hello-from-hook") {
+		t.Errorf("expected stdout to contain 'hello-from-hook', got %q", got)
+	}
+	if got := errBuf.String(); !strings.Contains(got, "oops") {
+		t.Errorf("expected stderr to contain 'oops', got %q", got)
+	}
+}
+
+func TestSetOutputCapturesDiscoverWarning(t *testing.T) {
+	var outBuf, errBuf bytes.Buffer
+	restore := SetOutput(&outBuf, &errBuf)
+	defer restore()
+
+	gitDir := setupGitDir(t)
+	// Write a non-executable hook to trigger the warning
+	hookPath := filepath.Join(gitDir, "hooks", "pre-pre-push")
+	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\nexit 0\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	hooks, err := Discover(gitDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hooks) != 0 {
+		t.Fatalf("expected 0 hooks, got %d", len(hooks))
+	}
+
+	if got := errBuf.String(); !strings.Contains(got, "not executable") {
+		t.Errorf("expected stderr warning about non-executable hook, got %q", got)
 	}
 }
