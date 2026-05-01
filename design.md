@@ -86,10 +86,10 @@ If the process is killed mid-invocation, the tmp directory leaks. `safegit gc` r
 `.git/safegit/log` is an append-only JSON-lines file. One line per mutating operation. It is the source of truth for `safegit doctor` (and `safegit undo`, post-v1).
 
 ```json
-{"ts":"2026-04-26T11:39:42.123Z","pid":12345,"op":"commit","ref":"refs/heads/main","tree":"<sha>","parent":"<sha>","new":"<sha>","attempts":1}
-{"ts":"2026-04-26T11:39:43.001Z","pid":12346,"op":"commit","ref":"refs/heads/main","tree":"<sha>","parent":"<sha>","new":"<sha>","attempts":3,"cas_misses":2}
-{"ts":"2026-04-26T11:39:44.500Z","pid":12347,"op":"wip","ref":"refs/safegit/wip/a3f9e1c2","files":["src/foo.go","src/bar.go"]}
-{"ts":"2026-04-26T11:39:45.900Z","pid":12348,"op":"push","ref":"refs/heads/main","local_sha":"<sha>","remote_sha":"<sha>","hooks_run":["pre-pre-push","pre-pre-push.d/lint"]}
+{"ts":"2026-04-26T11:39:42.123Z","pid":12345,"op":"commit","extra":{"ref":"refs/heads/main","tree":"<sha>","parent":"<sha>","sha":"<sha>","attempts":1}}
+{"ts":"2026-04-26T11:39:43.001Z","pid":12346,"op":"commit","extra":{"ref":"refs/heads/main","tree":"<sha>","parent":"<sha>","sha":"<sha>","attempts":3}}
+{"ts":"2026-04-26T11:39:44.500Z","pid":12347,"op":"wip-create","extra":{"id":"a3f9e1c2","ref":"refs/safegit/wip/a3f9e1c2","files":["src/foo.go","src/bar.go"]}}
+{"ts":"2026-04-26T11:39:45.900Z","pid":12348,"op":"push","extra":{"remote":"origin","refs":[{"localRef":"refs/heads/main","localSha":"<sha>","remoteRef":"refs/heads/main","remoteSha":"<sha>"}],"hooksRun":2}}
 ```
 
 Required fields: `ts`, `pid`, `op`. Other fields are op-specific. Writes use `O_APPEND` on Linux/macOS, which guarantees atomic append for writes <= `PIPE_BUF` (4096 bytes). Lines longer than 4096 bytes are rejected; commit messages are not logged, only their SHA.
@@ -446,8 +446,9 @@ Staging is folded into `safegit commit` via the `file:hunk-spec` syntax (e.g., `
 
 - **`safegit commit -m <msg> [-F <file>] [--allow-empty] [--branch <ref>] -- <files>...`** -- run the pipeline in Section 2. A complete file list after `--` is required.
     - JSON: `{"sha": "...", "ref": "...", "parent": "...", "tree": "...", "attempts": 1}`.
-- **`safegit amend [-m <msg>] -- <files>...`** -- amend the tip of the current branch. Implemented as: build new tree (with optional file changes), `commit-tree` with the parent of `HEAD`, lock-and-update-ref. Refuses if the branch tip moved since the amend was prepared.
-- **`safegit reword [<rev>] -m <msg>`** -- rewrite a commit message. v1 only allows rewording the tip of the current branch.
+- **`safegit amend [-m <msg>] [--branch <ref>] -- <files>...`** -- amend the tip of the current branch (or `--branch`). Implemented as: build new tree (with optional file changes), `commit-tree` with the parent of `HEAD`, lock-and-update-ref. Refuses if the branch tip moved since the amend was prepared.
+- **`safegit reword [<rev>] -m <msg> [--branch <ref>]`** -- rewrite a commit message. v1 only allows rewording the tip of the current branch (or `--branch`).
+- **`safegit undo`** -- reverse the last commit, amend, or reword on the current branch by reading the oplog and resetting the ref to the previous value via CAS.
 
 ### 5.5 Branching and tree-mutating ops
 
@@ -461,6 +462,10 @@ These commands all pass through the coordination layer in Section 8. They refuse
 - **`safegit rebase <upstream>`** -- subprocess to `git rebase`. Subject to coordination layer.
 - **`safegit reset --hard <rev>`** -- subject to coordination layer.
 - **`safegit bisect <subcommand>`** -- subject to coordination layer for tree-moving subcommands.
+- **`safegit stash [<args>...]`** -- guarded passthrough: coordination check, then `git stash`.
+- **`safegit cherry-pick <commit>...`** -- guarded passthrough: coordination check, then `git cherry-pick`.
+- **`safegit revert <commit>...`** -- guarded passthrough: coordination check, then `git revert`.
+- **`safegit tag [<args>...]`** -- unguarded passthrough to `git tag` (no coordination check).
 
 ### 5.6 Remote
 
@@ -615,27 +620,16 @@ files: file1, file2, ..."
 
 1. Verify `refs/safegit/wip/<wip-id>` exists.
 2. Read the file list from the wip commit message.
-3. Verify that the working-tree versions of those files match HEAD content (otherwise the user has scribbled on top of reverted-to-HEAD files; abort unless `--force`).
-4. Compute the diff between the wip ref and its parent, scoped to the recorded files:
+3. Restore files from the wip commit's tree directly to the working tree via `git checkout <wip-sha> -- <files>`. No clean-check is performed: wip-locks prevent commits to these files, so any working-tree changes are the user's own edits and are overwritten unconditionally.
 
-    ```
-    git diff <wip-id>^..<wip-id> -- <file1> <file2> ...
-    ```
-
-5. Apply the diff to the working tree:
-
-    ```
-    git apply <diff>
-    ```
-
-6. Delete the per-file lock files for the recorded files.
-7. Delete the wip ref:
+4. Delete the per-file lock files for the recorded files.
+5. Delete the wip ref:
 
     ```
     git update-ref -d refs/safegit/wip/<wip-id>
     ```
 
-8. Append `unwip` op log entry.
+6. Append `unwip` op log entry.
 
 ### 7.3 Listing wips
 
@@ -742,6 +736,8 @@ Without wip, Agent A would have had to commit a noisy WIP commit or convince Age
 ---
 
 ## 9. Concurrency Tests
+
+Note: the test names below (T1-T17) are from the original design. The actual test names in `internal/test/` differ but cover the same scenarios.
 
 The design must be falsifiable. This section enumerates the test scenarios that prove or disprove the architecture. All tests are Go tests under `internal/test/concurrent_test.go` using `t.Parallel()`, goroutines, and a temp git repo per test (set up via `t.TempDir()` + `git init`).
 

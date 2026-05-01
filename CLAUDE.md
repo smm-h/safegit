@@ -27,3 +27,6 @@ This project uses [rlsbl](https://github.com/smm-h/rlsbl) for release orchestrat
 - Oplog entries must be < 4096 bytes (POSIX atomic append guarantee)
 - Tests in internal/test/ are integration tests that build and run the safegit binary as a subprocess
 - CGO_ENABLED=0 for all builds (static binary, no C dependencies)
+- `safegit undo` reverses the last commit/amend/reword via oplog
+- `safegit amend --branch` and `safegit reword --branch` operate on a branch other than HEAD
+- stash, cherry-pick, revert are guarded passthroughs (coordination check before git); tag is unguarded passthrough

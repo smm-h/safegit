@@ -100,6 +100,8 @@ Configuration is stored in `.git/safegit/config.json`. Remove the entire
   `safegit unlock --force` to clear a stuck lock.
 - **Submodules and LFS are not supported.** `safegit init` refuses on repos with
   `.gitmodules` or `filter=lfs` in `.gitattributes` (use `--force` to override).
+- **Linux and macOS only.** Windows is not supported (Unix-only syscalls for
+  locking, signals, process management).
 
 ## License
 
