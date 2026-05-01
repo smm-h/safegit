@@ -134,6 +134,7 @@ func runAmend(flags globalFlags, args []string) {
 
 	// Parse amend-specific flags
 	var messages []string
+	var branch string
 	var files []string
 	pastSeparator := false
 
@@ -151,6 +152,12 @@ func runAmend(flags globalFlags, args []string) {
 			}
 			i++
 			messages = append(messages, args[i])
+		case "--branch":
+			if i+1 >= len(args) {
+				die(flags, "amend",2, "--branch requires an argument")
+			}
+			i++
+			branch = args[i]
 		default:
 			die(flags, "amend",2, fmt.Sprintf("unknown flag: %s", args[i]))
 		}
@@ -177,6 +184,7 @@ func runAmend(flags globalFlags, args []string) {
 	result, err := p.Amend(context.Background(), commit.AmendRequest{
 		Message:   msg,
 		FileSpecs: fileSpecs,
+		Branch:    branch,
 		Force:     flags.force,
 		DryRun:    flags.dryRun,
 	})
@@ -222,6 +230,7 @@ func runReword(flags globalFlags, args []string) {
 
 	// Parse reword flags
 	var messages []string
+	var branch string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-m":
@@ -230,6 +239,12 @@ func runReword(flags globalFlags, args []string) {
 			}
 			i++
 			messages = append(messages, args[i])
+		case "--branch":
+			if i+1 >= len(args) {
+				die(flags, "reword",2, "--branch requires an argument")
+			}
+			i++
+			branch = args[i]
 		default:
 			die(flags, "reword",2, fmt.Sprintf("unknown flag: %s", args[i]))
 		}
@@ -250,6 +265,7 @@ func runReword(flags globalFlags, args []string) {
 	p := &commit.Pipeline{SafegitDir: sgDir, Config: *cfg}
 	result, err := p.Reword(context.Background(), commit.RewordRequest{
 		Message: msg,
+		Branch:  branch,
 		DryRun:  flags.dryRun,
 	})
 	if err != nil {

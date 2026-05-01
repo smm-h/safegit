@@ -20,6 +20,7 @@ import (
 type AmendRequest struct {
 	Message   string     // empty = keep existing message
 	FileSpecs []FileSpec // files to stage into the amended commit
+	Branch    string     // target branch ref; empty = HEAD
 	Force     bool       // skip gitignore check
 	DryRun    bool
 }
@@ -43,9 +44,16 @@ func (p *Pipeline) Amend(ctx context.Context, req AmendRequest) (*AmendResult, e
 		return nil, fmt.Errorf("resolving repo root: %w", err)
 	}
 
-	ref, err := git.HeadRef()
-	if err != nil {
-		return nil, fmt.Errorf("resolving HEAD: %w", err)
+	// Resolve target branch ref
+	ref := req.Branch
+	if ref == "" {
+		ref, err = git.HeadRef()
+		if err != nil {
+			return nil, fmt.Errorf("resolving HEAD: %w", err)
+		}
+	}
+	if !strings.HasPrefix(ref, "refs/") {
+		ref = "refs/heads/" + ref
 	}
 
 	if len(req.FileSpecs) == 0 {
@@ -110,31 +118,32 @@ func (p *Pipeline) tryAmend(
 	attempt int,
 ) (*AmendResult, bool, error) {
 
-	// Snapshot current HEAD SHA (the commit we're replacing)
-	headSHA, err := git.RevParse("HEAD")
+	// Snapshot current tip SHA (the commit we're replacing).
+	// Use ref (not "HEAD") so cross-branch amend resolves the correct tip.
+	headSHA, err := git.RevParse(ref)
 	if err != nil {
-		return nil, false, fmt.Errorf("resolving HEAD: %w", err)
+		return nil, false, fmt.Errorf("resolving %s: %w", ref, err)
 	}
 
-	// Get parent of HEAD (HEAD^)
-	parentSHA, err := git.RevParse("HEAD^")
+	// Get parent of tip (ref^)
+	parentSHA, err := git.RevParse(ref + "^")
 	if err != nil {
-		return nil, false, fmt.Errorf("resolving HEAD^: %w", err)
+		return nil, false, fmt.Errorf("resolving %s^: %w", ref, err)
 	}
 
 	// Determine message: use provided or reuse existing
 	message := req.Message
 	if message == "" {
-		msg, err := git.CommitMessage("HEAD")
+		msg, err := git.CommitMessage(ref)
 		if err != nil {
-			return nil, false, fmt.Errorf("reading HEAD commit message: %w", err)
+			return nil, false, fmt.Errorf("reading %s commit message: %w", ref, err)
 		}
 		message = msg
 	}
 
-	// --- Phase A: create tmp index from the resolved HEAD and stage new files ---
-	// Use headSHA (resolved above) instead of "HEAD" to avoid a TOCTOU race:
-	// if HEAD moves between RevParse and index creation, the tree would be
+	// --- Phase A: create tmp index from the resolved tip and stage new files ---
+	// Use headSHA (resolved above) instead of ref to avoid a TOCTOU race:
+	// if the ref moves between RevParse and index creation, the tree would be
 	// based on a different commit than headSHA, silently dropping files.
 	tmpIdx, err := index.New(p.SafegitDir, headSHA)
 	if err != nil {
@@ -234,6 +243,7 @@ func (p *Pipeline) tryAmend(
 // RewordRequest holds inputs for a reword operation.
 type RewordRequest struct {
 	Message string // required
+	Branch  string // target branch ref; empty = HEAD
 	DryRun  bool
 }
 
@@ -253,9 +263,17 @@ func (p *Pipeline) Reword(ctx context.Context, req RewordRequest) (*RewordResult
 		return nil, fmt.Errorf("reword requires a message (-m)")
 	}
 
-	ref, err := git.HeadRef()
-	if err != nil {
-		return nil, fmt.Errorf("resolving HEAD: %w", err)
+	// Resolve target branch ref
+	ref := req.Branch
+	if ref == "" {
+		var err error
+		ref, err = git.HeadRef()
+		if err != nil {
+			return nil, fmt.Errorf("resolving HEAD: %w", err)
+		}
+	}
+	if !strings.HasPrefix(ref, "refs/") {
+		ref = "refs/heads/" + ref
 	}
 
 	maxAttempts := p.Config.Commit.CASMaxAttempts
