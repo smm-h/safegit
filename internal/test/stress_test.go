@@ -510,8 +510,9 @@ func TestPollingWakeupLatency(t *testing.T) {
 		t.Fatal(err)
 	}
 	lockFile := filepath.Join(lockDir, "main.lock")
-	lockContent := fmt.Sprintf("pid=%d\nts=%s\nop=commit\nhost=test\n",
-		os.Getpid(), time.Now().UTC().Format(time.RFC3339Nano))
+	hn1, _ := os.Hostname()
+	lockContent := fmt.Sprintf("pid=%d\nts=%s\nop=commit\nhost=%s\n",
+		os.Getpid(), time.Now().UTC().Format(time.RFC3339Nano), hn1)
 	if err := os.WriteFile(lockFile, []byte(lockContent), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -770,9 +771,10 @@ func TestLockRecoveredOplog(t *testing.T) {
 	// Plant a stale lock
 	lockDir := filepath.Join(dir, ".git", "safegit", "locks", "refs", "heads")
 	os.MkdirAll(lockDir, 0755)
-	lockContent := fmt.Sprintf("pid=%d\nts=%s\nop=commit\nhost=test\n",
-		deadPID, time.Now().Add(-1*time.Hour).UTC().Format(time.RFC3339Nano))
-	os.WriteFile(filepath.Join(lockDir, "main.lock"), []byte(lockContent), 0644)
+	hn2, _ := os.Hostname()
+	lockContent2 := fmt.Sprintf("pid=%d\nts=%s\nop=commit\nhost=%s\n",
+		deadPID, time.Now().Add(-1*time.Hour).UTC().Format(time.RFC3339Nano), hn2)
+	os.WriteFile(filepath.Join(lockDir, "main.lock"), []byte(lockContent2), 0644)
 
 	// Commit should recover the stale lock
 	_, _, code := runSafegit(t, dir, "commit", "-m", "after recovery", "--", "recover.txt")
