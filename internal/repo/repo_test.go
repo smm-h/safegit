@@ -22,7 +22,7 @@ func TestInitAndIsInitialized(t *testing.T) {
 		t.Fatal("should not be initialized before Init")
 	}
 
-	if err := Init(gitDir, false); err != nil {
+	if err := Init(gitDir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -65,17 +65,12 @@ func TestInitAlreadyInitialized(t *testing.T) {
 	gitDir := filepath.Join(t.TempDir(), ".git")
 	os.MkdirAll(gitDir, 0755)
 
-	Init(gitDir, false)
+	Init(gitDir)
 
-	// Second init without force should fail
-	err := Init(gitDir, false)
+	// Second init should fail
+	err := Init(gitDir)
 	if err == nil {
-		t.Fatal("expected error on double init without --force")
-	}
-
-	// With force should succeed
-	if err := Init(gitDir, true); err != nil {
-		t.Fatalf("init --force should succeed: %v", err)
+		t.Fatal("expected error on double init")
 	}
 }
 
@@ -88,7 +83,7 @@ func TestEnsureInitialized(t *testing.T) {
 		t.Fatal("expected error when not initialized")
 	}
 
-	Init(gitDir, false)
+	Init(gitDir)
 
 	err = EnsureInitialized(gitDir)
 	if err != nil {
@@ -106,7 +101,7 @@ func TestUninstall(t *testing.T) {
 		t.Fatal("expected error uninstalling when not initialized")
 	}
 
-	Init(gitDir, false)
+	Init(gitDir)
 	err = Uninstall(gitDir)
 	if err != nil {
 		t.Fatal(err)
