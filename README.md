@@ -37,15 +37,13 @@ safegit commit -m "add feature X" -- src/foo.go src/bar.go
 safegit push
 ```
 
-safegit auto-initializes on first use (creates `.git/safegit/`). Run
-`safegit init` explicitly only if you want to pre-create the directory
-structure before the first commit.
+safegit auto-initializes on first use (creates `.git/safegit/`).
+Use `safegit doctor --uninstall` to remove safegit from a repo.
 
 ## Key commands
 
 | Command   | Description |
 |-----------|-------------|
-| `init`    | Create `.git/safegit/` directory structure |
 | `commit`  | Stage files and commit atomically (`--amend` to amend/reword) |
 | `undo`    | Reverse the last commit/amend/reword via oplog |
 | `push`    | Push with pre-pre-push hooks and retry logic |
