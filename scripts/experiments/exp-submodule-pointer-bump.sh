@@ -40,7 +40,7 @@ git commit -q -m "add submodule"
 # Record the old submodule SHA
 OLD_SHA=$(git ls-tree HEAD mysub | awk '{print $3}')
 
-"$SAFEGIT" init --force -q
+"$SAFEGIT" init -q
 
 # Make a new commit inside the submodule
 cd mysub

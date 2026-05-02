@@ -40,7 +40,7 @@ git commit -q -m "add submodule"
 # Record the submodule entry before safegit touches anything
 SUB_ENTRY_BEFORE=$(git ls-tree HEAD mysub)
 
-"$SAFEGIT" init --force -q
+"$SAFEGIT" init -q
 
 # Create and commit a new file in the parent via safegit
 echo "parent data" > newfile.txt
