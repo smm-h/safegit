@@ -12,6 +12,10 @@
 
 - **Auto-initialization.** Running any safegit command on an uninitialized repo now automatically runs `safegit init` instead of erroring. A one-time message is printed to stderr.
 
+### Fixed
+
+- **macOS ARM64 build.** `doctor_darwin.go` failed `go vet` on ARM64 due to `[]int8` to `string` conversion. Fixed by converting through `[]byte`.
+
 ### Changed
 
 - **`IsInitialized` now checks for the `.git/safegit/` directory instead of `config.json`.**
