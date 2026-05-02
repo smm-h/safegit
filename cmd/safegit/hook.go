@@ -39,24 +39,8 @@ func hookList(flags globalFlags) int {
 
 	discovered, err := hooks.Discover(gitDir)
 	if err != nil {
-		if flags.format == formatJSON {
-			emitJSON("hook list", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
-		} else {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		}
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
-	}
-
-	if flags.format == formatJSON {
-		names := make([]string, len(discovered))
-		for i, h := range discovered {
-			names[i] = filepath.Base(h)
-		}
-		emitJSON("hook list", map[string]interface{}{
-			"hooks": names,
-			"count": len(names),
-		}, nil, nil)
-		return 0
 	}
 
 	if len(discovered) == 0 {
@@ -182,18 +166,12 @@ func hookInstall(flags globalFlags, args []string) int {
 	srcPath := args[0]
 
 	if err := hooks.Install(gitDir, srcPath); err != nil {
-		if flags.format == formatJSON {
-			emitJSON("hook install", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
-		} else {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		}
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
 
 	name := filepath.Base(srcPath)
-	if flags.format == formatJSON {
-		emitJSON("hook install", map[string]string{"name": name}, nil, nil)
-	} else if !flags.quiet {
+	if !flags.quiet {
 		fmt.Printf("installed hook: %s\n", name)
 	}
 	return 0
@@ -224,9 +202,5 @@ Subcommands:
   run [<name>]     Run a specific hook (or all hooks)
   install <path>   Copy a hook file to .git/hooks/, chmod +x
 `
-	if flags.format == formatJSON {
-		emitJSON("hook", map[string]string{"usage": msg}, nil, nil)
-	} else {
-		fmt.Print(msg)
-	}
+	fmt.Print(msg)
 }
