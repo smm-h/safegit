@@ -10,6 +10,7 @@
 
 set -euo pipefail
 
+SAFEGIT="$(cd "$(dirname "$0")/../.." && pwd)/safegit"
 DIR=$(mktemp -d)
 trap "rm -rf $DIR" EXIT
 cd "$DIR"
@@ -20,10 +21,9 @@ git config user.name "Test"
 
 echo "seed" > seed.txt
 git add seed.txt && git commit -q -m "initial"
-safegit init -q
 
 # Set a short lock timeout so the test doesn't take forever
-safegit config lock.acquireTimeoutSeconds 3
+"$SAFEGIT" config lock.acquireTimeoutSeconds 3
 
 # Create a zero-length lock file (simulates crash mid-create)
 LOCK_DIR=".git/safegit/locks/refs/heads"
@@ -33,7 +33,7 @@ touch "$LOCK_DIR/main.lock"
 # Try to commit -- should recover quickly, not hang for 3 seconds
 echo "data" > file.txt
 START=$(date +%s)
-safegit commit -m "after corrupt lock" -- file.txt 2>err.txt && RC=0 || RC=$?
+"$SAFEGIT" commit -m "after corrupt lock" -- file.txt 2>err.txt && RC=0 || RC=$?
 END=$(date +%s)
 ELAPSED=$((END - START))
 

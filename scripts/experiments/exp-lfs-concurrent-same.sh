@@ -4,7 +4,7 @@
 # pointer (not corrupted by concurrent clean-filter execution).
 set -euo pipefail
 
-SAFEGIT=/home/m/Projects/safegit/safegit
+SAFEGIT="$(cd "$(dirname "$0")/../.." && pwd)/safegit"
 DIR=$(mktemp -d)
 trap "rm -rf $DIR" EXIT
 cd "$DIR"
@@ -18,8 +18,6 @@ git lfs install --local
 # Track *.bin via LFS
 echo '*.bin filter=lfs diff=lfs merge=lfs -text' > .gitattributes
 git add .gitattributes && git commit -q -m "init lfs"
-
-"$SAFEGIT" init -q
 
 # Create initial large.bin and commit it
 dd if=/dev/urandom of=large.bin bs=1024 count=100 2>/dev/null

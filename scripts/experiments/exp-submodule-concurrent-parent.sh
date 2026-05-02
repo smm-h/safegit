@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-SAFEGIT=/home/m/Projects/safegit/safegit
+SAFEGIT="$(cd "$(dirname "$0")/../.." && pwd)/safegit"
 DIR=$(mktemp -d)
 trap "rm -rf $DIR" EXIT
 cd "$DIR"
@@ -41,7 +41,6 @@ git commit -q -m "add submodule"
 # Record the submodule entry before concurrent commits
 SUB_ENTRY_BEFORE=$(git ls-tree HEAD mysub)
 
-"$SAFEGIT" init -q
 "$SAFEGIT" config commit.casMaxAttempts 50
 
 # Create the files that will be committed concurrently

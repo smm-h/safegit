@@ -10,6 +10,7 @@
 
 set -euo pipefail
 
+SAFEGIT="$(cd "$(dirname "$0")/../.." && pwd)/safegit"
 DIR=$(mktemp -d)
 trap "rm -rf $DIR" EXIT
 cd "$DIR"
@@ -20,7 +21,6 @@ git config user.name "Test"
 
 echo "seed" > seed.txt
 git add seed.txt && git commit -q -m "initial"
-safegit init -q
 
 git branch feature
 
@@ -37,7 +37,7 @@ fi
 
 # Cross-branch commit
 echo "feature-work" > feature.txt
-safegit commit -q -m "cross-branch" --branch feature -- feature.txt
+"$SAFEGIT" commit -q -m "cross-branch" --branch feature -- feature.txt
 
 # Check if staged changes survived
 AFTER=$(git diff --cached --name-only)
