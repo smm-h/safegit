@@ -34,7 +34,7 @@ if [[ -z "$WIP_ID" ]]; then
 fi
 
 # Try to restore
-safegit unwip "$WIP_ID" 2>unwip_err.txt && UNWIP_RC=0 || UNWIP_RC=$?
+safegit wip restore "$WIP_ID" 2>unwip_err.txt && UNWIP_RC=0 || UNWIP_RC=$?
 
 if [[ $UNWIP_RC -eq 0 ]]; then
     # Check the file was actually restored with the right content

@@ -58,8 +58,6 @@ func main() {
 		runCommit(flags, cmdArgs)
 	case "wip":
 		runWip(flags, cmdArgs)
-	case "unwip":
-		runUnwip(flags, cmdArgs)
 	case "doctor":
 		runDoctor(flags)
 	case "gc":

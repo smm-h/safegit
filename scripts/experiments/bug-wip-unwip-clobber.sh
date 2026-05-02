@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bug: safegit unwip overwrites another agent's edits to a wip-locked file.
+# Bug: safegit wip restore overwrites another agent's edits to a wip-locked file.
 #
 # Wip-locks only block safegit commit/amend, not filesystem writes.
 # When Agent A unwips, it blindly overwrites with the wip snapshot,
@@ -36,7 +36,7 @@ fi
 echo "agent-B-critical-work" > shared.txt
 
 # Agent A unwips -- should this destroy B's work?
-safegit unwip "$WIP_ID" 2>unwip_err.txt && UNWIP_RC=0 || UNWIP_RC=$?
+safegit wip restore "$WIP_ID" 2>unwip_err.txt && UNWIP_RC=0 || UNWIP_RC=$?
 
 CONTENT=$(cat shared.txt)
 
