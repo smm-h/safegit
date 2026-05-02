@@ -80,10 +80,9 @@ func SharedSafegitDir(ctx context.Context, gitDir string) string {
 	return filepath.Join(abs, "safegit")
 }
 
-// IsInitialized checks whether .git/safegit/ exists and has config.json.
+// IsInitialized checks whether the .git/safegit/ directory exists.
 func IsInitialized(gitDir string) bool {
-	configPath := filepath.Join(SafegitDir(gitDir), "config.json")
-	_, err := os.Stat(configPath)
+	_, err := os.Stat(SafegitDir(gitDir))
 	return err == nil
 }
 
@@ -96,9 +95,9 @@ func Init(gitDir string) error {
 		return fmt.Errorf("safegit already initialized at %s (use --force to reinitialize)", sgDir)
 	}
 
-	// Create directory structure
+	// Create directory structure (MkdirAll creates all parents, so sgDir
+	// itself does not need a separate call)
 	dirs := []string{
-		sgDir,
 		filepath.Join(sgDir, "locks", "refs", "heads"),
 		filepath.Join(sgDir, "tmp"),
 	}
@@ -139,10 +138,13 @@ func Init(gitDir string) error {
 	return nil
 }
 
-// EnsureInitialized returns an error if .git/safegit/ is not set up.
+// EnsureInitialized auto-initializes .git/safegit/ if it doesn't exist yet.
 func EnsureInitialized(gitDir string) error {
 	if !IsInitialized(gitDir) {
-		return errors.New("safegit not initialized; run 'safegit init' first")
+		if err := Init(gitDir); err != nil {
+			return fmt.Errorf("safegit: auto-init failed: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "safegit: auto-initialized %s\n", SafegitDir(gitDir))
 	}
 	return nil
 }
