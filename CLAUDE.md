@@ -29,4 +29,4 @@ This project uses [rlsbl](https://github.com/smm-h/rlsbl) for release orchestrat
 - CGO_ENABLED=0 for all builds (static binary, no C dependencies)
 - `safegit undo` reverses the last commit/amend/reword via oplog
 - `safegit amend --branch` and `safegit reword --branch` operate on a branch other than HEAD
-- stash, cherry-pick, revert are guarded passthroughs (coordination check before git); tag is unguarded passthrough
+- cherry-pick, revert are guarded passthroughs (coordination check before git)
