@@ -17,7 +17,23 @@ func runWip(flags globalFlags, args []string) {
 	}
 	sgDir := repo.SafegitDir(gitDir)
 
-	// "wip list" subcommand
+	// subcommand dispatch
+	if len(args) > 0 && args[0] == "restore" {
+		if len(args) < 2 {
+			die(flags, "wip", 2, "usage: safegit wip restore <wip-id>")
+		}
+		ctx := context.Background()
+		wipID := args[1]
+		restored, err := wip.Restore(ctx, sgDir, wipID)
+		if err != nil {
+			die(flags, "wip", 1, err.Error())
+		}
+		if !flags.quiet {
+			fmt.Printf("wip %s restored (%d file(s))\n", wipID, len(restored))
+		}
+		return
+	}
+
 	if len(args) > 0 && args[0] == "list" {
 		ctx := context.Background()
 		wips, err := wip.List(ctx, sgDir)
@@ -38,7 +54,7 @@ func runWip(flags globalFlags, args []string) {
 
 	// "wip <file1> [<file2> ...]" -- create a wip
 	if len(args) == 0 {
-		die(flags, "wip",2, "usage: safegit wip <file1> [<file2> ...] | safegit wip list")
+		die(flags, "wip", 2, "usage: safegit wip <file1> [<file2> ...] | safegit wip list | safegit wip restore <id>")
 	}
 
 	ctx := context.Background()
@@ -52,25 +68,3 @@ func runWip(flags globalFlags, args []string) {
 	}
 }
 
-func runUnwip(flags globalFlags, args []string) {
-	gitDir := mustGitDir(flags)
-	if err := repo.EnsureInitialized(gitDir); err != nil {
-		die(flags, "wip",4, err.Error())
-	}
-	sgDir := repo.SafegitDir(gitDir)
-
-	if len(args) == 0 {
-		die(flags, "wip",2, "usage: safegit unwip <wip-id>")
-	}
-
-	ctx := context.Background()
-	wipID := args[0]
-	restored, err := wip.Restore(ctx, sgDir, wipID)
-	if err != nil {
-		die(flags, "wip",1, err.Error())
-	}
-
-	if !flags.quiet {
-		fmt.Printf("wip %s restored (%d file(s))\n", wipID, len(restored))
-	}
-}
