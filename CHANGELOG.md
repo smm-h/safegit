@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0
+
+### CLI consolidation (24 -> 20 commands)
+
+- **`amend` and `reword` merged into `commit --amend`.** `safegit commit --amend -- files` replaces `safegit amend`. `safegit commit --amend -m "msg"` with no files replaces `safegit reword`. Mirrors git's native interface.
+- **`unwip` merged into `wip restore`.** `safegit wip restore <id>` replaces `safegit unwip <id>`. All wip operations now live under one command.
+- **`gc` merged into `doctor --fix`.** `safegit doctor --fix` replaces `safegit gc`. Doctor already diagnosed the problems; now it can fix them too.
+- **`branch` removed.** Use `git branch` directly. Zero concurrency safety was added by the wrapper.
+
 ## 0.3.0
 
 ### Removed
