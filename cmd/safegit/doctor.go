@@ -21,7 +21,19 @@ type checkResult struct {
 	Detail string `json:"detail,omitempty"`
 }
 
-func runDoctor(flags globalFlags) {
+func runDoctor(flags globalFlags, args []string) {
+	// Parse --fix from subcommand args.
+	fix := false
+	for _, a := range args {
+		switch a {
+		case "--fix":
+			fix = true
+		default:
+			fmt.Fprintf(os.Stderr, "unknown doctor flag: %s\n", a)
+			os.Exit(2)
+		}
+	}
+
 	ctx := context.Background()
 	gitDir := mustGitDir(flags)
 
@@ -36,7 +48,7 @@ func runDoctor(flags globalFlags) {
 
 	sgDir := repo.SafegitDir(gitDir)
 
-	// Check 2: Orphan tmp dirs (report only, don't delete -- use gc for cleanup)
+	// Check 2: Orphan tmp dirs (report only; --fix cleans them up)
 	if repo.IsInitialized(gitDir) {
 		orphans, err := index.GarbageCollectDryRun(sgDir)
 		if err != nil {
@@ -45,7 +57,7 @@ func runDoctor(flags globalFlags) {
 			checks = append(checks, checkResult{
 				Name:   "tmp_dirs",
 				Status: "warn",
-				Detail: fmt.Sprintf("%d orphan tmp dir(s) found (run 'safegit gc' to clean)", len(orphans)),
+				Detail: fmt.Sprintf("%d orphan tmp dir(s) found (run 'safegit doctor --fix' to clean)", len(orphans)),
 			})
 		} else {
 			checks = append(checks, checkResult{Name: "tmp_dirs", Status: "ok"})
@@ -89,7 +101,7 @@ func runDoctor(flags globalFlags) {
 			checks = append(checks, checkResult{
 				Name:   "wip_locks",
 				Status: "warn",
-				Detail: fmt.Sprintf("%d orphan wip-lock(s) found (run 'safegit gc' to clean)", len(orphans)),
+				Detail: fmt.Sprintf("%d orphan wip-lock(s) found (run 'safegit doctor --fix' to clean)", len(orphans)),
 			})
 		} else {
 			checks = append(checks, checkResult{Name: "wip_locks", Status: "ok"})
@@ -215,5 +227,105 @@ func runDoctor(flags globalFlags) {
 	}
 	if allOK && !flags.quiet {
 		fmt.Println("all checks passed")
+	}
+
+	// --fix: run garbage collection and cleanup (formerly `safegit gc`).
+	if fix && repo.IsInitialized(gitDir) {
+		doctorFix(flags, gitDir)
+	}
+}
+
+// doctorFix performs cleanup: orphan tmp dirs, orphan wip-locks, legacy queue
+// dir, and oplog rotation. With --dry-run it only reports what would be done.
+func doctorFix(flags globalFlags, gitDir string) {
+	sgDir := repo.SafegitDir(gitDir)
+	cfg, _ := loadConfig(flags, gitDir)
+
+	if flags.dryRun {
+		orphanDirs, err := index.GarbageCollectDryRun(sgDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+
+		orphanWipLocks, _ := wip.OrphanLocks(context.Background(), sgDir)
+
+		// Check for legacy queue directory.
+		queueDir := filepath.Join(sgDir, "queue")
+		hasLegacyQueue := false
+		if info, err := os.Stat(queueDir); err == nil && info.IsDir() {
+			hasLegacyQueue = true
+		}
+
+		logSizeMB := float64(0)
+		logSize, _ := oplog.LogSize(sgDir)
+		if logSize > 0 {
+			logSizeMB = float64(logSize) / (1024 * 1024)
+		}
+		maxMB := 100
+		if cfg != nil && cfg.Log.MaxSizeMB > 0 {
+			maxMB = cfg.Log.MaxSizeMB
+		}
+		wouldRotate := logSize >= int64(maxMB)*1024*1024
+
+		if !flags.quiet {
+			fmt.Printf("would remove %d orphan tmp dir(s)\n", len(orphanDirs))
+			if len(orphanWipLocks) > 0 {
+				fmt.Printf("would remove %d orphan wip-lock(s)\n", len(orphanWipLocks))
+			}
+			if hasLegacyQueue {
+				fmt.Println("would remove legacy queue directory")
+			}
+			fmt.Printf("log size: %.1f MB (max: %d MB)", logSizeMB, maxMB)
+			if wouldRotate {
+				fmt.Print(" -- would rotate")
+			}
+			fmt.Println()
+		}
+		return
+	}
+
+	// Actual cleanup.
+	removed, err := index.GarbageCollect(sgDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	wipCleaned, wipErr := wip.CleanOrphanLocks(context.Background(), sgDir)
+	if wipErr != nil {
+		fmt.Fprintf(os.Stderr, "error cleaning wip locks: %v\n", wipErr)
+		os.Exit(1)
+	}
+
+	// Clean up legacy queue directory (removed in v0.2).
+	queueDir := filepath.Join(sgDir, "queue")
+	queueRemoved := false
+	if info, err := os.Stat(queueDir); err == nil && info.IsDir() {
+		os.RemoveAll(queueDir)
+		queueRemoved = true
+	}
+
+	// Log rotation.
+	maxMB := 100
+	if cfg != nil && cfg.Log.MaxSizeMB > 0 {
+		maxMB = cfg.Log.MaxSizeMB
+	}
+	rotated, rotErr := oplog.Rotate(sgDir, maxMB)
+	if rotErr != nil && !flags.quiet {
+		fmt.Fprintf(os.Stderr, "warning: log rotation failed: %v\n", rotErr)
+	}
+
+	if !flags.quiet {
+		fmt.Printf("removed %d orphan tmp dir(s)\n", removed)
+		if wipCleaned > 0 {
+			fmt.Printf("removed %d orphan wip-lock(s)\n", wipCleaned)
+		}
+		if queueRemoved {
+			fmt.Println("removed legacy queue directory")
+		}
+		if rotated {
+			fmt.Println("log rotated (old log saved as log.1)")
+		}
 	}
 }

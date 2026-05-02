@@ -59,9 +59,7 @@ func main() {
 	case "wip":
 		runWip(flags, cmdArgs)
 	case "doctor":
-		runDoctor(flags)
-	case "gc":
-		runGC(flags)
+		runDoctor(flags, cmdArgs)
 	case "version":
 		runVersion(flags)
 	case "checkout":
@@ -182,8 +180,7 @@ Commands:
   revert      Revert commits (guarded)
   config      Show or set configuration values
   unlock      Release a stale ref lock (--force to override live holder)
-  doctor      Health checks (initialized? orphan dirs? stale locks?)
-  gc          Garbage-collect dead tmp index directories and rotate logs
+  doctor      Health checks (--fix to garbage-collect and repair)
   version     Print version and build info
   help        Print this help
 

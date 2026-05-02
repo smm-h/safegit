@@ -396,7 +396,7 @@ func TestKillMidCommit(t *testing.T) {
 	}
 }
 
-// T5: Create orphan tmp dirs with dead PIDs, run gc, verify cleanup.
+// T5: Create orphan tmp dirs with dead PIDs, run doctor --fix, verify cleanup.
 func TestTmpDirGc(t *testing.T) {
 	dir := newRepo(t)
 
@@ -428,10 +428,10 @@ func TestTmpDirGc(t *testing.T) {
 		t.Fatalf("expected at least 3 tmp dirs, got %d", len(entries))
 	}
 
-	// Run gc
-	stdout, stderr, code := runSafegit(t, dir, "gc")
+	// Run doctor --fix (replaces the former gc subcommand)
+	stdout, stderr, code := runSafegit(t, dir, "doctor", "--fix")
 	if code != 0 {
-		t.Fatalf("gc failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+		t.Fatalf("doctor --fix failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
 
 	// Verify dirs are gone
