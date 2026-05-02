@@ -84,8 +84,6 @@ func main() {
 		os.Exit(runUnlock(flags, cmdArgs))
 	case "undo":
 		runUndo(flags, cmdArgs)
-	case "branch":
-		os.Exit(runBranch(flags, cmdArgs))
 	case "cherry-pick":
 		os.Exit(runGuardedPassthrough(flags, "cherry-pick", cmdArgs))
 	case "revert":
@@ -175,7 +173,6 @@ Commands:
   bisect      Bisect (guarded: checks for uncommitted work)
   push        Push with pre-pre-push hooks and retry logic
   hook        Manage pre-pre-push hooks (list, run, install)
-  branch      List, create, or delete branches
   cherry-pick Cherry-pick commits (guarded)
   revert      Revert commits (guarded)
   config      Show or set configuration values
