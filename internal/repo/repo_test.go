@@ -78,13 +78,16 @@ func TestEnsureInitialized(t *testing.T) {
 	gitDir := filepath.Join(t.TempDir(), ".git")
 	os.MkdirAll(gitDir, 0755)
 
+	// EnsureInitialized should auto-init when not initialized
 	err := EnsureInitialized(gitDir)
-	if err == nil {
-		t.Fatal("expected error when not initialized")
+	if err != nil {
+		t.Fatalf("unexpected error from auto-init: %v", err)
+	}
+	if !IsInitialized(gitDir) {
+		t.Fatal("should be initialized after EnsureInitialized auto-init")
 	}
 
-	Init(gitDir)
-
+	// Calling again on an already-initialized repo should succeed
 	err = EnsureInitialized(gitDir)
 	if err != nil {
 		t.Fatalf("unexpected error after init: %v", err)
