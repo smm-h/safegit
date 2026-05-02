@@ -407,7 +407,7 @@ JSON output schema is uniform for every command: `{"ok": bool, "command": str, "
 
 ### 5.1 Lifecycle
 
-- **`safegit init`** -- bootstrap `.git/safegit/`, install `.git/hooks/pre-pre-push` wrapper, write default `config.json`. Refuses if `.gitmodules` exists or if `.gitattributes` contains an LFS filter (see 6.7). `--uninstall` reverses everything.
+- **`safegit init`** -- bootstrap `.git/safegit/`, install `.git/hooks/pre-pre-push` wrapper, write default `config.json`. `--uninstall` reverses everything.
     - JSON: `{"installed": true, "hookPath": ".git/hooks/pre-pre-push", "configPath": ".git/safegit/config.json"}`.
 
 There are no `safegit session` subcommands; sessions do not exist (see 1.2).
@@ -473,7 +473,7 @@ These commands all pass through the coordination layer in Section 7. They refuse
 ### 5.9 Utility
 
 - **`safegit version`** -- print version, build info, git version.
-- **`safegit doctor`** -- sanity-check repo state. Reports: orphan tmp directories, stale ref locks (with holder PID), non-executable hook files, NFS-mounted repo, presence of `.gitmodules` or LFS filters, `HEAD` movements without op log entries (raw-git bypass detection).
+- **`safegit doctor`** -- sanity-check repo state. Reports: orphan tmp directories, stale ref locks (with holder PID), non-executable hook files, NFS-mounted repo, `HEAD` movements without op log entries (raw-git bypass detection).
     - JSON: `{"healthy": bool, "issues": [{"severity": "warn"|"error", "message": "...", "fixHint": "..."}]}`.
 
 ---
@@ -520,24 +520,13 @@ v1 supports same-machine concurrency only. Cross-machine concurrency on a shared
 - **Detection at runtime:** lock files include `host`. If a lock holder's `host` differs from local `hostname`, we conservatively treat the lock as alive and wait. After `lock.acquireTimeout`, exit code 8. The user must run `safegit unlock --force` on the holder's host or accept that cross-machine use is unsupported.
 - **Recovery:** documented as an explicit non-goal for v1.
 
-### 6.7 Unsupported repo features
-
-`safegit init` refuses to initialize on repos that use features the v1 design does not handle:
-
-| Condition | Error |
-|---|---|
-| `.gitmodules` present at repo root | "safegit v1 does not support submodules; remove .gitmodules or use raw git." |
-| `.gitattributes` contains a line matching `filter=lfs` | "safegit v1 does not support Git LFS." |
-
-If these features are added to the repo after `safegit init`, `safegit doctor` reports an error and refuses subsequent mutating operations until they are removed or the project upgrades to a version that supports them (see Future Work).
-
-### 6.8 Pre-pre-push hook hangs
+### 6.7 Pre-pre-push hook hangs
 
 - **Symptom:** hook process doesn't exit within `hooks.preprepush.timeoutSeconds`.
 - **Detection:** Go context timeout fires.
 - **Recovery:** `SIGTERM`, 5s grace, `SIGKILL`. Push aborts with exit code 21. Op log records `hook_timeout`. No partial state -- we never opened the network connection.
 
-### 6.9 Raw-git bypass
+### 6.8 Raw-git bypass
 
 - **Symptom:** a user (or another tool) ran `git commit` directly. safegit does not install enforcement hooks (Section 4.0), so this is allowed by design.
 - **Detection:** on any safegit invocation, the op log's most recent ref-update entry is compared against the actual ref tip. If the tip has advanced without an entry, `safegit doctor` and a warning on the next mutating command surface the bypass:
@@ -688,8 +677,6 @@ These items are explicitly punted to v2 (or later) and are NOT part of v1 scope.
 - **Line-level stage precision.** v1 stages whole hunks. `safegit stage <file> --lines L1-L2` would translate a working-tree line range into the overlapping hunk(s); v2 may add this.
 - **Sub-hunk staging.** True sub-hunk precision (stage some lines of a hunk, leave others) requires synthesizing a smaller patch via line-level diff. Deferred.
 - **Cross-machine support.** NFS, distributed coordinator, cross-host PID liveness. v1 is same-machine only and `safegit doctor` warns on NFS.
-- **Submodules.** Each submodule has its own index and HEAD; the coordination layer would need per-submodule extensions. v1 refuses to init on a repo with `.gitmodules`.
-- **Git LFS.** LFS smudge/clean filters need to run during `git apply --cached`; works in principle but needs testing. v1 refuses to init on a repo with an LFS filter line.
 - **Per-agent virtual working tree.** GitButler-style workspace isolation (each agent sees its own view of the working tree). Would obviate the coordination layer's "must be clean" rule. Requires either FUSE or a custom file-overlay; significant complexity.
 - **Persistent virtual indexes.** Incremental staging across invocations (`safegit stage` then later `safegit commit`). v1 rebuilds the index every invocation for simplicity.
 - **`SAFEGIT_AUTHORIZED` env var + git hook enforcement.** v1 relies on Claude Code `settings.json` permission rules and discipline. If discipline-only proves insufficient in practice, a v2 may add an installed `pre-commit` hook that aborts unless `SAFEGIT_AUTHORIZED=1` is set.

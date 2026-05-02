@@ -165,31 +165,6 @@ func runDoctor(flags globalFlags, args []string) {
 		}
 	}
 
-	// Check 9: Unsupported features (.gitmodules, LFS)
-	{
-		repoRoot, rootErr := git.RepoRoot(ctx)
-		if rootErr == nil {
-			var unsupported []string
-			if _, err := os.Stat(filepath.Join(repoRoot, ".gitmodules")); err == nil {
-				unsupported = append(unsupported, ".gitmodules detected (submodules not supported)")
-			}
-			attrsPath := filepath.Join(repoRoot, ".gitattributes")
-			if data, err := os.ReadFile(attrsPath); err == nil {
-				if strings.Contains(string(data), "filter=lfs") {
-					unsupported = append(unsupported, ".gitattributes has filter=lfs (LFS not supported)")
-				}
-			}
-			if len(unsupported) > 0 {
-				checks = append(checks, checkResult{
-					Name:   "unsupported",
-					Status: "warn",
-					Detail: strings.Join(unsupported, "; "),
-				})
-			} else {
-				checks = append(checks, checkResult{Name: "unsupported", Status: "ok"})
-			}
-		}
-	}
 
 	allOK := true
 	for _, c := range checks {

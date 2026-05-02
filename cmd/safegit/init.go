@@ -32,7 +32,7 @@ func runInit(flags globalFlags, args []string) {
 		return
 	}
 
-	err := repo.Init(gitDir, flags.force)
+	err := repo.Init(gitDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/smm-h/safegit/internal/git"
 )
@@ -90,18 +89,11 @@ func IsInitialized(gitDir string) bool {
 
 // Init creates the .git/safegit/ directory structure and writes default config.json.
 // Returns an error if already initialized (use --force to reinitialize).
-func Init(gitDir string, force bool) error {
+func Init(gitDir string) error {
 	sgDir := SafegitDir(gitDir)
 
-	if IsInitialized(gitDir) && !force {
+	if IsInitialized(gitDir) {
 		return fmt.Errorf("safegit already initialized at %s (use --force to reinitialize)", sgDir)
-	}
-
-	// Refuse on unsupported repo features (unless --force)
-	if !force {
-		if err := checkUnsupportedFeatures(gitDir); err != nil {
-			return err
-		}
 	}
 
 	// Create directory structure
@@ -309,27 +301,3 @@ func parseInt(s string) (int, error) {
 	return v, err
 }
 
-// checkUnsupportedFeatures refuses init on repos with submodules or LFS.
-func checkUnsupportedFeatures(gitDir string) error {
-	// Use git rev-parse to find the true worktree root. filepath.Dir(gitDir)
-	// breaks when .git is a file (worktrees, submodules) because gitDir points
-	// to the shared .git directory, not the worktree containing .gitmodules/.gitattributes.
-	repoRoot, err := git.RepoRoot(context.Background())
-	if err != nil {
-		// Fall back to parent of gitDir if git rev-parse fails
-		repoRoot = filepath.Dir(gitDir)
-	}
-
-	if _, err := os.Stat(filepath.Join(repoRoot, ".gitmodules")); err == nil {
-		return fmt.Errorf("safegit does not support submodules (.gitmodules detected); use --force to override")
-	}
-
-	attrsPath := filepath.Join(repoRoot, ".gitattributes")
-	if data, err := os.ReadFile(attrsPath); err == nil {
-		if strings.Contains(string(data), "filter=lfs") {
-			return fmt.Errorf("safegit does not support Git LFS (filter=lfs in .gitattributes); use --force to override")
-		}
-	}
-
-	return nil
-}
