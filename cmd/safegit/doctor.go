@@ -21,20 +21,36 @@ type checkResult struct {
 }
 
 func runDoctor(flags globalFlags, args []string) {
-	// Parse --fix from subcommand args.
+	// Parse --fix and --uninstall from subcommand args.
 	fix := false
+	uninstall := false
 	for _, a := range args {
 		switch a {
 		case "--fix":
 			fix = true
+		case "--uninstall":
+			uninstall = true
 		default:
 			fmt.Fprintf(os.Stderr, "unknown doctor flag: %s\n", a)
 			os.Exit(2)
 		}
 	}
 
-	ctx := context.Background()
 	gitDir := mustGitDir(flags)
+
+	// --uninstall: remove safegit from this repo and exit.
+	if uninstall {
+		if err := repo.Uninstall(gitDir); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		if !flags.quiet {
+			fmt.Println("safegit uninstalled")
+		}
+		return
+	}
+
+	ctx := context.Background()
 
 	var checks []checkResult
 
@@ -42,7 +58,7 @@ func runDoctor(flags globalFlags, args []string) {
 	if repo.IsInitialized(gitDir) {
 		checks = append(checks, checkResult{Name: "initialized", Status: "ok"})
 	} else {
-		checks = append(checks, checkResult{Name: "initialized", Status: "error", Detail: "run 'safegit init'"})
+		checks = append(checks, checkResult{Name: "initialized", Status: "error", Detail: "not initialized (run any safegit command to auto-init)"})
 	}
 
 	sgDir := repo.SafegitDir(gitDir)

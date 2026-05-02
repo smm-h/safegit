@@ -87,13 +87,13 @@ func IsInitialized(gitDir string) bool {
 }
 
 // Init creates the .git/safegit/ directory structure and writes default config.json.
-// Returns an error if already initialized.
+// Idempotent: returns nil if already initialized.
 func Init(gitDir string) error {
-	sgDir := SafegitDir(gitDir)
-
 	if IsInitialized(gitDir) {
-		return fmt.Errorf("safegit already initialized at %s", sgDir)
+		return nil
 	}
+
+	sgDir := SafegitDir(gitDir)
 
 	// Create directory structure (MkdirAll creates all parents, so sgDir
 	// itself does not need a separate call)

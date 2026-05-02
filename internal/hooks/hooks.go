@@ -296,7 +296,7 @@ func InstallPlaceholder(gitDir string) error {
 	}
 
 	placeholder := `#!/bin/sh
-# Installed by safegit init. This is a no-op placeholder.
+# Installed by safegit. This is a no-op placeholder.
 # Add your pre-push validators here, or use .git/hooks/pre-pre-push.d/
 exit 0
 `
