@@ -949,7 +949,7 @@ func TestUndoAmend(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "extra.txt"), []byte("extra\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	stdout, stderr, code := runSafegit(t, dir, "amend", "--", "extra.txt")
+	stdout, stderr, code := runSafegit(t, dir, "commit", "--amend", "--", "extra.txt")
 	if code != 0 {
 		t.Fatalf("amend failed (code %d): %s", code, stderr)
 	}

@@ -56,10 +56,6 @@ func main() {
 		runInit(flags, cmdArgs)
 	case "commit":
 		runCommit(flags, cmdArgs)
-	case "amend":
-		runAmend(flags, cmdArgs)
-	case "reword":
-		runReword(flags, cmdArgs)
 	case "wip":
 		runWip(flags, cmdArgs)
 	case "unwip":
@@ -172,9 +168,7 @@ func usageText() string {
 
 Commands:
   init        Initialize .git/safegit/ directory structure
-  commit      Stage and commit files atomically (per-invocation index)
-  amend       Amend the tip commit with new files (CAS-safe)
-  reword      Rewrite the tip commit message (CAS-safe)
+  commit      Stage and commit files atomically (--amend to amend/reword)
   undo        Reverse the last commit/amend/reword using the oplog
   wip         Save/restore work-in-progress snapshots
   checkout    Checkout a ref (guarded: checks for uncommitted work)
