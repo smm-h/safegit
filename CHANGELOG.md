@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+### Removed
+
+- **`--format json` flag and all JSON output.** Every command now produces only human-readable output. The JSON envelope infrastructure (`emitJSON`, `jsonResponse`, `jsonError`, `--format` flag) is gone. 9 of 22 commands silently ignored `--format json` anyway (all guarded passthroughs), making the feature inconsistent. Agents already parse human output and git's native formats directly.
+
+### Fixed
+
+- Pre-push hook skips stress tests for tag-only pushes (no code changed, no point re-testing)
+- CLAUDE.md and README updated to remove references to dropped commands (stash, tag, fetch, status, diff, log, show)
+
 ## 0.2.0
 
 ### Removed commands
