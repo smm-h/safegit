@@ -33,7 +33,15 @@ if ! grep -q "^## $VERSION" CHANGELOG.md; then
 fi
 
 # Run stress tests (concurrency safety regression check)
-if [ "${SKIP_STRESS:-}" != "1" ]; then
+# Skip for tag-only pushes (stdin lines have: local_ref local_sha remote_ref remote_sha)
+PUSHING_BRANCH=false
+while IFS=' ' read -r local_ref _ _ _; do
+  case "$local_ref" in
+    refs/tags/*) ;;
+    *) PUSHING_BRANCH=true ;;
+  esac
+done
+if [ "$PUSHING_BRANCH" = true ] && [ "${SKIP_STRESS:-}" != "1" ]; then
   if [ -f scripts/stress ]; then
     echo "Running stress tests (skip with SKIP_STRESS=1)..."
     scripts/stress 2
