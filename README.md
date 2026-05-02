@@ -45,7 +45,6 @@ safegit push
 | `init`    | Create `.git/safegit/` directory structure |
 | `commit`  | Stage files and commit atomically (`--amend` to amend/reword) |
 | `undo`    | Reverse the last commit/amend/reword via oplog |
-| `wip`     | Save/restore work-in-progress snapshots (`wip list`, `wip restore`) |
 | `push`    | Push with pre-pre-push hooks and retry logic |
 | `hook`    | Manage pre-pre-push hooks (list, run, install) |
 | `doctor`  | Health checks and repair (`--fix` to garbage-collect) |

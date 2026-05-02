@@ -33,7 +33,6 @@ func coordGuard(flags globalFlags, sgDir, operation string) int {
 			Extra: map[string]interface{}{
 				"operation": operation,
 				"modified":  len(dirty.ModifiedFiles),
-				"wipLocks":  len(dirty.WipLocks),
 			},
 		})
 	}

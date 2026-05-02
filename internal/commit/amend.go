@@ -14,7 +14,6 @@ import (
 	"github.com/smm-h/safegit/internal/oplog"
 	"github.com/smm-h/safegit/internal/repo"
 	"github.com/smm-h/safegit/internal/stage"
-	"github.com/smm-h/safegit/internal/wip"
 )
 
 // AmendRequest holds inputs for an amend operation.
@@ -76,24 +75,6 @@ func (p *Pipeline) Amend(ctx context.Context, req AmendRequest) (*AmendResult, e
 	absFiles, err := p.resolveFiles(ctx, repoRoot, filePaths, req.Force)
 	if err != nil {
 		return nil, err
-	}
-
-	// Check for wip-locked files (same guard as Execute)
-	var lockedMsgs []string
-	for _, fp := range filePaths {
-		locked, wipID, lErr := wip.IsLocked(p.SafegitDir, fp)
-		if lErr != nil {
-			continue
-		}
-		if locked {
-			lockedMsgs = append(lockedMsgs, fmt.Sprintf("%s (wip %s)", fp, wipID))
-		}
-	}
-	if len(lockedMsgs) > 0 {
-		return nil, &CommitError{
-			Code:    ExitWipLocked,
-			Message: fmt.Sprintf("refusing to amend wip-locked files: %s", strings.Join(lockedMsgs, ", ")),
-		}
 	}
 
 	maxAttempts := p.Config.Commit.CASMaxAttempts

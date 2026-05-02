@@ -12,7 +12,6 @@ import (
 	"github.com/smm-h/safegit/internal/git"
 	"github.com/smm-h/safegit/internal/repo"
 	"github.com/smm-h/safegit/internal/testutil"
-	"github.com/smm-h/safegit/internal/wip"
 )
 
 // newPipeline creates a Pipeline with default config for the given safegitDir.
@@ -669,42 +668,3 @@ func TestInitialCommit(t *testing.T) {
 	}
 }
 
-func TestCommitRefusesWipLocked(t *testing.T) {
-	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
-	testutil.Chdir(t, dir)
-
-	// Modify seed.txt and create a wip to lock the file
-	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("wip content\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := wip.Create(context.Background(), sgDir, []string{"seed.txt"})
-	if err != nil {
-		t.Fatalf("wip.Create: %v", err)
-	}
-
-	// Modify seed.txt again and try to commit via the pipeline
-	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("new content\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	p := newPipeline(sgDir)
-	_, err = p.Execute(context.Background(), CommitRequest{
-		Message: "should fail",
-		Files:   []string{"seed.txt"},
-	})
-
-	if err == nil {
-		t.Fatal("expected commit to fail for wip-locked file, got nil")
-	}
-	ce, ok := err.(*CommitError)
-	if !ok {
-		t.Fatalf("expected *CommitError, got %T: %v", err, err)
-	}
-	if ce.Code != ExitWipLocked {
-		t.Errorf("error code = %d, want %d", ce.Code, ExitWipLocked)
-	}
-	if !strings.Contains(ce.Message, "wip-locked") {
-		t.Errorf("error message = %q, want to contain 'wip-locked'", ce.Message)
-	}
-}
