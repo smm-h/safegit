@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Removed
+
+- **`wip` command and all WIP snapshot functionality.** `wip create`, `wip list`, `wip restore` are gone. The `wip-locks/` directory is no longer created. Use `safegit commit` on a temporary branch to save work-in-progress instead.
+- **Submodule and Git LFS refusal check.** `safegit init` no longer refuses on repos with `.gitmodules` or `filter=lfs`. Both work correctly under concurrency (verified by experiment scripts).
+- **Placeholder `pre-pre-push` hook installation.** `safegit init` no longer writes a no-op hook to `.git/hooks/pre-pre-push`. Use `safegit hook install` to add hooks.
+
+### Added
+
+- **Auto-initialization.** Running any safegit command on an uninitialized repo now automatically runs `safegit init` instead of erroring. A one-time message is printed to stderr.
+
+### Changed
+
+- **`IsInitialized` now checks for the `.git/safegit/` directory instead of `config.json`.**
+
 ## 0.4.0
 
 ### CLI consolidation (24 -> 20 commands)
