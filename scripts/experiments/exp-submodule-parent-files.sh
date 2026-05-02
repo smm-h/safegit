@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-SAFEGIT=/home/m/Projects/safegit/safegit
+SAFEGIT="$(cd "$(dirname "$0")/../.." && pwd)/safegit"
 DIR=$(mktemp -d)
 trap "rm -rf $DIR" EXIT
 cd "$DIR"
@@ -39,8 +39,6 @@ git commit -q -m "add submodule"
 
 # Record the submodule entry before safegit touches anything
 SUB_ENTRY_BEFORE=$(git ls-tree HEAD mysub)
-
-"$SAFEGIT" init -q
 
 # Create and commit a new file in the parent via safegit
 echo "parent data" > newfile.txt

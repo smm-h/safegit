@@ -9,6 +9,7 @@
 
 set -euo pipefail
 
+SAFEGIT="$(cd "$(dirname "$0")/../.." && pwd)/safegit"
 DIR=$(mktemp -d)
 trap "rm -rf $DIR" EXIT
 cd "$DIR"
@@ -16,10 +17,9 @@ cd "$DIR"
 git init --initial-branch=main -q
 git config user.email "test@test.com"
 git config user.name "Test"
-safegit init -q
 
 echo "first file" > hello.txt
-safegit commit -m "initial commit" -- hello.txt 2>err.txt && RC=0 || RC=$?
+"$SAFEGIT" commit -m "initial commit" -- hello.txt 2>err.txt && RC=0 || RC=$?
 
 if [[ $RC -eq 0 ]]; then
     # Verify the commit actually landed

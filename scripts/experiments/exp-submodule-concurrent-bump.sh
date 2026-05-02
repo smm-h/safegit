@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-SAFEGIT=/home/m/Projects/safegit/safegit
+SAFEGIT="$(cd "$(dirname "$0")/../.." && pwd)/safegit"
 DIR=$(mktemp -d)
 trap "rm -rf $DIR" EXIT
 cd "$DIR"
@@ -42,7 +42,6 @@ git commit -q -m "add submodule"
 
 OLD_SUB_SHA=$(git ls-tree HEAD mysub | awk '{print $3}')
 
-"$SAFEGIT" init -q
 "$SAFEGIT" config commit.casMaxAttempts 50
 
 # Make a new commit inside the submodule

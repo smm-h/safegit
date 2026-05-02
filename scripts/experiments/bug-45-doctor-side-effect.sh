@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bug #45: doctor deletes orphan tmp dirs as a side effect.
 #
-# safegit doctor is a diagnostic command but it calls GarbageCollect
+# "$SAFEGIT" doctor is a diagnostic command but it calls GarbageCollect
 # which removes orphan tmp directories. A health check shouldn't mutate state.
 #
 # Expected: doctor reports orphan dirs but doesn't delete them
@@ -9,6 +9,7 @@
 
 set -euo pipefail
 
+SAFEGIT="$(cd "$(dirname "$0")/../.." && pwd)/safegit"
 DIR=$(mktemp -d)
 trap "rm -rf $DIR" EXIT
 cd "$DIR"
@@ -18,7 +19,6 @@ git config user.email "test@test.com"
 git config user.name "Test"
 echo "seed" > seed.txt
 git add seed.txt && git commit -q -m "initial"
-safegit init -q
 
 # Create a fake orphan tmp dir with a dead PID
 ORPHAN_DIR=".git/safegit/tmp/999999999-deadbeef"
@@ -26,7 +26,7 @@ mkdir -p "$ORPHAN_DIR"
 echo "fake-index" > "$ORPHAN_DIR/index"
 
 # Run doctor
-safegit doctor >/dev/null 2>&1
+"$SAFEGIT" doctor >/dev/null 2>&1
 
 # Check if the orphan dir still exists
 if [[ -d "$ORPHAN_DIR" ]]; then
