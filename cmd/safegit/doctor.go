@@ -196,11 +196,6 @@ func runDoctor(flags globalFlags) {
 		}
 	}
 
-	if flags.format == formatJSON {
-		emitJSON("doctor", checks, nil, nil)
-		return
-	}
-
 	allOK := true
 	for _, c := range checks {
 		icon := "OK"

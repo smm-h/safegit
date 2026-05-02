@@ -23,16 +23,10 @@ func runInit(flags globalFlags, args []string) {
 	if uninstall {
 		err := repo.Uninstall(gitDir)
 		if err != nil {
-			if flags.format == formatJSON {
-				emitJSON("init", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
-			} else {
-				fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			}
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
-		if flags.format == formatJSON {
-			emitJSON("init", map[string]string{"action": "uninstalled"}, nil, nil)
-		} else if !flags.quiet {
+		if !flags.quiet {
 			fmt.Println("safegit uninstalled")
 		}
 		return
@@ -40,11 +34,7 @@ func runInit(flags globalFlags, args []string) {
 
 	err := repo.Init(gitDir, flags.force)
 	if err != nil {
-		if flags.format == formatJSON {
-			emitJSON("init", nil, &jsonError{Code: 1, Message: err.Error()}, nil)
-		} else {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		}
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -55,9 +45,7 @@ func runInit(flags globalFlags, args []string) {
 	}
 
 	sgDir := repo.SafegitDir(gitDir)
-	if flags.format == formatJSON {
-		emitJSON("init", map[string]string{"safegit_dir": sgDir}, nil, warnings)
-	} else if !flags.quiet {
+	if !flags.quiet {
 		fmt.Printf("initialized safegit at %s\n", sgDir)
 		for _, w := range warnings {
 			fmt.Fprintf(os.Stderr, "warning: %s\n", w)

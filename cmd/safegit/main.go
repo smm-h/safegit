@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -32,37 +31,14 @@ func init() {
 	}
 }
 
-// output format for the entire CLI
-type outputFormat int
-
-const (
-	formatHuman outputFormat = iota
-	formatJSON
-)
-
 // globalFlags holds flags parsed before command dispatch.
 type globalFlags struct {
-	format     outputFormat
 	quiet      bool
 	verbose    bool
 	noColor    bool
 	dryRun     bool
 	force      bool
 	configPath string
-}
-
-// jsonResponse is the envelope for all JSON output.
-type jsonResponse struct {
-	OK       bool        `json:"ok"`
-	Command  string      `json:"command"`
-	Data     interface{} `json:"data,omitempty"`
-	Error    *jsonError  `json:"error,omitempty"`
-	Warnings []string    `json:"warnings,omitempty"`
-}
-
-type jsonError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
 }
 
 func main() {
@@ -141,22 +117,6 @@ func parseGlobalFlags(args []string) (globalFlags, []string) {
 			break
 		}
 		switch args[i] {
-		case "--format":
-			if i+1 < len(args) {
-				i++
-				switch args[i] {
-				case "json":
-					f.format = formatJSON
-				case "human":
-					f.format = formatHuman
-				default:
-					fmt.Fprintf(os.Stderr, "unknown format: %s (expected human|json)\n", args[i])
-					os.Exit(2)
-				}
-			} else {
-				fmt.Fprintln(os.Stderr, "--format requires an argument (human|json)")
-				os.Exit(2)
-			}
 		case "--quiet", "-q":
 			f.quiet = true
 		case "--verbose", "-v":
@@ -185,19 +145,6 @@ func parseGlobalFlags(args []string) (globalFlags, []string) {
 
 func runVersion(flags globalFlags) {
 	gitVer := gitVersion()
-
-	if flags.format == formatJSON {
-		data := map[string]string{
-			"safegit_version": version,
-			"go_version":      runtime.Version(),
-			"os":              runtime.GOOS,
-			"arch":            runtime.GOARCH,
-			"git_version":     gitVer,
-		}
-		emitJSON("version", data, nil, nil)
-		return
-	}
-
 	fmt.Printf("safegit %s\n", version)
 	fmt.Printf("go      %s %s/%s\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
 	fmt.Printf("git     %s\n", gitVer)
@@ -212,20 +159,11 @@ func gitVersion() string {
 }
 
 func printUsage(flags globalFlags) {
-	if flags.format == formatJSON {
-		emitJSON("help", map[string]string{"usage": usageText()}, nil, nil)
-		return
-	}
 	fmt.Print(usageText())
 }
 
 func unknownCommand(flags globalFlags, cmd string) {
-	msg := fmt.Sprintf("unknown command: %s", cmd)
-	if flags.format == formatJSON {
-		emitJSON(cmd, nil, &jsonError{Code: 2, Message: msg}, nil)
-		return
-	}
-	fmt.Fprintln(os.Stderr, msg)
+	fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 	fmt.Fprint(os.Stderr, usageText())
 }
 
@@ -259,7 +197,6 @@ Commands:
 
 Global flags:
   --config <path>       Override config.json path
-  --format human|json   Output format (default: human)
   --quiet, -q           Suppress non-essential output
   --verbose, -v         Verbose output
   --no-color            Disable colored output
@@ -281,12 +218,7 @@ func mustGitDir(flags globalFlags) string {
 	ctx := context.Background()
 	gitDir, err := git.GitDir(ctx)
 	if err != nil {
-		msg := "not a git repository (or git is not installed)"
-		if flags.format == formatJSON {
-			emitJSON("", nil, &jsonError{Code: 3, Message: msg}, nil)
-		} else {
-			fmt.Fprintln(os.Stderr, msg)
-		}
+		fmt.Fprintln(os.Stderr, "not a git repository (or git is not installed)")
 		os.Exit(3)
 	}
 	// Resolve to absolute path
@@ -299,11 +231,7 @@ func mustGitDir(flags globalFlags) string {
 
 // die prints an error for the given subcommand and exits with code.
 func die(flags globalFlags, cmd string, code int, msg string) {
-	if flags.format == formatJSON {
-		emitJSON(cmd, nil, &jsonError{Code: code, Message: msg}, nil)
-	} else {
-		fmt.Fprintf(os.Stderr, "error: %s\n", msg)
-	}
+	fmt.Fprintf(os.Stderr, "error: %s\n", msg)
 	os.Exit(code)
 }
 
@@ -364,16 +292,3 @@ func isHunkSpec(s string) bool {
 	return true
 }
 
-// emitJSON writes a JSON envelope to stdout.
-func emitJSON(command string, data interface{}, errVal *jsonError, warnings []string) {
-	resp := jsonResponse{
-		OK:       errVal == nil,
-		Command:  command,
-		Data:     data,
-		Error:    errVal,
-		Warnings: warnings,
-	}
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	_ = enc.Encode(resp)
-}

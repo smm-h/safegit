@@ -15,12 +15,6 @@ func TestParseGlobalFlags(t *testing.T) {
 		wantRest []string
 	}{
 		{
-			name:     "format json",
-			args:     []string{"--format", "json", "commit"},
-			wantF:    globalFlags{format: formatJSON},
-			wantRest: []string{"commit"},
-		},
-		{
 			name:     "quiet flag",
 			args:     []string{"--quiet", "status"},
 			wantF:    globalFlags{quiet: true},
@@ -94,8 +88,8 @@ func TestParseGlobalFlags(t *testing.T) {
 		},
 		{
 			name:     "multiple global flags combined",
-			args:     []string{"--quiet", "--dry-run", "--format", "json", "commit", "-m", "msg"},
-			wantF:    globalFlags{quiet: true, dryRun: true, format: formatJSON},
+			args:     []string{"--quiet", "--dry-run", "commit", "-m", "msg"},
+			wantF:    globalFlags{quiet: true, dryRun: true},
 			wantRest: []string{"commit", "-m", "msg"},
 		},
 		{
@@ -103,12 +97,6 @@ func TestParseGlobalFlags(t *testing.T) {
 			args:     []string{},
 			wantF:    globalFlags{},
 			wantRest: nil,
-		},
-		{
-			name:     "format human is explicit default",
-			args:     []string{"--format", "human", "status"},
-			wantF:    globalFlags{format: formatHuman},
-			wantRest: []string{"status"},
 		},
 	}
 

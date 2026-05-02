@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -23,17 +22,10 @@ const (
 
 // pushRefInfo describes a single ref being pushed.
 type pushRefInfo struct {
-	LocalRef  string `json:"localRef"`
-	LocalSHA  string `json:"localSha"`
-	RemoteRef string `json:"remoteRef"`
-	RemoteSHA string `json:"remoteSha"`
-}
-
-// pushResult is the JSON output for a successful push.
-type pushResult struct {
-	Remote   string              `json:"remote"`
-	Refs     []pushRefInfo       `json:"refs"`
-	HooksRun []hooks.HookResult  `json:"hooksRun,omitempty"`
+	LocalRef  string
+	LocalSHA  string
+	RemoteRef string
+	RemoteSHA string
 }
 
 func runPush(flags globalFlags, args []string) int {
@@ -126,19 +118,11 @@ func runPush(flags globalFlags, args []string) int {
 		// Check hook results
 		for _, hr := range hookResults {
 			if hr.TimedOut {
-				if flags.format == formatJSON {
-					emitJSON("push", nil, &jsonError{Code: exitPushHookTimeout, Message: fmt.Sprintf("hook %s timed out after %v", hr.Name, hr.Duration)}, nil)
-				} else {
-					fmt.Fprintf(os.Stderr, "hook %s timed out after %v\n", hr.Name, hr.Duration)
-				}
+				fmt.Fprintf(os.Stderr, "hook %s timed out after %v\n", hr.Name, hr.Duration)
 				return exitPushHookTimeout
 			}
 			if hr.ExitCode != 0 {
-				if flags.format == formatJSON {
-					emitJSON("push", nil, &jsonError{Code: exitPushHookFailed, Message: fmt.Sprintf("hook %s failed (exit %d)", hr.Name, hr.ExitCode)}, nil)
-				} else {
-					fmt.Fprintf(os.Stderr, "hook %s failed (exit %d)\n", hr.Name, hr.ExitCode)
-				}
+				fmt.Fprintf(os.Stderr, "hook %s failed (exit %d)\n", hr.Name, hr.ExitCode)
 				return exitPushHookFailed
 			}
 		}
@@ -172,11 +156,7 @@ func runPush(flags globalFlags, args []string) int {
 	}
 
 	if pushErr != nil {
-		if flags.format == formatJSON {
-			emitJSON("push", nil, &jsonError{Code: exitPushGitFailed, Message: pushErr.Error()}, nil)
-		} else {
-			fmt.Fprintf(os.Stderr, "push failed: %v\n", pushErr)
-		}
+		fmt.Fprintf(os.Stderr, "push failed: %v\n", pushErr)
 		return exitPushGitFailed
 	}
 
@@ -199,10 +179,7 @@ func runPush(flags globalFlags, args []string) int {
 	})
 
 	// Output result
-	result := pushResult{Remote: remote, Refs: refs, HooksRun: hookResults}
-	if flags.format == formatJSON {
-		emitJSON("push", result, nil, nil)
-	} else if !flags.quiet {
+	if !flags.quiet {
 		for _, r := range refs {
 			fmt.Printf("  %s -> %s\n", shortRef(r.LocalRef), shortRef(r.RemoteRef))
 		}
@@ -391,37 +368,4 @@ func shortRef(ref string) string {
 	ref = strings.TrimPrefix(ref, "refs/heads/")
 	ref = strings.TrimPrefix(ref, "refs/tags/")
 	return ref
-}
-
-
-// MarshalJSON for HookResult to format Duration as a string.
-func (r pushResult) MarshalJSON() ([]byte, error) {
-	type hookResultJSON struct {
-		Name     string `json:"name"`
-		ExitCode int    `json:"exitCode"`
-		Duration string `json:"duration"`
-		TimedOut bool   `json:"timedOut,omitempty"`
-	}
-
-	hooksJSON := make([]hookResultJSON, len(r.HooksRun))
-	for i, hr := range r.HooksRun {
-		hooksJSON[i] = hookResultJSON{
-			Name:     hr.Name,
-			ExitCode: hr.ExitCode,
-			Duration: hr.Duration.String(),
-			TimedOut: hr.TimedOut,
-		}
-	}
-
-	type alias struct {
-		Remote   string           `json:"remote"`
-		Refs     []pushRefInfo    `json:"refs"`
-		HooksRun []hookResultJSON `json:"hooksRun,omitempty"`
-	}
-
-	return json.Marshal(alias{
-		Remote:   r.Remote,
-		Refs:     r.Refs,
-		HooksRun: hooksJSON,
-	})
 }
