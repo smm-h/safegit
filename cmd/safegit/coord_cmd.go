@@ -19,19 +19,11 @@ func coordGuard(flags globalFlags, sgDir, operation string) int {
 	ctx := context.Background()
 	dirty, err := coord.Check(ctx, sgDir)
 	if err != nil {
-		if flags.format == formatJSON {
-			emitJSON(operation, nil, &jsonError{Code: 1, Message: err.Error()}, nil)
-		} else {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		}
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
 	if dirty != nil && !flags.force {
-		if flags.format == formatJSON {
-			emitJSON(operation, nil, &jsonError{Code: 5, Message: dirty.Refuse(operation)}, nil)
-		} else {
-			fmt.Fprint(os.Stderr, dirty.Refuse(operation))
-		}
+		fmt.Fprint(os.Stderr, dirty.Refuse(operation))
 		return 5
 	}
 	if dirty != nil {

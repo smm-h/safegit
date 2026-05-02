@@ -140,7 +140,7 @@ func TestStress100(t *testing.T) {
 }
 
 // T12: Raw-git bypass detection. Commit via raw git, then verify doctor
-// reports the bypass in its JSON output.
+// reports the bypass in its output.
 func TestRawGitBypassDetection(t *testing.T) {
 	dir := newRepo(t)
 
@@ -161,40 +161,20 @@ func TestRawGitBypassDetection(t *testing.T) {
 	}
 
 	// Run safegit doctor
-	stdout, stderr, code := runSafegit(t, dir, "--format", "json", "doctor")
+	stdout, stderr, code := runSafegit(t, dir, "doctor")
 	if code != 0 {
 		t.Fatalf("doctor failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
 
-	r := parseJSON(t, stdout)
-	if !r.OK {
-		t.Fatalf("doctor returned ok=false: %s", stdout)
-	}
-
-	// Parse the checks array and find bypass_detect
-	var checks []struct {
-		Name   string `json:"name"`
-		Status string `json:"status"`
-		Detail string `json:"detail"`
-	}
-	if err := json.Unmarshal(r.Data, &checks); err != nil {
-		t.Fatalf("parsing doctor data: %v", err)
-	}
-
-	found := false
-	for _, c := range checks {
-		if c.Name == "bypass_detect" {
-			found = true
-			if c.Status != "warn" {
-				t.Errorf("bypass_detect status = %q, want 'warn'", c.Status)
-			}
-			if !strings.Contains(c.Detail, "diverged") {
-				t.Errorf("bypass_detect detail = %q, want to contain 'diverged'", c.Detail)
-			}
-		}
-	}
-	if !found {
+	// Human output has lines like "[WARN] bypass_detect: ...diverged..."
+	if !strings.Contains(stdout, "bypass_detect") {
 		t.Error("bypass_detect check not found in doctor output")
+	}
+	if !strings.Contains(stdout, "[WARN] bypass_detect") {
+		t.Errorf("bypass_detect not marked as WARN in doctor output:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "diverged") {
+		t.Errorf("doctor output does not mention 'diverged':\n%s", stdout)
 	}
 }
 
@@ -701,22 +681,15 @@ func TestConfigOverride(t *testing.T) {
 	}
 
 	// Read the config via --config flag
-	stdout, _, code := runSafegit(t, dir, "--format", "json", "--config", customCfg, "config", "commit.casMaxAttempts")
+	stdout, _, code := runSafegit(t, dir, "--config", customCfg, "config", "commit.casMaxAttempts")
 	if code != 0 {
 		t.Fatalf("config read failed (code %d)", code)
 	}
 
-	r := parseJSON(t, stdout)
-	if !r.OK {
-		t.Fatalf("config returned ok=false: %s", stdout)
-	}
-
-	var data map[string]interface{}
-	if err := json.Unmarshal(r.Data, &data); err != nil {
-		t.Fatal(err)
-	}
-	if val, ok := data["commit.casMaxAttempts"].(float64); !ok || val != 99 {
-		t.Errorf("casMaxAttempts = %v, want 99", data["commit.casMaxAttempts"])
+	// Human output is just the value on its own line
+	got := strings.TrimSpace(stdout)
+	if got != "99" {
+		t.Errorf("casMaxAttempts = %q, want %q", got, "99")
 	}
 }
 
@@ -976,24 +949,17 @@ func TestUndoAmend(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "extra.txt"), []byte("extra\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	stdout, stderr, code := runSafegit(t, dir, "--format", "json", "amend", "--", "extra.txt")
+	stdout, stderr, code := runSafegit(t, dir, "amend", "--", "extra.txt")
 	if code != 0 {
 		t.Fatalf("amend failed (code %d): %s", code, stderr)
 	}
 
-	// Verify amend JSON has oldSha pointing to original commit
-	r := parseJSON(t, stdout)
-	if !r.OK {
-		t.Fatalf("amend returned ok=false: %s", stdout)
+	// Human output includes "amended (was XXXXXXXX)" with the first 8 chars of the old SHA
+	if !strings.Contains(stdout, "amended") {
+		t.Fatalf("amend output missing 'amended': %s", stdout)
 	}
-	var amendData struct {
-		OldSHA string `json:"oldSha"`
-	}
-	if err := json.Unmarshal(r.Data, &amendData); err != nil {
-		t.Fatalf("parsing amend data: %v", err)
-	}
-	if amendData.OldSHA != origSHA {
-		t.Errorf("amend oldSha = %s, want %s (original commit)", amendData.OldSHA, origSHA)
+	if !strings.Contains(stdout, origSHA[:8]) {
+		t.Errorf("amend output does not reference original SHA %s: %s", origSHA[:8], stdout)
 	}
 
 	// Verify HEAD moved (amend creates a new commit object)

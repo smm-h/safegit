@@ -133,27 +133,6 @@ func runSafegit(t *testing.T, repoDir string, args ...string) (stdout, stderr st
 	return
 }
 
-// jsonResult is the parsed JSON output envelope from safegit --format json.
-type jsonResult struct {
-	OK      bool            `json:"ok"`
-	Command string          `json:"command"`
-	Data    json.RawMessage `json:"data"`
-	Error   *struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
-// parseJSON parses the JSON envelope from safegit --format json stdout.
-func parseJSON(t *testing.T, stdout string) jsonResult {
-	t.Helper()
-	var r jsonResult
-	if err := json.Unmarshal([]byte(stdout), &r); err != nil {
-		t.Fatalf("failed to parse JSON output: %v\nraw: %s", err, stdout)
-	}
-	return r
-}
-
 // gitLog returns the number of commits on the given ref.
 func gitLog(t *testing.T, dir, ref string) int {
 	t.Helper()
@@ -192,7 +171,7 @@ func TestStageDifferentFiles(t *testing.T) {
 	parallel(N, func(i int) {
 		fname := fmt.Sprintf("file%02d.txt", i)
 		msg := fmt.Sprintf("commit file %d", i)
-		stdout, stderr, code := runSafegit(t, dir, "--format", "json", "commit", "-m", msg, "--", fname)
+		stdout, stderr, code := runSafegit(t, dir, "commit", "-m", msg, "--", fname)
 		results[i] = stdout
 		errors[i] = stderr
 		codes[i] = code
@@ -268,7 +247,7 @@ func TestCommitDifferentBranches(t *testing.T) {
 		branchName := fmt.Sprintf("branch%02d", i)
 		fname := fmt.Sprintf("file%02d.txt", i)
 		msg := fmt.Sprintf("commit to %s", branchName)
-		stdout, stderr, code := runSafegit(t, dir, "--format", "json", "commit", "-m", msg, "--branch", branchName, "--", fname)
+		stdout, stderr, code := runSafegit(t, dir, "commit", "-m", msg, "--branch", branchName, "--", fname)
 		results[i] = stdout
 		errs[i] = stderr
 		codes[i] = code
@@ -318,7 +297,7 @@ func TestCommitSameBranch(t *testing.T) {
 	parallel(N, func(i int) {
 		fname := fmt.Sprintf("concurrent%02d.txt", i)
 		msg := fmt.Sprintf("concurrent commit %d", i)
-		stdout, stderr, code := runSafegit(t, dir, "--format", "json", "commit", "-m", msg, "--", fname)
+		stdout, stderr, code := runSafegit(t, dir, "commit", "-m", msg, "--", fname)
 		stdouts[i] = stdout
 		stderrs[i] = stderr
 		codes[i] = code
@@ -399,7 +378,7 @@ func TestKillMidCommit(t *testing.T) {
 
 	// Now run safegit commit -- it should detect the dead PID and recover
 	start := time.Now()
-	stdout, stderr, code := runSafegit(t, dir, "--format", "json", "commit", "-m", "recovered", "--", "recover.txt")
+	stdout, stderr, code := runSafegit(t, dir, "commit", "-m", "recovered", "--", "recover.txt")
 	elapsed := time.Since(start)
 
 	if code != 0 {
@@ -450,24 +429,9 @@ func TestTmpDirGc(t *testing.T) {
 	}
 
 	// Run gc
-	stdout, stderr, code := runSafegit(t, dir, "--format", "json", "gc")
+	stdout, stderr, code := runSafegit(t, dir, "gc")
 	if code != 0 {
 		t.Fatalf("gc failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
-	}
-
-	// Parse JSON to verify removal count
-	r := parseJSON(t, stdout)
-	if !r.OK {
-		t.Fatalf("gc returned ok=false: %s", stdout)
-	}
-
-	var data map[string]interface{}
-	if err := json.Unmarshal(r.Data, &data); err != nil {
-		t.Fatal(err)
-	}
-	removed, _ := data["removed"].(float64)
-	if removed < 3 {
-		t.Errorf("gc removed %.0f dirs, expected at least 3", removed)
 	}
 
 	// Verify dirs are gone
@@ -627,7 +591,7 @@ func TestWipLockConflict(t *testing.T) {
 	}
 
 	// Agent A: wip seed.txt
-	stdout, stderr, code := runSafegit(t, dir, "--format", "json", "wip", "seed.txt")
+	stdout, stderr, code := runSafegit(t, dir, "wip", "seed.txt")
 	if code != 0 {
 		t.Fatalf("first wip failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -638,18 +602,15 @@ func TestWipLockConflict(t *testing.T) {
 	}
 
 	// Agent B: try to commit seed.txt (should fail with exit code 6 = wip-locked)
-	stdout, stderr, code = runSafegit(t, dir, "--format", "json", "commit", "-m", "agent B commit", "--", "seed.txt")
+	stdout, stderr, code = runSafegit(t, dir, "commit", "-m", "agent B commit", "--", "seed.txt")
 	if code != 6 {
 		t.Errorf("expected exit code 6 (wip-locked), got %d: stdout=%s stderr=%s", code, stdout, stderr)
 	}
 
-	// Verify error message mentions wip-locked
-	r := parseJSON(t, stdout)
-	if r.Error == nil {
-		t.Fatal("expected error in JSON output")
-	}
-	if !strings.Contains(r.Error.Message, "wip-locked") {
-		t.Errorf("error message %q does not contain 'wip-locked'", r.Error.Message)
+	// Verify error message mentions wip-locked (check both stdout and stderr)
+	combined := stdout + stderr
+	if !strings.Contains(combined, "wip-locked") {
+		t.Errorf("output %q does not contain 'wip-locked'", combined)
 	}
 }
 
@@ -672,7 +633,7 @@ func TestCheckoutRefusedDirty(t *testing.T) {
 	}
 
 	// safegit checkout should refuse
-	stdout, stderr, code := runSafegit(t, dir, "--format", "json", "checkout", "other")
+	stdout, stderr, code := runSafegit(t, dir, "checkout", "other")
 	if code != 5 {
 		t.Errorf("expected exit code 5 (dirty tree), got %d: stdout=%s stderr=%s", code, stdout, stderr)
 	}

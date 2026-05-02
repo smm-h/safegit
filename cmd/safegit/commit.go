@@ -13,11 +13,7 @@ import (
 func runCommit(flags globalFlags, args []string) {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
-		if flags.format == formatJSON {
-			emitJSON("commit", nil, &jsonError{Code: 4, Message: err.Error()}, nil)
-		} else {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		}
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(4)
 	}
 
@@ -101,17 +97,11 @@ func runCommit(flags globalFlags, args []string) {
 		if ce, ok := err.(*commit.CommitError); ok {
 			code = ce.Code
 		}
-		if flags.format == formatJSON {
-			emitJSON("commit", nil, &jsonError{Code: code, Message: err.Error()}, nil)
-		} else {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		}
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(code)
 	}
 
-	if flags.format == formatJSON {
-		emitJSON("commit", result, nil, nil)
-	} else if !flags.quiet {
+	if !flags.quiet {
 		fmt.Printf("[%s %s] %s\n", refShortName(result.Ref), result.SHA[:8], firstLine(msg))
 		fmt.Printf(" %d file(s) committed", len(files))
 		if result.Attempts > 1 {
@@ -124,11 +114,7 @@ func runCommit(flags globalFlags, args []string) {
 func runAmend(flags globalFlags, args []string) {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
-		if flags.format == formatJSON {
-			emitJSON("amend", nil, &jsonError{Code: 4, Message: err.Error()}, nil)
-		} else {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		}
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(4)
 	}
 
@@ -193,17 +179,11 @@ func runAmend(flags globalFlags, args []string) {
 		if ce, ok := err.(*commit.CommitError); ok {
 			code = ce.Code
 		}
-		if flags.format == formatJSON {
-			emitJSON("amend", nil, &jsonError{Code: code, Message: err.Error()}, nil)
-		} else {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		}
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(code)
 	}
 
-	if flags.format == formatJSON {
-		emitJSON("amend", result, nil, nil)
-	} else if !flags.quiet {
+	if !flags.quiet {
 		msgDisplay := msg
 		if msgDisplay == "" {
 			msgDisplay = "(message preserved)"
@@ -220,11 +200,7 @@ func runAmend(flags globalFlags, args []string) {
 func runReword(flags globalFlags, args []string) {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
-		if flags.format == formatJSON {
-			emitJSON("reword", nil, &jsonError{Code: 4, Message: err.Error()}, nil)
-		} else {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		}
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(4)
 	}
 
@@ -273,17 +249,11 @@ func runReword(flags globalFlags, args []string) {
 		if ce, ok := err.(*commit.CommitError); ok {
 			code = ce.Code
 		}
-		if flags.format == formatJSON {
-			emitJSON("reword", nil, &jsonError{Code: code, Message: err.Error()}, nil)
-		} else {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		}
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(code)
 	}
 
-	if flags.format == formatJSON {
-		emitJSON("reword", result, nil, nil)
-	} else if !flags.quiet {
+	if !flags.quiet {
 		fmt.Printf("[%s %s] %s\n", refShortName(result.Ref), result.SHA[:8], firstLine(msg))
 		fmt.Printf(" reworded (was %s)\n", result.OldSHA[:8])
 	}

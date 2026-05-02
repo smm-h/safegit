@@ -22,15 +22,6 @@ var undoableOps = map[string]string{
 	"reword": "oldSha",
 }
 
-// undoResult is the JSON data envelope for the undo command.
-type undoResult struct {
-	Ref       string `json:"ref"`
-	UndoneOp  string `json:"undoneOp"`
-	OldSHA    string `json:"oldSha"`
-	RestoredSHA string `json:"restoredSha"`
-	DryRun    bool   `json:"dryRun,omitempty"`
-}
-
 func runUndo(flags globalFlags, args []string) {
 	const cmd = "undo"
 
@@ -87,19 +78,8 @@ func runUndo(flags globalFlags, args []string) {
 	}
 
 	if flags.dryRun {
-		result := undoResult{
-			Ref:         ref,
-			UndoneOp:    entry.Op,
-			OldSHA:      currentSHA,
-			RestoredSHA: targetSHA,
-			DryRun:      true,
-		}
-		if flags.format == formatJSON {
-			emitJSON(cmd, result, nil, nil)
-		} else {
-			fmt.Printf("would undo %s on %s\n", entry.Op, refShortName(ref))
-			fmt.Printf("  %s -> %s\n", currentSHA[:8], targetSHA[:8])
-		}
+		fmt.Printf("would undo %s on %s\n", entry.Op, refShortName(ref))
+		fmt.Printf("  %s -> %s\n", currentSHA[:8], targetSHA[:8])
 		return
 	}
 
@@ -133,15 +113,7 @@ func runUndo(flags globalFlags, args []string) {
 		},
 	})
 
-	result := undoResult{
-		Ref:         ref,
-		UndoneOp:    entry.Op,
-		OldSHA:      currentSHA,
-		RestoredSHA: targetSHA,
-	}
-	if flags.format == formatJSON {
-		emitJSON(cmd, result, nil, nil)
-	} else if !flags.quiet {
+	if !flags.quiet {
 		fmt.Printf("undid %s on %s\n", entry.Op, refShortName(ref))
 		fmt.Printf("  %s -> %s\n", currentSHA[:8], targetSHA[:8])
 	}

@@ -24,9 +24,7 @@ func runWip(flags globalFlags, args []string) {
 		if err != nil {
 			die(flags, "wip",1, err.Error())
 		}
-		if flags.format == formatJSON {
-			emitJSON("wip list", map[string]interface{}{"wips": wips}, nil, nil)
-		} else if !flags.quiet {
+		if !flags.quiet {
 			if len(wips) == 0 {
 				fmt.Println("no active wips")
 			} else {
@@ -49,14 +47,7 @@ func runWip(flags globalFlags, args []string) {
 		die(flags, "wip",1, err.Error())
 	}
 
-	if flags.format == formatJSON {
-		data := map[string]interface{}{
-			"id":    result.ID,
-			"files": result.Files,
-			"ref":   result.Ref,
-		}
-		emitJSON("wip", data, nil, nil)
-	} else if !flags.quiet {
+	if !flags.quiet {
 		fmt.Printf("wip %s created (%d file(s) saved)\n", result.ID, len(result.Files))
 	}
 }
@@ -79,13 +70,7 @@ func runUnwip(flags globalFlags, args []string) {
 		die(flags, "wip",1, err.Error())
 	}
 
-	if flags.format == formatJSON {
-		data := map[string]interface{}{
-			"id":       wipID,
-			"restored": restored,
-		}
-		emitJSON("unwip", data, nil, nil)
-	} else if !flags.quiet {
+	if !flags.quiet {
 		fmt.Printf("wip %s restored (%d file(s))\n", wipID, len(restored))
 	}
 }
