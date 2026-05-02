@@ -61,16 +61,16 @@ func TestInitAndIsInitialized(t *testing.T) {
 	}
 }
 
-func TestInitAlreadyInitialized(t *testing.T) {
+func TestInitIdempotent(t *testing.T) {
 	gitDir := filepath.Join(t.TempDir(), ".git")
 	os.MkdirAll(gitDir, 0755)
 
 	Init(gitDir)
 
-	// Second init should fail
+	// Second init should succeed (idempotent)
 	err := Init(gitDir)
-	if err == nil {
-		t.Fatal("expected error on double init")
+	if err != nil {
+		t.Fatalf("expected nil on double init, got: %v", err)
 	}
 }
 

@@ -48,7 +48,7 @@ func projectRoot() string {
 	return filepath.Join(wd, "..", "..")
 }
 
-// newRepo creates a temp git repo with safegit init and an initial commit.
+// newRepo creates a temp git repo with an initial commit (safegit auto-inits).
 func newRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -82,13 +82,8 @@ func newRepo(t *testing.T) string {
 		}
 	}
 
-	// safegit init
-	stdout, stderr, code := runSafegit(t, dir, "init")
-	if code != 0 {
-		t.Fatalf("safegit init failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
-	}
-
 	// Bump CAS max attempts high for concurrent tests to avoid exhaustion.
+	// (safegit config auto-initializes .git/safegit/ on first run)
 	// 200 is enough for TestStress100 (100 parallel commits) with headroom.
 	runSafegit(t, dir, "config", "commit.casMaxAttempts", "200")
 

@@ -1049,8 +1049,8 @@ func TestPassthrough_CherryPick(t *testing.T) {
 	}
 }
 
-// R8: TestWorktree_LockSharing verifies that safegit init works inside a git
-// worktree and that the lock directory is placed under the common .git dir
+// R8: TestWorktree_LockSharing verifies that safegit auto-init works inside a
+// git worktree and that the lock directory is placed under the common .git dir
 // (not the worktree's own .git file), enabling lock sharing across worktrees.
 func TestWorktree_LockSharing(t *testing.T) {
 	dir := newRepo(t)
@@ -1075,20 +1075,15 @@ func TestWorktree_LockSharing(t *testing.T) {
 		}
 	}
 
-	// Run safegit init in the worktree
-	_, stderr, code := runSafegit(t, wtDir, "init")
-	if code != 0 {
-		t.Fatalf("safegit init in worktree failed (code %d): %s", code, stderr)
-	}
-
 	// Bump CAS attempts for the worktree too
+	// (safegit config auto-initializes .git/safegit/ on first run)
 	runSafegit(t, wtDir, "config", "commit.casMaxAttempts", "50")
 
 	// Create a file in the main repo and commit to main
 	if err := os.WriteFile(filepath.Join(dir, "main_file.txt"), []byte("from main\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	_, stderr, code = runSafegit(t, dir, "commit", "-m", "main commit", "--", "main_file.txt")
+	_, stderr, code := runSafegit(t, dir, "commit", "-m", "main commit", "--", "main_file.txt")
 	if code != 0 {
 		t.Fatalf("commit in main repo failed (code %d): %s", code, stderr)
 	}
@@ -1137,8 +1132,8 @@ func TestWorktree_LockSharing(t *testing.T) {
 	// The worktree's git dir is at .git/worktrees/wt/.
 	wtGitDir := filepath.Join(mainGitDir, "worktrees", "wt")
 	wtLocksDir := filepath.Join(wtGitDir, "safegit", "locks", "refs", "heads")
-	// This dir may or may not exist (safegit init creates it under the worktree's
-	// git dir too), but the important thing is that the SHARED dir exists.
+	// This dir may or may not exist (safegit auto-init creates it under the
+	// worktree's git dir too), but the important thing is that the SHARED dir exists.
 	// Log whether the worktree-local locks dir exists for diagnostic purposes.
 	if _, err := os.Stat(wtLocksDir); err == nil {
 		t.Logf("note: worktree-local locks dir also exists at %s (init creates both)", wtLocksDir)

@@ -52,8 +52,6 @@ func main() {
 	cmd := args[0]
 	cmdArgs := args[1:]
 	switch cmd {
-	case "init":
-		runInit(flags, cmdArgs)
 	case "commit":
 		runCommit(flags, cmdArgs)
 	case "doctor":
@@ -159,7 +157,6 @@ func usageText() string {
 	return `Usage: safegit <command> [options]
 
 Commands:
-  init        Initialize .git/safegit/ directory structure
   commit      Stage and commit files atomically (--amend to amend/reword)
   undo        Reverse the last commit/amend/reword using the oplog
   checkout    Checkout a ref (guarded: checks for uncommitted work)
@@ -174,7 +171,7 @@ Commands:
   revert      Revert commits (guarded)
   config      Show or set configuration values
   unlock      Release a stale ref lock (--force to override live holder)
-  doctor      Health checks (--fix to garbage-collect and repair)
+  doctor      Health checks (--fix to repair, --uninstall to remove)
   version     Print version and build info
   help        Print this help
 
