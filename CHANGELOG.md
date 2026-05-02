@@ -1,11 +1,16 @@
 # Changelog
 
+## 0.6.0
+
+### Removed
+
+- **`init` command.** Replaced by auto-initialization: any safegit command on an uninitialized repo creates `.git/safegit/` automatically. Use `safegit doctor --uninstall` to remove safegit from a repo.
+
 ## 0.5.0
 
 ### Removed
 
 - **`wip` command and all WIP snapshot functionality.** `wip create`, `wip list`, `wip restore` are gone. The `wip-locks/` directory is no longer created. Use `safegit commit` on a temporary branch to save work-in-progress instead.
-- **`init` command.** Replaced by auto-initialization: any safegit command on an uninitialized repo creates `.git/safegit/` automatically. Use `safegit doctor --uninstall` to remove safegit from a repo.
 - **Submodule and Git LFS refusal check.** Repos with `.gitmodules` or `filter=lfs` are now fully supported. Both work correctly under concurrency (verified by experiment scripts).
 - **Placeholder `pre-pre-push` hook installation.** No-op hook is no longer installed automatically. Use `safegit hook install` to add hooks.
 
