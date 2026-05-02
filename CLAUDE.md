@@ -28,5 +28,7 @@ This project uses [rlsbl](https://github.com/smm-h/rlsbl) for release orchestrat
 - Tests in internal/test/ are integration tests that build and run the safegit binary as a subprocess
 - CGO_ENABLED=0 for all builds (static binary, no C dependencies)
 - `safegit undo` reverses the last commit/amend/reword via oplog
-- `safegit amend --branch` and `safegit reword --branch` operate on a branch other than HEAD
+- `safegit commit --amend --branch <name>` for cross-branch amend/reword
+- `safegit wip restore <id>` to restore a wip snapshot (replaces unwip)
+- `safegit doctor --fix` to garbage-collect and repair (replaces gc)
 - cherry-pick, revert are guarded passthroughs (coordination check before git)

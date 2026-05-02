@@ -43,22 +43,17 @@ safegit push
 | Command   | Description |
 |-----------|-------------|
 | `init`    | Create `.git/safegit/` directory structure |
-| `commit`  | Stage files and commit atomically using a per-invocation index |
-| `amend`   | Amend the tip commit with new files (CAS-safe) |
-| `reword`  | Rewrite the tip commit message (CAS-safe) |
-| `undo`    | Reverse the last commit, amend, or reword via oplog |
-| `wip`     | Save work-in-progress snapshots to refs |
-| `unwip`   | Restore a previously saved wip snapshot |
+| `commit`  | Stage files and commit atomically (`--amend` to amend/reword) |
+| `undo`    | Reverse the last commit/amend/reword via oplog |
+| `wip`     | Save/restore work-in-progress snapshots (`wip list`, `wip restore`) |
 | `push`    | Push with pre-pre-push hooks and retry logic |
 | `hook`    | Manage pre-pre-push hooks (list, run, install) |
-| `doctor`  | Health checks: initialization, stale locks, orphan dirs, bypass detection |
-| `gc`      | Garbage-collect dead tmp directories and rotate logs |
+| `doctor`  | Health checks and repair (`--fix` to garbage-collect) |
 | `config`  | Show or set configuration values |
 | `unlock`  | Release a stale ref lock |
 
-The read-only git command `branch` is passed through to git. Tree-mutating
-commands (`checkout`, `pull`, `merge`, `rebase`, `reset`, `bisect`,
-`cherry-pick`, `revert`) are passed through with coordination guards.
+Tree-mutating commands (`checkout`, `pull`, `merge`, `rebase`, `reset`,
+`bisect`, `cherry-pick`, `revert`) are passed through with coordination guards.
 
 ## How it works
 
