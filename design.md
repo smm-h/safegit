@@ -554,6 +554,9 @@ The coordination layer prevents tree-mutating operations from clobbering uncommi
 | `safegit merge` | Three-way merge; may modify working tree. |
 | `safegit reset --hard` | Resets working tree to a ref. |
 | `safegit bisect <good|bad|reset>` | Moves the working tree across commits. |
+| `safegit stash` | Modifies working tree and/or index. |
+| `safegit cherry-pick` | Applies commit(s) to working tree. |
+| `safegit revert` | Applies inverse commit(s) to working tree. |
 
 Read-only commands (`safegit status`, `safegit diff`, `safegit log`, `safegit fetch`) and pure ref-update commands (`safegit branch --create`, `safegit commit`) are NOT affected.
 
@@ -604,7 +607,7 @@ This is what makes the design safe under concurrency: no agent can have hidden i
 
 ## 8. Concurrency Tests
 
-Note: the test names below (T1-T17) are from the original design. The actual test names in `internal/test/` differ but cover the same scenarios.
+Note: the test names below (T1-T15) are from the original design. The actual test names in `internal/test/` differ but cover the same scenarios.
 
 The design must be falsifiable. This section enumerates the test scenarios that prove or disprove the architecture. All tests are Go tests under `internal/test/concurrent_test.go` using `t.Parallel()`, goroutines, and a temp git repo per test (set up via `t.TempDir()` + `git init`).
 
