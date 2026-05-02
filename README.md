@@ -33,10 +33,13 @@ Pre-built binaries are available on
 
 ```
 cd your-repo
-safegit init
 safegit commit -m "add feature X" -- src/foo.go src/bar.go
 safegit push
 ```
+
+safegit auto-initializes on first use (creates `.git/safegit/`). Run
+`safegit init` explicitly only if you want to pre-create the directory
+structure before the first commit.
 
 ## Key commands
 
