@@ -56,8 +56,6 @@ func main() {
 		runInit(flags, cmdArgs)
 	case "commit":
 		runCommit(flags, cmdArgs)
-	case "wip":
-		runWip(flags, cmdArgs)
 	case "doctor":
 		runDoctor(flags, cmdArgs)
 	case "version":
@@ -164,7 +162,6 @@ Commands:
   init        Initialize .git/safegit/ directory structure
   commit      Stage and commit files atomically (--amend to amend/reword)
   undo        Reverse the last commit/amend/reword using the oplog
-  wip         Save/restore work-in-progress snapshots
   checkout    Checkout a ref (guarded: checks for uncommitted work)
   pull        Fetch + merge (guarded, default --ff-only)
   merge       Merge a branch (guarded)

@@ -13,7 +13,7 @@ This document is the architecture spec for v1. It assumes the locked-in decision
 - Pre-pre-push hooks that run BEFORE any network I/O.
 - `--format json` available everywhere; default is human-readable.
 
-The eight numbered sections that follow describe the data model, commit pipeline, hunk staging API, pre-pre-push hook contract, full CLI surface, failure modes, wip via refs, and the coordination layer. Section 9 covers the concurrency test plan.
+The eight numbered sections that follow describe the data model, commit pipeline, hunk staging API, pre-pre-push hook contract, full CLI surface, failure modes, the coordination layer, and the concurrency test plan.
 
 ---
 
@@ -49,8 +49,6 @@ All safegit-specific state lives under `.git/safegit/`. Nothing escapes that dir
     queue/                           (not implemented in v1)
       refs/
         heads/<branch>.q     FIFO queue file for ref-lock waiters (one line per waiter: <pid> <ts>)
-    wip-locks/
-      <file-path-hash>       per-file lock for active wips (contents: <wip-id>)
     tmp/
       <pid>-<random>/        per-invocation scratch (index file, synthetic patches)
                              deleted when the invocation exits
@@ -88,7 +86,6 @@ If the process is killed mid-invocation, the tmp directory leaks. `safegit gc` r
 ```json
 {"ts":"2026-04-26T11:39:42.123Z","pid":12345,"op":"commit","extra":{"ref":"refs/heads/main","tree":"<sha>","parent":"<sha>","sha":"<sha>","attempts":1}}
 {"ts":"2026-04-26T11:39:43.001Z","pid":12346,"op":"commit","extra":{"ref":"refs/heads/main","tree":"<sha>","parent":"<sha>","sha":"<sha>","attempts":3}}
-{"ts":"2026-04-26T11:39:44.500Z","pid":12347,"op":"wip-create","extra":{"id":"a3f9e1c2","ref":"refs/safegit/wip/a3f9e1c2","files":["src/foo.go","src/bar.go"]}}
 {"ts":"2026-04-26T11:39:45.900Z","pid":12348,"op":"push","extra":{"remote":"origin","refs":[{"localRef":"refs/heads/main","localSha":"<sha>","remoteRef":"refs/heads/main","remoteSha":"<sha>"}],"hooksRun":2}}
 ```
 
@@ -107,16 +104,6 @@ host=hostname.local
 
 `pid` and `host` are the keys for liveness. `op` is informational (for `safegit doctor` and operator inspection).
 
-### 1.5 Wip lock file format
-
-`wip-locks/<file-path-hash>` is a one-line text file containing the wip-id of the active wip that owns the file:
-
-```
-a3f9e1c2
-```
-
-`<file-path-hash>` is `sha256(<repo-relative-path>)[:16]`. See Section 7 for wip semantics.
-
 ---
 
 ## 2. Commit Pipeline
@@ -130,7 +117,6 @@ The full sequence for `safegit commit -m "msg" -- file1 file2 ...`. The pipeline
     - It must exist on disk OR be a known deletion (`--allow-empty` or explicit `--delete <file>`).
     - It must be inside the working tree (no `../` escape).
     - It must not be `.gitignore`'d unless `--force` is passed.
-    - It must not be locked by an active wip held by another invocation (see Section 7.4).
 3. **Stage files into tmp index.** Apply the staging logic from Section 3 to each file.
 4. **Build the tree.**
 
@@ -180,7 +166,7 @@ At this point we have a valid commit object in the object DB but no ref points t
 | Step | Phase | Holds lock? | Touches global state? |
 |---|---|---|---|
 | 1. Init tmp index | A | no | no (only tmp dir) |
-| 2. Validate args | A | no | reads only (incl. wip-locks) |
+| 2. Validate args | A | no | reads only |
 | 3. Stage to tmp index | A | no | no |
 | 4. `git write-tree` | A | no | yes (writes objects, idempotent) |
 | 5. Resolve parent ref | A | no | reads only |
@@ -400,7 +386,7 @@ Global flags applicable to every command:
 | `--verbose`, `-v` | -- | Debug output to stderr. |
 | `--no-color` | auto | Disable ANSI color in human output. |
 | `--dry-run` | -- | Print what would happen, don't mutate. |
-| `--force` | -- | Bypass coordination layer / wip-lock checks (see Section 8). |
+| `--force` | -- | Bypass coordination layer checks (see Section 7). |
 
 Exit code conventions:
 
@@ -411,8 +397,7 @@ Exit code conventions:
 | 2 | Usage error (bad flags) |
 | 3 | Not in a git repo |
 | 4 | safegit not initialized |
-| 5 | Coordination layer refusal (working tree dirty, see Section 8) |
-| 6 | Wip lock conflict (see Section 7) |
+| 5 | Coordination layer refusal (working tree dirty, see Section 7) |
 | 7-19 | Pipeline-specific (commit/stage; see Section 2/3) |
 | 20-29 | Hook errors (see Section 4) |
 | 30-39 | Lock errors |
@@ -452,7 +437,7 @@ Staging is folded into `safegit commit` via the `file:hunk-spec` syntax (e.g., `
 
 ### 5.5 Branching and tree-mutating ops
 
-These commands all pass through the coordination layer in Section 8. They refuse if the working tree is dirty (modified, deleted, untracked, or wip-locked files present) unless `--force` is passed.
+These commands all pass through the coordination layer in Section 7. They refuse if the working tree is dirty (modified, deleted, or untracked files present) unless `--force` is passed.
 
 - **`safegit branch [<name>] [--from <rev>]`** -- create a branch (ref-locked). Does not touch working tree; coordination layer not invoked.
 - **`safegit branch --list [--format json]`**.
@@ -474,29 +459,21 @@ These commands all pass through the coordination layer in Section 8. They refuse
 - **`safegit pull [<remote>] [<branch>] [--ff-only]`** -- fetch + ff-only merge by default. Subject to coordination layer.
 - **`safegit fetch [<remote>] [<refspec>...]`** -- direct passthrough (no tree mutation).
 
-### 5.7 Wip
-
-See Section 7 for semantics.
-
-- **`safegit wip <file>...`** -- snapshot the listed files to a wip ref. Files are NOT reverted in the working tree (to avoid clobbering other agents' edits). The wip-lock prevents commits to those files.
-- **`safegit unwip <wip-id>`** -- restore a wip back to the working tree.
-- **`safegit wip list [--format json]`** -- list active wips.
-
-### 5.8 Hooks
+### 5.7 Hooks
 
 - **`safegit hook install <name> --from <path>`** -- copy a hook into `.git/hooks/`, `chmod +x`.
 - **`safegit hook list [--format json]`** -- list discovered hooks per Section 4.1.
 - **`safegit hook run <name>`** -- invoke a hook manually for testing (synthesizes stdin).
 
-### 5.9 Recovery
+### 5.8 Recovery
 
 - **`safegit unlock <ref> [--force]`** -- force-release a stale ref lock. Without `--force`, refuses to release a lock whose holder is alive.
 - **`safegit gc [--dry-run]`** -- remove `tmp/<pid>-<rand>/` directories whose PID is dead, ~~prune empty queue files~~ (queue not implemented in v1), compact `log` (rotates at `log.maxSize`, default 100MB).
 
-### 5.10 Utility
+### 5.9 Utility
 
 - **`safegit version`** -- print version, build info, git version.
-- **`safegit doctor`** -- sanity-check repo state. Reports: orphan tmp directories, stale ref locks (with holder PID), non-executable hook files, NFS-mounted repo, presence of `.gitmodules` or LFS filters, `HEAD` movements without op log entries (raw-git bypass detection), wip locks whose ref no longer exists.
+- **`safegit doctor`** -- sanity-check repo state. Reports: orphan tmp directories, stale ref locks (with holder PID), non-executable hook files, NFS-mounted repo, presence of `.gitmodules` or LFS filters, `HEAD` movements without op log entries (raw-git bypass detection).
     - JSON: `{"healthy": bool, "issues": [{"severity": "warn"|"error", "message": "...", "fixHint": "..."}]}`.
 
 ---
@@ -574,93 +551,11 @@ If these features are added to the repo after `safegit init`, `safegit doctor` r
 
 ---
 
-## 7. Wip
-
-Wip ("work in progress") is safegit's tree-state isolation primitive. It replaces what `git stash` does for a single user: park dirty work somewhere safe so the working tree can be moved.
-
-Unlike `git stash`, wips are real commits on real refs (`refs/safegit/wip/<wip-id>`), so they survive process death, can be inspected with `git log`, and don't interfere with other agents' wips. Raw `git stash` is NOT blocked by safegit (see Section 4.0) but agents are advised against it.
-
-### 7.1 Creating a wip
-
-`safegit wip <file>...`
-
-1. Validate that none of the listed files are already locked by another active wip. If any are, exit code 6 with a list of locked files and their owning wip-ids.
-2. Generate `<wip-id>` = 8-char hex random.
-3. Build a tree where the listed files have working-tree content and all other files have HEAD content:
-
-    ```
-    GIT_INDEX_FILE=.git/safegit/tmp/<pid>-<rand>/index \
-      git read-tree HEAD
-    GIT_INDEX_FILE=... git update-index --add -- <listed files>
-    GIT_INDEX_FILE=... git write-tree
-    ```
-
-4. Create the wip commit:
-
-    ```
-    git commit-tree <wip-tree-sha> -p HEAD -m "safegit wip <id>
-files: file1, file2, ..."
-    ```
-
-    The commit message embeds the list of wip'd files (one per line after `files:`). This is the canonical record of which files belong to the wip.
-5. Create the ref atomically:
-
-    ```
-    git update-ref refs/safegit/wip/<wip-id> <wip-commit-sha>
-    ```
-
-6. Write per-file lock files: for each listed file, `.git/safegit/wip-locks/<sha256(path)[:16]>` containing `<wip-id>`.
-7. Files are NOT reverted in the working tree. The wip-lock prevents commits to these files, which is the safety mechanism. The user can manually revert if desired.
-8. Append `wip` op log entry (Section 1.3).
-9. Return `<wip-id>` to the caller.
-
-### 7.2 Restoring a wip
-
-`safegit unwip <wip-id>`
-
-1. Verify `refs/safegit/wip/<wip-id>` exists.
-2. Read the file list from the wip commit message.
-3. Restore files from the wip commit's tree directly to the working tree via `git checkout <wip-sha> -- <files>`. No clean-check is performed: wip-locks prevent commits to these files, so any working-tree changes are the user's own edits and are overwritten unconditionally.
-
-4. Delete the per-file lock files for the recorded files.
-5. Delete the wip ref:
-
-    ```
-    git update-ref -d refs/safegit/wip/<wip-id>
-    ```
-
-6. Append `unwip` op log entry.
-
-### 7.3 Listing wips
-
-`safegit wip list` enumerates `refs/safegit/wip/*`. For each, parses the file list out of the commit message and prints it. JSON: `{"wips": [{"id": "...", "files": [...], "createdAt": "..."}]}`.
-
-### 7.4 Wip-lock conflict policy
-
-If `safegit wip <files>` is invoked and ANY of the requested files appears in `.git/safegit/wip-locks/`, the operation aborts with exit code 6:
-
-```
-safegit: cannot wip; files locked by other wips:
-  src/foo.go  (wip a3f9e1c2)
-  src/bar.go  (wip f00dface)
-hint: 'safegit unwip a3f9e1c2' to release src/foo.go
-```
-
-Locks are released by `safegit unwip <wip-id>`, which deletes both the ref and all per-file lock files associated with that wip.
-
-`safegit commit -- <files>` similarly refuses if any of the staged files is wip-locked by another invocation.
-
-### 7.5 Recovery
-
-If a wip ref exists but its per-file lock files are missing (or vice versa), `safegit doctor` flags the inconsistency and offers `safegit gc --wip-locks` to remove orphan lock files (those whose `<wip-id>` no longer corresponds to a live ref).
-
----
-
-## 8. Coordination Layer
+## 7. Coordination Layer
 
 The coordination layer prevents tree-mutating operations from clobbering uncommitted work belonging to another concurrent invocation. It is the alternative to per-agent virtual working trees.
 
-### 8.1 Affected commands
+### 7.1 Affected commands
 
 | Command | Reason |
 |---|---|
@@ -673,7 +568,7 @@ The coordination layer prevents tree-mutating operations from clobbering uncommi
 
 Read-only commands (`safegit status`, `safegit diff`, `safegit log`, `safegit fetch`) and pure ref-update commands (`safegit branch --create`, `safegit commit`) are NOT affected.
 
-### 8.2 Detection algorithm
+### 7.2 Detection algorithm
 
 Before invoking the underlying git operation:
 
@@ -685,10 +580,8 @@ for line in porcelain:
     if status != "  " (clean):
         dirty.append(path)
 
-wip_locked := readdir(".git/safegit/wip-locks/")
-
-if len(dirty) > 0 or len(wip_locked) > 0:
-    refuse(dirty, wip_locked)
+if len(dirty) > 0:
+    refuse(dirty)
 ```
 
 Refusal output:
@@ -701,47 +594,32 @@ Modified files:
   M src/bar.go
 ?? scratch.txt
 
-Active wips:
-  refs/safegit/wip/a3f9e1c2  (src/baz.go)
-
 Suggestion:
   safegit commit -m "<msg>" -- src/foo.go src/bar.go
-  safegit wip src/foo.go src/bar.go
   Or pass --force to override (you may lose work).
 ```
 
 Exit code 5.
 
-### 8.3 The "calling agent's stage" exception
+### 7.3 The "calling agent's stage" exception
 
-Because each safegit invocation rebuilds its tmp index from `HEAD` and there is no persistent stage, the coordination check has no need to whitelist files belonging to "this agent's pending stage." The rule is simply: working tree must be clean (or wip'd into a ref).
+Because each safegit invocation rebuilds its tmp index from `HEAD` and there is no persistent stage, the coordination check has no need to whitelist files belonging to "this agent's pending stage." The rule is simply: working tree must be clean.
 
-This is what makes the design safe under concurrency: no agent can have hidden in-flight state that another agent might trample. Any in-flight state must be either committed or wip'd, both of which are visible to every other invocation.
+This is what makes the design safe under concurrency: no agent can have hidden in-flight state that another agent might trample. Any in-flight state must be committed, which is visible to every other invocation.
 
-### 8.4 Bypass
+### 7.4 Bypass
 
 `--force` skips the dirty-tree check. Useful for recovery scenarios (e.g. you intentionally want `safegit reset --hard` to discard local edits). A warning is printed and an op log entry `coordination_bypassed` is recorded.
 
-### 8.5 Interaction with wip
-
-The "right" way to multitask within or across agents is:
-
-1. Agent A is editing `src/foo.go`, gets called away.
-2. `safegit wip src/foo.go` -> wip-id `a3f9e1c2`, working tree reverted.
-3. Agent B can now `safegit checkout other-branch` (clean tree, coordination passes).
-4. Later, Agent A returns: `safegit checkout original-branch && safegit unwip a3f9e1c2`.
-
-Without wip, Agent A would have had to commit a noisy WIP commit or convince Agent B to wait.
-
 ---
 
-## 9. Concurrency Tests
+## 8. Concurrency Tests
 
 Note: the test names below (T1-T17) are from the original design. The actual test names in `internal/test/` differ but cover the same scenarios.
 
 The design must be falsifiable. This section enumerates the test scenarios that prove or disprove the architecture. All tests are Go tests under `internal/test/concurrent_test.go` using `t.Parallel()`, goroutines, and a temp git repo per test (set up via `t.TempDir()` + `git init`).
 
-### 9.1 Test harness
+### 8.1 Test harness
 
 Helper: `newRepo(t *testing.T) *RepoFixture`
 
@@ -754,7 +632,7 @@ Helper: `newRepo(t *testing.T) *RepoFixture`
 
 Helper: `parallel(n int, fn func(i int))` -- spawns n goroutines, calls `fn(i)`, waits via `sync.WaitGroup`. Used by every test.
 
-### 9.2 Test scenarios
+### 8.2 Test scenarios
 
 | # | Name | Setup | Action | Expected |
 |---|------|-------|--------|----------|
@@ -771,12 +649,10 @@ Helper: `parallel(n int, fn func(i int))` -- spawns n goroutines, calls `fn(i)`,
 | T11 | HookTimeout | Configure `pre-pre-push` to `sleep 60`; set `hooks.preprepush.timeoutSeconds=2`; run push | -- | Push aborts within 8s with exit code 21. |
 | T12 | RawGitBypassDetection | `git commit -am "bypass"`; then `safegit doctor` | -- | Doctor reports the bypass; exit code 0 with warnings array containing the bypass detection. |
 | T13 | DiskFullSimulated | Mount a small `tmpfs` at `.git/objects`; run `safegit commit` of a file >tmpfs size | -- | Exit code 9; no corruption; subsequent `safegit commit` after freeing space succeeds. |
-| T14 | WipLockConflict | Invocation A wips `src/foo.go`; invocation B tries to wip `src/foo.go` | -- | B exits with code 6; A's wip ref intact. |
-| T15 | CheckoutRefusedDirty | Working tree has a modified file; invocation B runs `safegit checkout other-branch` | -- | B exits with code 5; ref unchanged; working tree unchanged. |
-| T16 | PullRefusedWithWip | Invocation A creates a wip on `file1`; invocation B runs `safegit pull` | -- | B exits with code 5 (wip locks count as dirty); pull does not run. |
-| T17 | CheckoutCleanProceeds | Working tree clean, no wips; `safegit checkout other-branch` | -- | Succeeds; HEAD moves; op log records `checkout`. |
+| T14 | CheckoutRefusedDirty | Working tree has a modified file; invocation B runs `safegit checkout other-branch` | -- | B exits with code 5; ref unchanged; working tree unchanged. |
+| T15 | CheckoutCleanProceeds | Working tree clean; `safegit checkout other-branch` | -- | Succeeds; HEAD moves; op log records `checkout`. |
 
-### 9.3 Running
+### 8.3 Running
 
 ```
 go test ./internal/test/... -race -count=10 -timeout=10m
@@ -786,7 +662,7 @@ The `-race` flag catches data races in shared safegit state. `-count=10` reruns 
 
 For T1, T3, T9 specifically, also run under `stress-ng --io 4 --vm 2 --timeout 60s` in CI to expose disk/memory pressure regressions.
 
-### 9.4 Continuous integration
+### 8.4 Continuous integration
 
 GitHub Actions matrix: ubuntu-latest, macos-latest, on Go 1.22, 1.23, 1.24. Each runs:
 

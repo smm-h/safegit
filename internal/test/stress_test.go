@@ -178,28 +178,6 @@ func TestRawGitBypassDetection(t *testing.T) {
 	}
 }
 
-// T16: Pull refused when wip locks exist.
-func TestPullRefusedWithWip(t *testing.T) {
-	dir := newRepo(t)
-
-	// Modify seed.txt and create a wip
-	seedPath := filepath.Join(dir, "seed.txt")
-	if err := os.WriteFile(seedPath, []byte("wip content\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	_, stderr, code := runSafegit(t, dir, "wip", "seed.txt")
-	if code != 0 {
-		t.Fatalf("wip failed (code %d): %s", code, stderr)
-	}
-
-	// safegit pull should refuse with code 5 (wip locks count as dirty)
-	_, _, code = runSafegit(t, dir, "pull")
-	if code != 5 {
-		t.Errorf("expected exit code 5 (dirty/wip), got %d", code)
-	}
-}
-
 // T17: Checkout succeeds when working tree is clean and no wips.
 func TestCheckoutCleanProceeds(t *testing.T) {
 	dir := newRepo(t)

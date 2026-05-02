@@ -579,41 +579,6 @@ func TestOpLogIntegrity(t *testing.T) {
 	}
 }
 
-// T14: Agent A wips file1, Agent B tries to wip file1, B gets error code 6
-// (wip-locked file blocks commit).
-func TestWipLockConflict(t *testing.T) {
-	dir := newRepo(t)
-
-	// Modify seed.txt so we have something to wip
-	seedPath := filepath.Join(dir, "seed.txt")
-	if err := os.WriteFile(seedPath, []byte("modified for wip\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Agent A: wip seed.txt
-	stdout, stderr, code := runSafegit(t, dir, "wip", "seed.txt")
-	if code != 0 {
-		t.Fatalf("first wip failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
-	}
-
-	// Write new content to seed.txt (simulating Agent B's work)
-	if err := os.WriteFile(seedPath, []byte("agent B content\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Agent B: try to commit seed.txt (should fail with exit code 6 = wip-locked)
-	stdout, stderr, code = runSafegit(t, dir, "commit", "-m", "agent B commit", "--", "seed.txt")
-	if code != 6 {
-		t.Errorf("expected exit code 6 (wip-locked), got %d: stdout=%s stderr=%s", code, stdout, stderr)
-	}
-
-	// Verify error message mentions wip-locked (check both stdout and stderr)
-	combined := stdout + stderr
-	if !strings.Contains(combined, "wip-locked") {
-		t.Errorf("output %q does not contain 'wip-locked'", combined)
-	}
-}
-
 // T15: Dirty working tree, checkout refused with code 5.
 func TestCheckoutRefusedDirty(t *testing.T) {
 	dir := newRepo(t)

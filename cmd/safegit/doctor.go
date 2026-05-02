@@ -12,7 +12,6 @@ import (
 	"github.com/smm-h/safegit/internal/lock"
 	"github.com/smm-h/safegit/internal/oplog"
 	"github.com/smm-h/safegit/internal/repo"
-	"github.com/smm-h/safegit/internal/wip"
 )
 
 type checkResult struct {
@@ -92,23 +91,7 @@ func runDoctor(flags globalFlags, args []string) {
 		}
 	}
 
-	// Check 4: Orphan wip-locks
-	if repo.IsInitialized(gitDir) {
-		orphans, err := wip.OrphanLocks(ctx, sgDir)
-		if err != nil {
-			checks = append(checks, checkResult{Name: "wip_locks", Status: "warn", Detail: err.Error()})
-		} else if len(orphans) > 0 {
-			checks = append(checks, checkResult{
-				Name:   "wip_locks",
-				Status: "warn",
-				Detail: fmt.Sprintf("%d orphan wip-lock(s) found (run 'safegit doctor --fix' to clean)", len(orphans)),
-			})
-		} else {
-			checks = append(checks, checkResult{Name: "wip_locks", Status: "ok"})
-		}
-	}
-
-	// Check 5: Config readable
+	// Check 4: Config readable
 	if repo.IsInitialized(gitDir) {
 		cfg, err := repo.LoadConfig(gitDir)
 		if err != nil {
@@ -235,8 +218,8 @@ func runDoctor(flags globalFlags, args []string) {
 	}
 }
 
-// doctorFix performs cleanup: orphan tmp dirs, orphan wip-locks, legacy queue
-// dir, and oplog rotation. With --dry-run it only reports what would be done.
+// doctorFix performs cleanup: orphan tmp dirs, legacy queue dir, and oplog
+// rotation. With --dry-run it only reports what would be done.
 func doctorFix(flags globalFlags, gitDir string) {
 	sgDir := repo.SafegitDir(gitDir)
 	cfg, _ := loadConfig(flags, gitDir)
@@ -247,8 +230,6 @@ func doctorFix(flags globalFlags, gitDir string) {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
-
-		orphanWipLocks, _ := wip.OrphanLocks(context.Background(), sgDir)
 
 		// Check for legacy queue directory.
 		queueDir := filepath.Join(sgDir, "queue")
@@ -270,9 +251,6 @@ func doctorFix(flags globalFlags, gitDir string) {
 
 		if !flags.quiet {
 			fmt.Printf("would remove %d orphan tmp dir(s)\n", len(orphanDirs))
-			if len(orphanWipLocks) > 0 {
-				fmt.Printf("would remove %d orphan wip-lock(s)\n", len(orphanWipLocks))
-			}
 			if hasLegacyQueue {
 				fmt.Println("would remove legacy queue directory")
 			}
@@ -289,12 +267,6 @@ func doctorFix(flags globalFlags, gitDir string) {
 	removed, err := index.GarbageCollect(sgDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-
-	wipCleaned, wipErr := wip.CleanOrphanLocks(context.Background(), sgDir)
-	if wipErr != nil {
-		fmt.Fprintf(os.Stderr, "error cleaning wip locks: %v\n", wipErr)
 		os.Exit(1)
 	}
 
@@ -318,9 +290,6 @@ func doctorFix(flags globalFlags, gitDir string) {
 
 	if !flags.quiet {
 		fmt.Printf("removed %d orphan tmp dir(s)\n", removed)
-		if wipCleaned > 0 {
-			fmt.Printf("removed %d orphan wip-lock(s)\n", wipCleaned)
-		}
 		if queueRemoved {
 			fmt.Println("removed legacy queue directory")
 		}

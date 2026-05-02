@@ -108,7 +108,6 @@ func Init(gitDir string, force bool) error {
 	dirs := []string{
 		sgDir,
 		filepath.Join(sgDir, "locks", "refs", "heads"),
-		filepath.Join(sgDir, "wip-locks"),
 		filepath.Join(sgDir, "tmp"),
 	}
 	for _, d := range dirs {
