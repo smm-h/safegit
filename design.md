@@ -407,8 +407,8 @@ JSON output schema is uniform for every command: `{"ok": bool, "command": str, "
 
 ### 5.1 Lifecycle
 
-- **`safegit init`** -- bootstrap `.git/safegit/`, install `.git/hooks/pre-pre-push` wrapper, write default `config.json`. `--uninstall` reverses everything.
-    - JSON: `{"installed": true, "hookPath": ".git/hooks/pre-pre-push", "configPath": ".git/safegit/config.json"}`.
+- **`safegit init`** -- bootstrap `.git/safegit/` and write default `config.json`. Running any safegit command on an uninitialized repo automatically runs this. `--uninstall` reverses everything.
+    - JSON: `{"installed": true, "configPath": ".git/safegit/config.json"}`.
 
 There are no `safegit session` subcommands; sessions do not exist (see 1.2).
 
@@ -667,7 +667,7 @@ GitHub Actions matrix: ubuntu-latest, macos-latest, on Go 1.22, 1.23, 1.24. Each
 
 ## Distribution
 
-safegit is shipped as a single static Go binary built with `CGO_ENABLED=0`. The binary embeds the `pre-pre-push` hook wrapper template. `safegit init` writes the wrapper to `.git/hooks/pre-pre-push` (this is the only hook safegit installs; there are no enforcement hooks per Section 4.0).
+safegit is shipped as a single static Go binary built with `CGO_ENABLED=0`. The binary embeds the `pre-pre-push` hook wrapper template. `safegit hook install` writes the wrapper to `.git/hooks/pre-pre-push` (this is the only hook safegit installs; there are no enforcement hooks per Section 4.0).
 
 Build matrix: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64. Released as GitHub Release artifacts; no package-manager presence in v1.
 
