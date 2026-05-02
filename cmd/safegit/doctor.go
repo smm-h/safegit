@@ -15,9 +15,9 @@ import (
 )
 
 type checkResult struct {
-	Name   string `json:"name"`
-	Status string `json:"status"` // "ok", "warn", "error"
-	Detail string `json:"detail,omitempty"`
+	Name   string
+	Status string // "ok", "warn", "error"
+	Detail string
 }
 
 func runDoctor(flags globalFlags, args []string) {
