@@ -56,10 +56,9 @@ safegit push
 | `config`  | Show or set configuration values |
 | `unlock`  | Release a stale ref lock |
 
-Read-only git commands (`status`, `diff`, `log`, `show`, `branch`, `fetch`,
-`tag`) are passed through to git. Tree-mutating commands (`checkout`, `pull`,
-`merge`, `rebase`, `reset`, `bisect`, `stash`, `cherry-pick`, `revert`) are
-passed through with coordination guards.
+The read-only git command `branch` is passed through to git. Tree-mutating
+commands (`checkout`, `pull`, `merge`, `rebase`, `reset`, `bisect`,
+`cherry-pick`, `revert`) are passed through with coordination guards.
 
 ## How it works
 
