@@ -407,8 +407,7 @@ JSON output schema is uniform for every command: `{"ok": bool, "command": str, "
 
 ### 5.1 Lifecycle
 
-- **`safegit init`** -- bootstrap `.git/safegit/` and write default `config.json`. Running any safegit command on an uninitialized repo automatically runs this. `--uninstall` reverses everything.
-    - JSON: `{"installed": true, "configPath": ".git/safegit/config.json"}`.
+safegit auto-initializes on first use: any command that requires `.git/safegit/` calls `EnsureInitialized`, which creates the directory structure and writes default `config.json` if missing. To remove safegit from a repo, use `safegit doctor --uninstall`.
 
 There are no `safegit session` subcommands; sessions do not exist (see 1.2).
 
@@ -447,7 +446,6 @@ These commands all pass through the coordination layer in Section 7. They refuse
 - **`safegit rebase <upstream>`** -- subprocess to `git rebase`. Subject to coordination layer.
 - **`safegit reset --hard <rev>`** -- subject to coordination layer.
 - **`safegit bisect <subcommand>`** -- subject to coordination layer for tree-moving subcommands.
-- **`safegit stash [<args>...]`** -- guarded passthrough: coordination check, then `git stash`.
 - **`safegit cherry-pick <commit>...`** -- guarded passthrough: coordination check, then `git cherry-pick`.
 - **`safegit revert <commit>...`** -- guarded passthrough: coordination check, then `git revert`.
 - **`safegit tag [<args>...]`** -- unguarded passthrough to `git tag` (no coordination check).
@@ -554,7 +552,6 @@ The coordination layer prevents tree-mutating operations from clobbering uncommi
 | `safegit merge` | Three-way merge; may modify working tree. |
 | `safegit reset --hard` | Resets working tree to a ref. |
 | `safegit bisect <good|bad|reset>` | Moves the working tree across commits. |
-| `safegit stash` | Modifies working tree and/or index. |
 | `safegit cherry-pick` | Applies commit(s) to working tree. |
 | `safegit revert` | Applies inverse commit(s) to working tree. |
 
@@ -616,7 +613,7 @@ The design must be falsifiable. This section enumerates the test scenarios that 
 Helper: `newRepo(t *testing.T) *RepoFixture`
 
 - creates a temp dir
-- runs `git init` and `safegit init`
+- runs `git init` (safegit auto-initializes on first command)
 - returns a fixture exposing:
     - `fixture.RunSafegit(args...) (stdout, stderr, exitcode)`
     - `fixture.HeadSHA(branch) string`
