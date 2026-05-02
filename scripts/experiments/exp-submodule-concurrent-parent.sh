@@ -41,7 +41,7 @@ git commit -q -m "add submodule"
 # Record the submodule entry before concurrent commits
 SUB_ENTRY_BEFORE=$(git ls-tree HEAD mysub)
 
-"$SAFEGIT" init --force -q
+"$SAFEGIT" init -q
 "$SAFEGIT" config commit.casMaxAttempts 50
 
 # Create the files that will be committed concurrently

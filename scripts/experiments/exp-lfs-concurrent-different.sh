@@ -18,7 +18,7 @@ git lfs install --local
 echo '*.bin filter=lfs diff=lfs merge=lfs -text' > .gitattributes
 git add .gitattributes && git commit -q -m "init lfs"
 
-"$SAFEGIT" init --force -q
+"$SAFEGIT" init -q
 "$SAFEGIT" config commit.casMaxAttempts 50
 
 # Create two different binary files
