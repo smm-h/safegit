@@ -15,3 +15,6 @@ dist/
 .*-cache.json
 .env
 .env.local
+
+# Added by rlsbl
+*.local-only
