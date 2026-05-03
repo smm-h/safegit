@@ -5,7 +5,7 @@
 - `go build -o safegit ./cmd/safegit` to build
 - `go test ./... -race` to run all tests with race detection
 - `go test ./internal/test/ -race -count=5 -timeout=15m` for stress tests
-- `scripts/stress` for a quick stress run
+- `testdata/stress` for a quick stress run
 
 ## Release workflow
 

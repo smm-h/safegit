@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./scripts/check-prs.sh"
+            "command": "rlsbl check-prs"
           }
         ]
       }

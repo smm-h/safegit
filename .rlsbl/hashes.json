@@ -1,13 +1,8 @@
 {
-  ".github/workflows/ci.yml": "55aaf4a8eb7cc13313518a357248c18c2f1a5bf5de1f8cff7b046281b418a0bf",
-  ".github/workflows/publish.yml": "725da6c88283096d6a56a4b7530e5464a7d27a512ae3eec04659bc5e7f95394d",
+  ".github/workflows/ci.yml": "80f7d797442c415a13f15a44ea0873873a95166beb1685e22f2d76ff9f27173f",
+  ".github/workflows/publish.yml": "5ca467d96dcef2d5826c095587835373efa533cdbe57bb3a28d25db37b63fe68",
   ".goreleaser.yml": "662cb9ef2c5d58c830d6ad8556c07e22ea6ab76f004e2abb2bf709649c5aafd4",
   "CHANGELOG.md": "fca781960bc4a70fce00e622926810542c6c62b34357a1228fa2e8432108c013",
   "CLAUDE.md": "03740c2f920cc79711453ee400363716c5f510a4439bc681dc91b0786aad2be2",
-  "scripts/check-prs.sh": "a438f046ac169256b859873e6f12b66bf629e12fa4bc1f766ed8484af983383c",
-  ".claude/settings.json": "99ee3041446e119611136c7c0f1955c1eef7e12ff21350e3da3380351dc25ef4",
-  "scripts/record-gif.sh": "9eeeeca1c1e50717dd3fc78842577947daefb42dbf37f77f4a792377c0b54081",
-  "scripts/pre-release.sh": "873d1b8f12f9507489d5f39bff6121f4ec766a27fc46af9cfe1eb85c57eeebe0",
-  "scripts/pre-push-hook.sh": "3686907234ca63f18d2cad27e10f68f2cb239c71c6691910a6efcfef901d8e8f",
-  "scripts/post-release.sh": "44702ecb560ec748a589b3af80267cd948141021596cde49e83597a6144d084e"
+  ".claude/settings.json": "99ee3041446e119611136c7c0f1955c1eef7e12ff21350e3da3380351dc25ef4"
 }
