@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1
+
+- **Post-release hook.** `scripts/post-release.sh` auto-installs the safegit binary locally on release via `go install`.
+- **Removed stale experiment script.** `bug-02-reword-no-retry.sh` tested the removed `reword` command.
+
 ## 0.6.0
 
 ### Removed
