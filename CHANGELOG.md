@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.2
+
+- **Migrated rlsbl layout.** Hooks moved from `scripts/` to `.rlsbl/hooks/`. Experiment scripts and stress tests moved from `scripts/` to `testdata/`. Two-step pre-push hook (rlsbl changelog check + safegit stress tests).
+- **Bumped GitHub Actions to Node.js 24.** `checkout@v6`, `setup-go@v6`, `goreleaser@v7`. Added `*.local-only` gitignore pattern.
+
 ## 0.6.1
 
 - **Post-release hook.** `scripts/post-release.sh` auto-installs the safegit binary locally on release via `go install`.
