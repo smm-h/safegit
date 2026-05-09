@@ -170,6 +170,9 @@ func runRewriteAuthor(flags globalFlags, args []string) {
 
 	// Push if requested
 	if push {
+		if _, _, err := git.Run(ctx, "remote", "get-url", "origin"); err != nil {
+			die(flags, cmd, 1, "no 'origin' remote configured; add one with git remote add origin <url>")
+		}
 		fmt.Println("Force-pushing all branches and tags...")
 		if _, _, err := git.Run(ctx, "push", "origin", "--all", "--force"); err != nil {
 			die(flags, cmd, 1, fmt.Sprintf("pushing branches: %v", err))
