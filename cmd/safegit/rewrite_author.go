@@ -176,13 +176,13 @@ Examples:
 	}
 
 	fmt.Println("Rewriting commits...")
-	shaMap, nameChanged, err := rewriteCommits(ctx, oldName, newName, oldEmail, newEmail)
+	shaMap, nameChanged, err := rewriteCommits(ctx, oldName, newName, oldEmail, newEmail, flags.verbose)
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("rewriting commits: %v", err))
 	}
 
 	fmt.Println("Updating refs...")
-	if err := updateRefs(ctx, shaMap, oldName, newName, oldEmail, newEmail); err != nil {
+	if err := updateRefs(ctx, shaMap, oldName, newName, oldEmail, newEmail, flags.verbose); err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("updating refs: %v", err))
 	}
 
@@ -609,7 +609,7 @@ func compareIntSlices(label string, before, after []int) string {
 // name matches oldName or a parent SHA was remapped by an earlier rewrite.
 // Returns the old-to-new SHA mapping, the count of commits whose name was
 // actually changed, and any error.
-func rewriteCommits(ctx context.Context, oldName, newName, oldEmail, newEmail string) (map[string]string, int, error) {
+func rewriteCommits(ctx context.Context, oldName, newName, oldEmail, newEmail string, verbose bool) (map[string]string, int, error) {
 	// Get all commits in topo-order with parents before children.
 	args := append([]string{"rev-list", "--topo-order", "--reverse"}, refGlobs...)
 	out, _, err := git.Run(ctx, args...)
@@ -681,6 +681,9 @@ func rewriteCommits(ctx context.Context, oldName, newName, oldEmail, newEmail st
 		// this commit keeps its original SHA.
 		if !thisNameChanged && !parentRemapped {
 			shaMap[sha] = sha
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  %s                   (unchanged)\n", sha[:12])
+			}
 			continue
 		}
 
@@ -692,6 +695,13 @@ func rewriteCommits(ctx context.Context, oldName, newName, oldEmail, newEmail st
 			return nil, 0, fmt.Errorf("creating rewritten commit for %s: %w", sha, err)
 		}
 		shaMap[sha] = newSHA
+		if verbose {
+			if thisNameChanged {
+				fmt.Fprintf(os.Stderr, "  %s -> %s  (name changed)\n", sha[:12], newSHA[:12])
+			} else {
+				fmt.Fprintf(os.Stderr, "  %s -> %s  (inherited)\n", sha[:12], newSHA[:12])
+			}
+		}
 	}
 
 	return shaMap, nameChanged, nil
@@ -700,7 +710,7 @@ func rewriteCommits(ctx context.Context, oldName, newName, oldEmail, newEmail st
 // updateRefs updates all branch and tag refs to point to rewritten commits.
 // For annotated tags, the tag object itself is rewritten if its target commit
 // changed or its tagger name matches oldName. Stash refs are skipped.
-func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName, oldEmail, newEmail string) error {
+func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName, oldEmail, newEmail string, verbose bool) error {
 	out, _, err := git.Run(ctx, "for-each-ref", "--format=%(refname) %(objecttype) %(objectname)", "refs/heads/", "refs/tags/", "refs/remotes/")
 	if err != nil {
 		return fmt.Errorf("listing refs: %w", err)
@@ -735,6 +745,9 @@ func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName,
 			if err := git.UpdateRef(ctx, refname, newSHA, objectname); err != nil {
 				return fmt.Errorf("updating ref %s: %w", refname, err)
 			}
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  %-20s %s -> %s\n", refname, objectname[:12], newSHA[:12])
+			}
 
 		case "tag":
 			// Annotated tag object -- rewrite if its target changed or
@@ -748,6 +761,9 @@ func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName,
 			}
 			if err := git.UpdateRef(ctx, refname, newTagSHA, objectname); err != nil {
 				return fmt.Errorf("updating annotated tag ref %s: %w", refname, err)
+			}
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  %-20s %s -> %s\n", refname, objectname[:12], newTagSHA[:12])
 			}
 		}
 	}
@@ -763,6 +779,9 @@ func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName,
 		if newSHA, ok := shaMap[headSHA]; ok && newSHA != headSHA {
 			if err := git.UpdateRef(ctx, "HEAD", newSHA, headSHA); err != nil {
 				return fmt.Errorf("updating detached HEAD: %w", err)
+			}
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  %-20s %s -> %s\n", "HEAD (detached)", headSHA[:12], newSHA[:12])
 			}
 		}
 	}

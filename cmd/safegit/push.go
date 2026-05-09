@@ -49,6 +49,12 @@ func runPush(flags globalFlags, args []string) int {
 	for i := 0; i < len(args); i++ {
 		flag, _, _ := splitFlagValue(args[i])
 		switch flag {
+		case "--help", "-h":
+			commandHelp("push [flags] [remote] [refspec...]", `Push to remote with pre-pre-push hooks and retry logic.
+
+Flags:
+  --force, -f          Force-push
+  --no-pre-pre-push    Skip pre-pre-push hooks`)
 		case "--no-pre-pre-push":
 			noPrePrePush = true
 		case "--force", "-f":
@@ -88,6 +94,13 @@ func runPush(flags globalFlags, args []string) int {
 		return 1
 	}
 
+	if flags.verbose {
+		fmt.Fprintf(os.Stderr, "  remote: %s (%s)\n", remote, remoteURL)
+		for _, r := range refs {
+			fmt.Fprintf(os.Stderr, "  ref: %s -> %s\n", shortRef(r.LocalRef), shortRef(r.RemoteRef))
+		}
+	}
+
 	// Build hook stdin (same format as git pre-push)
 	var stdinLines []string
 	for _, r := range refs {
@@ -118,6 +131,9 @@ func runPush(flags globalFlags, args []string) int {
 
 		// Check hook results
 		for _, hr := range hookResults {
+			if flags.verbose {
+				fmt.Fprintf(os.Stderr, "  hook %s: exit=%d (%v)\n", hr.Name, hr.ExitCode, hr.Duration)
+			}
 			if hr.TimedOut {
 				fmt.Fprintf(os.Stderr, "hook %s timed out after %v\n", hr.Name, hr.Duration)
 				return exitPushHookTimeout
@@ -149,7 +165,9 @@ func runPush(flags globalFlags, args []string) int {
 		if attempt < retryAttempts {
 			// Exponential backoff: 1s, 2s, 4s
 			backoff := time.Duration(1<<(attempt-1)) * time.Second
-			if !flags.quiet {
+			if flags.verbose {
+				fmt.Fprintf(os.Stderr, "  retry %d/%d after %v\n", attempt+1, retryAttempts, backoff)
+			} else if !flags.quiet {
 				fmt.Fprintf(os.Stderr, "transport error, retrying in %v (attempt %d/%d)...\n", backoff, attempt+1, retryAttempts)
 			}
 			time.Sleep(backoff)

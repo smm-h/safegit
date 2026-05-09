@@ -33,6 +33,17 @@ func runCommit(flags globalFlags, args []string) {
 		}
 		flag, val, hasVal := splitFlagValue(args[i])
 		switch flag {
+		case "--help", "-h":
+			commandHelp("commit [flags] -- <file>...", `Stage and commit files atomically with CAS retry.
+
+Flags:
+  -m <message>         Commit message (required)
+  -F <path>            Read commit message from file
+  --branch <name>      Commit to a different branch
+  --amend              Amend the current HEAD commit
+  --allow-empty        Allow commits with no file changes
+
+Files can include hunk specs: file.go:1,3 (hunks 1 and 3 only).`)
 		case "--":
 			pastSeparator = true
 		case "-m":
@@ -110,6 +121,17 @@ func runCommit(flags globalFlags, args []string) {
 		die(flags, "commit", 1, fmt.Sprintf("loading config: %v", err))
 	}
 
+	if flags.verbose {
+		paths := make([]string, len(fileSpecs))
+		for i, fs := range fileSpecs {
+			paths[i] = fs.Path
+		}
+		fmt.Fprintf(os.Stderr, "  files: %s\n", strings.Join(paths, ", "))
+		if branch != "" {
+			fmt.Fprintf(os.Stderr, "  branch: %s\n", branch)
+		}
+	}
+
 	p := &commit.Pipeline{SafegitDir: sgDir, Config: *cfg}
 	result, err := p.Execute(context.Background(), commit.CommitRequest{
 		Message:    msg,
@@ -126,6 +148,13 @@ func runCommit(flags globalFlags, args []string) {
 		}
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(code)
+	}
+
+	if flags.verbose {
+		fmt.Fprintf(os.Stderr, "  ref: %s\n", result.Ref)
+		fmt.Fprintf(os.Stderr, "  tree: %s\n", result.Tree)
+		fmt.Fprintf(os.Stderr, "  parent: %s\n", result.Parent)
+		fmt.Fprintf(os.Stderr, "  sha: %s\n", result.SHA)
 	}
 
 	if !flags.quiet {
@@ -156,6 +185,17 @@ func runCommitAmend(flags globalFlags, gitDir string, messages []string, branch 
 
 		fileSpecs := parseFileSpecs(files, flags, "commit")
 
+		if flags.verbose {
+			paths := make([]string, len(fileSpecs))
+			for i, fs := range fileSpecs {
+				paths[i] = fs.Path
+			}
+			fmt.Fprintf(os.Stderr, "  amend files: %s\n", strings.Join(paths, ", "))
+			if branch != "" {
+				fmt.Fprintf(os.Stderr, "  branch: %s\n", branch)
+			}
+		}
+
 		result, err := p.Amend(context.Background(), commit.AmendRequest{
 			Message:   msg,
 			FileSpecs: fileSpecs,
@@ -170,6 +210,14 @@ func runCommitAmend(flags globalFlags, gitDir string, messages []string, branch 
 			}
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(code)
+		}
+
+		if flags.verbose {
+			fmt.Fprintf(os.Stderr, "  ref: %s\n", result.Ref)
+			fmt.Fprintf(os.Stderr, "  tree: %s\n", result.Tree)
+			fmt.Fprintf(os.Stderr, "  parent: %s\n", result.Parent)
+			fmt.Fprintf(os.Stderr, "  old: %s\n", result.OldSHA)
+			fmt.Fprintf(os.Stderr, "  sha: %s\n", result.SHA)
 		}
 
 		if !flags.quiet {
@@ -192,6 +240,13 @@ func runCommitAmend(flags globalFlags, gitDir string, messages []string, branch 
 
 		msg := strings.Join(messages, "\n")
 
+		if flags.verbose {
+			fmt.Fprintf(os.Stderr, "  reword message: %s\n", firstLine(msg))
+			if branch != "" {
+				fmt.Fprintf(os.Stderr, "  branch: %s\n", branch)
+			}
+		}
+
 		result, err := p.Reword(context.Background(), commit.RewordRequest{
 			Message: msg,
 			Branch:  branch,
@@ -204,6 +259,12 @@ func runCommitAmend(flags globalFlags, gitDir string, messages []string, branch 
 			}
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(code)
+		}
+
+		if flags.verbose {
+			fmt.Fprintf(os.Stderr, "  ref: %s\n", result.Ref)
+			fmt.Fprintf(os.Stderr, "  old: %s\n", result.OldSHA)
+			fmt.Fprintf(os.Stderr, "  sha: %s\n", result.SHA)
 		}
 
 		if !flags.quiet {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/smm-h/safegit/internal/git"
 	"github.com/smm-h/safegit/internal/index"
@@ -26,6 +27,12 @@ func runDoctor(flags globalFlags, args []string) {
 	uninstall := false
 	for _, a := range args {
 		switch a {
+		case "--help", "-h":
+			commandHelp("doctor [flags]", `Run health checks on the safegit installation.
+
+Flags:
+  --fix                Repair issues (garbage-collect orphan dirs, rotate oplog)
+  --uninstall          Remove safegit from this repository`)
 		case "--fix":
 			fix = true
 		case "--uninstall":
@@ -53,18 +60,24 @@ func runDoctor(flags globalFlags, args []string) {
 	ctx := context.Background()
 
 	var checks []checkResult
+	var checkStart time.Time
 
 	// Check 1: Is safegit initialized?
+	checkStart = time.Now()
 	if repo.IsInitialized(gitDir) {
 		checks = append(checks, checkResult{Name: "initialized", Status: "ok"})
 	} else {
 		checks = append(checks, checkResult{Name: "initialized", Status: "error", Detail: "not initialized (run any safegit command to auto-init)"})
+	}
+	if flags.verbose {
+		fmt.Fprintf(os.Stderr, "  checked: initialized (%v)\n", time.Since(checkStart))
 	}
 
 	sgDir := repo.SafegitDir(gitDir)
 
 	// Check 2: Orphan tmp dirs (report only; --fix cleans them up)
 	if repo.IsInitialized(gitDir) {
+		checkStart = time.Now()
 		orphans, err := index.GarbageCollectDryRun(sgDir)
 		if err != nil {
 			checks = append(checks, checkResult{Name: "tmp_dirs", Status: "warn", Detail: err.Error()})
@@ -77,10 +90,14 @@ func runDoctor(flags globalFlags, args []string) {
 		} else {
 			checks = append(checks, checkResult{Name: "tmp_dirs", Status: "ok"})
 		}
+		if flags.verbose {
+			fmt.Fprintf(os.Stderr, "  checked: tmp_dirs (%v)\n", time.Since(checkStart))
+		}
 	}
 
 	// Check 3: Stale locks (scan the shared safegit dir so worktree locks are found)
 	if repo.IsInitialized(gitDir) {
+		checkStart = time.Now()
 		sharedDir := repo.SharedSafegitDir(ctx, gitDir)
 		locksDir := filepath.Join(sharedDir, "locks", "refs", "heads")
 		staleCount := 0
@@ -105,10 +122,14 @@ func runDoctor(flags globalFlags, args []string) {
 		} else {
 			checks = append(checks, checkResult{Name: "stale_locks", Status: "ok"})
 		}
+		if flags.verbose {
+			fmt.Fprintf(os.Stderr, "  checked: stale_locks (%v)\n", time.Since(checkStart))
+		}
 	}
 
 	// Check 4: Config readable
 	if repo.IsInitialized(gitDir) {
+		checkStart = time.Now()
 		cfg, err := repo.LoadConfig(gitDir)
 		if err != nil {
 			checks = append(checks, checkResult{Name: "config", Status: "error", Detail: err.Error()})
@@ -121,10 +142,14 @@ func runDoctor(flags globalFlags, args []string) {
 		} else {
 			checks = append(checks, checkResult{Name: "config", Status: "ok"})
 		}
+		if flags.verbose {
+			fmt.Fprintf(os.Stderr, "  checked: config (%v)\n", time.Since(checkStart))
+		}
 	}
 
 	// Check 6: Raw git bypass detection -- compare oplog's last ref-update against actual tip
 	if repo.IsInitialized(gitDir) {
+		checkStart = time.Now()
 		ref, refErr := git.HeadRef(ctx)
 		if refErr == nil && ref != "" {
 			lastEntry, entryErr := oplog.LastRefUpdate(sgDir, ref)
@@ -146,13 +171,21 @@ func runDoctor(flags globalFlags, args []string) {
 				checks = append(checks, checkResult{Name: "bypass_detect", Status: "ok", Detail: "no oplog entries for current ref"})
 			}
 		}
+		if flags.verbose {
+			fmt.Fprintf(os.Stderr, "  checked: bypass_detect (%v)\n", time.Since(checkStart))
+		}
 	}
 
 	// Check 7: NFS/network filesystem detection (platform-specific)
+	checkStart = time.Now()
 	checks = append(checks, checkFilesystem(gitDir))
+	if flags.verbose {
+		fmt.Fprintf(os.Stderr, "  checked: filesystem (%v)\n", time.Since(checkStart))
+	}
 
 	// Check 8: Non-executable hooks in pre-pre-push.d/
 	if repo.IsInitialized(gitDir) {
+		checkStart = time.Now()
 		hookDir := filepath.Join(gitDir, "hooks", "pre-pre-push.d")
 		entries, readErr := os.ReadDir(hookDir)
 		if readErr == nil {
@@ -178,6 +211,9 @@ func runDoctor(flags globalFlags, args []string) {
 			} else {
 				checks = append(checks, checkResult{Name: "hook_perms", Status: "ok"})
 			}
+		}
+		if flags.verbose {
+			fmt.Fprintf(os.Stderr, "  checked: hook_perms (%v)\n", time.Since(checkStart))
 		}
 	}
 
