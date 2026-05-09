@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.3
+
+- **Email rewriting.** `safegit rewrite-author` now accepts `--old-email` and `--new-email` flags to rewrite author/committer emails alongside names. Supports email-only rewrites when `--old-name` and `--new-name` are the same.
+- **Fix: graceful error when origin remote is missing.** `--push` now checks for the `origin` remote before attempting to force-push, with a clear error message instead of a raw git error.
+
 ## 0.7.2
 
 - **Fix: `rewrite-author` now excludes stash and notes refs.** `rev-list --all` includes `refs/stash` and `refs/notes`, which are not covered by `updateRefs`. Replaced with explicit ref globs (`refs/heads`, `refs/tags`, `refs/remotes`) so only branch, tag, and remote tracking refs are walked and rewritten.
