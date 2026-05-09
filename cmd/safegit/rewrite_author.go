@@ -22,6 +22,26 @@ func runRewriteAuthor(flags globalFlags, args []string) {
 	for i := 0; i < len(args); i++ {
 		flag, val, hasVal := splitFlagValue(args[i])
 		switch flag {
+		case "--help", "-h":
+			commandHelp("rewrite-author [flags]", `Rewrite author/committer identity across all repository history.
+
+Flags:
+  --old-name <name>    Author/committer name to match (required unless --old-email is used)
+  --new-name <name>    Replacement name (required when --old-name is used)
+  --old-email <email>  Author/committer email to match
+  --new-email <email>  Replacement email (required when --old-email is used)
+  --push               Force-push all branches and tags after rewriting
+
+At least one of --old-name or --old-email is required.
+When both --old-name and --old-email are specified, both must match (AND logic).
+
+Global flags (--dry-run, --force, --verbose) are also supported.
+
+Examples:
+  safegit rewrite-author --old-name mhxv --new-name smm-h
+  safegit rewrite-author --old-email old@work.com --new-email new@personal.com
+  safegit rewrite-author --old-name "John" --new-name "Jane" --old-email a@b.com --new-email c@d.com --push
+  safegit --dry-run rewrite-author --old-name mhxv --new-name smm-h`)
 		case "--old-name":
 			if hasVal {
 				oldName = val
@@ -65,13 +85,16 @@ func runRewriteAuthor(flags globalFlags, args []string) {
 		}
 	}
 
-	if oldName == "" {
-		die(flags, cmd, 2, "--old-name is required")
+	if oldName == "" && oldEmail == "" {
+		fmt.Fprintf(os.Stderr, "Run 'safegit rewrite-author --help' for usage.\n")
+		die(flags, cmd, 2, "at least one of --old-name or --old-email is required")
 	}
-	if newName == "" {
-		die(flags, cmd, 2, "--new-name is required")
+	if (oldName == "") != (newName == "") {
+		fmt.Fprintf(os.Stderr, "Run 'safegit rewrite-author --help' for usage.\n")
+		die(flags, cmd, 2, "--old-name and --new-name must be used together")
 	}
 	if (oldEmail == "") != (newEmail == "") {
+		fmt.Fprintf(os.Stderr, "Run 'safegit rewrite-author --help' for usage.\n")
 		die(flags, cmd, 2, "--old-email and --new-email must be used together")
 	}
 
@@ -107,15 +130,30 @@ func runRewriteAuthor(flags globalFlags, args []string) {
 			if err != nil {
 				die(flags, cmd, 1, fmt.Sprintf("parsing commit %s: %v", sha, err))
 			}
-			nameMatch := info.Author.Name == oldName || info.Committer.Name == oldName
+			nameMatch := oldName != "" && (info.Author.Name == oldName || info.Committer.Name == oldName)
 			emailMatch := oldEmail != "" && (info.Author.Email == oldEmail || info.Committer.Email == oldEmail)
-			if nameMatch || emailMatch {
+			var commitMatches bool
+			if oldName != "" && oldEmail != "" {
+				commitMatches = nameMatch && emailMatch
+			} else {
+				commitMatches = nameMatch || emailMatch
+			}
+			if commitMatches {
 				affected = append(affected, sha)
 			}
 		}
 
-		fmt.Printf("Would rewrite %d of %d commits (author/committer name: %s -> %s)\n",
-			len(affected), len(shas), oldName, newName)
+		var rewriteDesc string
+		switch {
+		case oldName != "" && oldEmail != "":
+			rewriteDesc = fmt.Sprintf("name: %s -> %s, email: %s -> %s", oldName, newName, oldEmail, newEmail)
+		case oldName != "":
+			rewriteDesc = fmt.Sprintf("name: %s -> %s", oldName, newName)
+		default:
+			rewriteDesc = fmt.Sprintf("email: %s -> %s", oldEmail, newEmail)
+		}
+		fmt.Printf("Would rewrite %d of %d commits (%s)\n",
+			len(affected), len(shas), rewriteDesc)
 		limit := len(affected)
 		if limit > 5 {
 			limit = 5
@@ -144,7 +182,7 @@ func runRewriteAuthor(flags globalFlags, args []string) {
 	}
 
 	fmt.Println("Updating refs...")
-	if err := updateRefs(ctx, shaMap, oldName, newName); err != nil {
+	if err := updateRefs(ctx, shaMap, oldName, newName, oldEmail, newEmail); err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("updating refs: %v", err))
 	}
 
@@ -450,8 +488,8 @@ func compareSnapshots(before, after rewriteSnapshot, oldName, newName, oldEmail 
 	}
 
 	// 5. Old name must not appear in author or committer names
-	//    (skip when old and new names are identical -- email-only rewrite)
-	if oldName != newName {
+	//    (skip when oldName is empty or old and new names are identical)
+	if oldName != "" && oldName != newName {
 		for i, name := range after.AuthorNames {
 			if name == oldName {
 				failures = append(failures, fmt.Sprintf(
@@ -596,25 +634,35 @@ func rewriteCommits(ctx context.Context, oldName, newName, oldEmail, newEmail st
 			}
 		}
 
-		// Check if author or committer name matches oldName.
+		// Check if this commit matches the rewrite criteria.
 		author := info.Author
 		committer := info.Committer
 		thisNameChanged := false
 
-		if author.Name == oldName {
-			author.Name = newName
-			thisNameChanged = true
+		nameMatch := oldName != "" && (author.Name == oldName || committer.Name == oldName)
+		emailMatch := oldEmail != "" && (author.Email == oldEmail || committer.Email == oldEmail)
+
+		var commitMatches bool
+		if oldName != "" && oldEmail != "" {
+			commitMatches = nameMatch && emailMatch // AND when both specified
+		} else {
+			commitMatches = nameMatch || emailMatch // OR when only one specified
 		}
-		if committer.Name == oldName {
-			committer.Name = newName
-			thisNameChanged = true
-		}
-		if oldEmail != "" {
-			if author.Email == oldEmail {
+
+		if commitMatches {
+			if oldName != "" && author.Name == oldName {
+				author.Name = newName
+				thisNameChanged = true
+			}
+			if oldName != "" && committer.Name == oldName {
+				committer.Name = newName
+				thisNameChanged = true
+			}
+			if oldEmail != "" && author.Email == oldEmail {
 				author.Email = newEmail
 				thisNameChanged = true
 			}
-			if committer.Email == oldEmail {
+			if oldEmail != "" && committer.Email == oldEmail {
 				committer.Email = newEmail
 				thisNameChanged = true
 			}
@@ -647,7 +695,7 @@ func rewriteCommits(ctx context.Context, oldName, newName, oldEmail, newEmail st
 // updateRefs updates all branch and tag refs to point to rewritten commits.
 // For annotated tags, the tag object itself is rewritten if its target commit
 // changed or its tagger name matches oldName. Stash refs are skipped.
-func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName string) error {
+func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName, oldEmail, newEmail string) error {
 	out, _, err := git.Run(ctx, "for-each-ref", "--format=%(refname) %(objecttype) %(objectname)", "refs/heads/", "refs/tags/", "refs/remotes/")
 	if err != nil {
 		return fmt.Errorf("listing refs: %w", err)
@@ -686,7 +734,7 @@ func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName 
 		case "tag":
 			// Annotated tag object -- rewrite if its target changed or
 			// tagger name matches.
-			newTagSHA, err := rewriteAnnotatedTag(ctx, objectname, shaMap, oldName, newName)
+			newTagSHA, err := rewriteAnnotatedTag(ctx, objectname, shaMap, oldName, newName, oldEmail, newEmail)
 			if err != nil {
 				return fmt.Errorf("rewriting annotated tag %s: %w", refname, err)
 			}
@@ -720,7 +768,7 @@ func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName 
 // rewriteAnnotatedTag rewrites an annotated tag object if its target commit
 // was remapped or its tagger name matches oldName. Returns the new tag object
 // SHA, or the original SHA if nothing changed.
-func rewriteAnnotatedTag(ctx context.Context, tagObjectSHA string, shaMap map[string]string, oldName, newName string) (string, error) {
+func rewriteAnnotatedTag(ctx context.Context, tagObjectSHA string, shaMap map[string]string, oldName, newName, oldEmail, newEmail string) (string, error) {
 	out, _, err := git.Run(ctx, "cat-file", "-p", tagObjectSHA)
 	if err != nil {
 		return "", fmt.Errorf("reading tag object %s: %w", tagObjectSHA, err)
@@ -755,12 +803,37 @@ func rewriteAnnotatedTag(ctx context.Context, tagObjectSHA string, shaMap map[st
 			}
 		case "tagger":
 			// Format: "Name <email> timestamp timezone"
-			// Re-use parseIdentity logic inline: find " <" to split name.
+			// Parse tagger name and email for AND/OR matching.
 			ltIdx := strings.LastIndex(val, " <")
 			if ltIdx >= 0 {
 				taggerName := val[:ltIdx]
-				if taggerName == oldName {
-					lines[i] = "tagger " + newName + val[ltIdx:]
+				rest := val[ltIdx:] // " <email> timestamp timezone"
+				gtIdx := strings.IndexByte(rest, '>')
+				var taggerEmail string
+				if gtIdx >= 0 {
+					taggerEmail = rest[2:gtIdx] // extract email between < and >
+				}
+
+				taggerNameMatch := oldName != "" && taggerName == oldName
+				taggerEmailMatch := oldEmail != "" && taggerEmail == oldEmail
+
+				var taggerMatches bool
+				if oldName != "" && oldEmail != "" {
+					taggerMatches = taggerNameMatch && taggerEmailMatch
+				} else {
+					taggerMatches = taggerNameMatch || taggerEmailMatch
+				}
+
+				if taggerMatches {
+					newTaggerName := taggerName
+					if taggerNameMatch && oldName != "" {
+						newTaggerName = newName
+					}
+					newRest := rest
+					if taggerEmailMatch && oldEmail != "" && gtIdx >= 0 {
+						newRest = " <" + newEmail + rest[gtIdx:]
+					}
+					lines[i] = "tagger " + newTaggerName + newRest
 					changed = true
 				}
 			}
