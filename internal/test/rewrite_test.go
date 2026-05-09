@@ -1,0 +1,593 @@
+package test
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+)
+
+// makeCommits creates n commits in repoDir with the given author/committer identity.
+// Each commit adds a file named <prefix><i>.txt with content <prefix><i>.
+func makeCommits(t *testing.T, repoDir string, authorName, authorEmail string, n int, prefix string) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		fname := fmt.Sprintf("%s%d.txt", prefix, i)
+		content := fmt.Sprintf("%s%d", prefix, i)
+		fpath := filepath.Join(repoDir, fname)
+		if err := os.WriteFile(fpath, []byte(content), 0644); err != nil {
+			t.Fatalf("writing %s: %v", fname, err)
+		}
+
+		cmd := exec.Command("git", "add", fname)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git add %s: %v\n%s", fname, err, out)
+		}
+
+		msg := fmt.Sprintf("%s commit %d", prefix, i)
+		cmd = exec.Command("git", "commit", "-m", msg)
+		cmd.Dir = repoDir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME="+authorName,
+			"GIT_AUTHOR_EMAIL="+authorEmail,
+			"GIT_COMMITTER_NAME="+authorName,
+			"GIT_COMMITTER_EMAIL="+authorEmail,
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git commit %s: %v\n%s", fname, err, out)
+		}
+	}
+}
+
+// getAuthorNames returns the list of author names from all commits (topo-order).
+func getAuthorNames(t *testing.T, repoDir string) []string {
+	t.Helper()
+	cmd := exec.Command("git", "log", "--all", "--topo-order", "--format=%an")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git log --format=%%an: %v", err)
+	}
+	raw := strings.TrimSpace(string(out))
+	if raw == "" {
+		return nil
+	}
+	return strings.Split(raw, "\n")
+}
+
+// getCommitCount returns the total number of commits across all refs.
+func getCommitCount(t *testing.T, repoDir string) int {
+	t.Helper()
+	cmd := exec.Command("git", "rev-list", "--all", "--count")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-list --all --count: %v", err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		t.Fatalf("parsing commit count: %v", err)
+	}
+	return n
+}
+
+// getTreeHashes returns the list of tree hashes from all commits (topo-order).
+func getTreeHashes(t *testing.T, repoDir string) []string {
+	t.Helper()
+	cmd := exec.Command("git", "log", "--all", "--topo-order", "--format=%T")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git log --format=%%T: %v", err)
+	}
+	raw := strings.TrimSpace(string(out))
+	if raw == "" {
+		return nil
+	}
+	return strings.Split(raw, "\n")
+}
+
+// containsName checks if a name appears in the list.
+func containsName(names []string, target string) bool {
+	for _, n := range names {
+		if n == target {
+			return true
+		}
+	}
+	return false
+}
+
+// slicesEqual checks if two string slices are identical.
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestRewriteAuthorBasic(t *testing.T) {
+	dir := newRepo(t) // 1 initial commit by "Test" <test@test.com>
+	makeCommits(t, dir, "oldname", "old@test.com", 10, "basic")
+
+	// Record pre-rewrite state
+	beforeCount := getCommitCount(t, dir)
+	beforeTrees := getTreeHashes(t, dir)
+
+	stdout, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	if code != 0 {
+		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	names := getAuthorNames(t, dir)
+
+	if containsName(names, "oldname") {
+		t.Errorf("author name 'oldname' still present after rewrite: %v", names)
+	}
+	if !containsName(names, "newname") {
+		t.Errorf("author name 'newname' not present after rewrite: %v", names)
+	}
+	if !containsName(names, "Test") {
+		t.Errorf("initial commit author 'Test' should be preserved: %v", names)
+	}
+
+	afterCount := getCommitCount(t, dir)
+	if afterCount != beforeCount {
+		t.Errorf("commit count changed: before=%d, after=%d", beforeCount, afterCount)
+	}
+	if beforeCount != 11 {
+		t.Errorf("expected 11 total commits (1 initial + 10), got %d", beforeCount)
+	}
+
+	afterTrees := getTreeHashes(t, dir)
+	if !slicesEqual(beforeTrees, afterTrees) {
+		t.Errorf("tree hashes changed after rewrite")
+	}
+}
+
+func TestRewriteAuthorMixedAuthors(t *testing.T) {
+	dir := newRepo(t)
+	makeCommits(t, dir, "alice", "alice@test.com", 5, "alice")
+	makeCommits(t, dir, "bob", "bob@test.com", 5, "bob")
+
+	stdout, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name", "alice", "--new-name", "alice-new")
+	if code != 0 {
+		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	names := getAuthorNames(t, dir)
+
+	if containsName(names, "alice") {
+		t.Errorf("author name 'alice' still present after rewrite: %v", names)
+	}
+	if !containsName(names, "alice-new") {
+		t.Errorf("author name 'alice-new' not present after rewrite: %v", names)
+	}
+	if !containsName(names, "bob") {
+		t.Errorf("author name 'bob' should be preserved: %v", names)
+	}
+	if !containsName(names, "Test") {
+		t.Errorf("initial commit author 'Test' should be preserved: %v", names)
+	}
+
+	afterCount := getCommitCount(t, dir)
+	if afterCount != 11 {
+		t.Errorf("expected 11 commits, got %d", afterCount)
+	}
+}
+
+func TestRewriteAuthorWithTags(t *testing.T) {
+	dir := newRepo(t)
+	makeCommits(t, dir, "oldname", "old@test.com", 5, "tag")
+
+	// Record the commit messages that v1.0 and v0.1 will point to
+	// v1.0 -> HEAD, v0.1 -> HEAD~2
+	cmdMsg := exec.Command("git", "log", "-1", "--format=%s", "HEAD")
+	cmdMsg.Dir = dir
+	outMsg, err := cmdMsg.Output()
+	if err != nil {
+		t.Fatalf("getting HEAD message: %v", err)
+	}
+	v10Msg := strings.TrimSpace(string(outMsg))
+
+	cmdMsg = exec.Command("git", "log", "-1", "--format=%s", "HEAD~2")
+	cmdMsg.Dir = dir
+	outMsg, err = cmdMsg.Output()
+	if err != nil {
+		t.Fatalf("getting HEAD~2 message: %v", err)
+	}
+	v01Msg := strings.TrimSpace(string(outMsg))
+
+	// Create tags
+	cmd := exec.Command("git", "tag", "v1.0")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git tag v1.0: %v\n%s", err, out)
+	}
+
+	cmd = exec.Command("git", "tag", "v0.1", "HEAD~2")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git tag v0.1: %v\n%s", err, out)
+	}
+
+	beforeCount := getCommitCount(t, dir)
+
+	stdout, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	if code != 0 {
+		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// Tags still exist
+	cmd = exec.Command("git", "tag", "-l")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git tag -l: %v", err)
+	}
+	tags := strings.TrimSpace(string(out))
+	if !strings.Contains(tags, "v1.0") {
+		t.Errorf("tag v1.0 missing after rewrite")
+	}
+	if !strings.Contains(tags, "v0.1") {
+		t.Errorf("tag v0.1 missing after rewrite")
+	}
+
+	// Each tag still points to a commit with the same message
+	for _, tc := range []struct {
+		tag     string
+		wantMsg string
+	}{
+		{"v1.0", v10Msg},
+		{"v0.1", v01Msg},
+	} {
+		cmdMsg = exec.Command("git", "log", "-1", "--format=%s", tc.tag)
+		cmdMsg.Dir = dir
+		outMsg, err = cmdMsg.Output()
+		if err != nil {
+			t.Fatalf("getting message for tag %s: %v", tc.tag, err)
+		}
+		gotMsg := strings.TrimSpace(string(outMsg))
+		if gotMsg != tc.wantMsg {
+			t.Errorf("tag %s message changed: want %q, got %q", tc.tag, tc.wantMsg, gotMsg)
+		}
+	}
+
+	// Author names rewritten
+	names := getAuthorNames(t, dir)
+	if containsName(names, "oldname") {
+		t.Errorf("author name 'oldname' still present after rewrite: %v", names)
+	}
+
+	// Commit count unchanged
+	afterCount := getCommitCount(t, dir)
+	if afterCount != beforeCount {
+		t.Errorf("commit count changed: before=%d, after=%d", beforeCount, afterCount)
+	}
+}
+
+func TestRewriteAuthorMerge(t *testing.T) {
+	dir := newRepo(t) // initial commit by "Test"
+
+	// Create feature branch
+	cmd := exec.Command("git", "checkout", "-b", "feature")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout -b feature: %v\n%s", err, out)
+	}
+
+	makeCommits(t, dir, "oldname", "old@test.com", 2, "feat")
+
+	// Switch back to main
+	cmd = exec.Command("git", "checkout", "main")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout main: %v\n%s", err, out)
+	}
+
+	makeCommits(t, dir, "oldname", "old@test.com", 2, "main")
+
+	// Merge feature into main with --no-ff
+	cmd = exec.Command("git", "merge", "feature", "--no-ff", "-m", "merge")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=oldname",
+		"GIT_AUTHOR_EMAIL=old@test.com",
+		"GIT_COMMITTER_NAME=oldname",
+		"GIT_COMMITTER_EMAIL=old@test.com",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git merge: %v\n%s", err, out)
+	}
+
+	beforeCount := getCommitCount(t, dir)
+	beforeTrees := getTreeHashes(t, dir)
+
+	stdout, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	if code != 0 {
+		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// Commit count unchanged
+	afterCount := getCommitCount(t, dir)
+	if afterCount != beforeCount {
+		t.Errorf("commit count changed: before=%d, after=%d", beforeCount, afterCount)
+	}
+
+	// Verify merge commit (HEAD) has 2 parents
+	cmd = exec.Command("git", "log", "-1", "--format=%P", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("getting HEAD parents: %v", err)
+	}
+	parents := strings.Fields(strings.TrimSpace(string(out)))
+	if len(parents) != 2 {
+		t.Errorf("merge commit should have 2 parents, got %d: %v", len(parents), parents)
+	}
+
+	// Tree hashes unchanged
+	afterTrees := getTreeHashes(t, dir)
+	if !slicesEqual(beforeTrees, afterTrees) {
+		t.Errorf("tree hashes changed after rewrite")
+	}
+
+	// No "oldname" in author names
+	names := getAuthorNames(t, dir)
+	if containsName(names, "oldname") {
+		t.Errorf("author name 'oldname' still present after rewrite: %v", names)
+	}
+}
+
+func TestRewriteAuthorMultipleBranches(t *testing.T) {
+	dir := newRepo(t) // 1 initial commit by "Test"
+
+	// Get the initial commit SHA for creating branches from
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	initialSHA := strings.TrimSpace(string(out))
+
+	// Create 3 branches from initial commit, each with 3 commits by "oldname"
+	for _, branch := range []string{"br1", "br2", "br3"} {
+		cmd = exec.Command("git", "checkout", "-b", branch, initialSHA)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git checkout -b %s: %v\n%s", branch, err, out)
+		}
+		makeCommits(t, dir, "oldname", "old@test.com", 3, branch+"_")
+	}
+
+	// Switch back to main
+	cmd = exec.Command("git", "checkout", "main")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout main: %v\n%s", err, out)
+	}
+
+	beforeCount := getCommitCount(t, dir)
+
+	stdout, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	if code != 0 {
+		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// All 3 branches exist
+	for _, branch := range []string{"br1", "br2", "br3"} {
+		cmd = exec.Command("git", "rev-parse", "--verify", "refs/heads/"+branch)
+		cmd.Dir = dir
+		if _, err := cmd.Output(); err != nil {
+			t.Errorf("branch %s missing after rewrite", branch)
+		}
+	}
+
+	// Commit count unchanged (1 initial shared + 3*3 = 10)
+	afterCount := getCommitCount(t, dir)
+	if afterCount != beforeCount {
+		t.Errorf("commit count changed: before=%d, after=%d", beforeCount, afterCount)
+	}
+
+	// No "oldname" in any branch's log
+	names := getAuthorNames(t, dir)
+	if containsName(names, "oldname") {
+		t.Errorf("author name 'oldname' still present after rewrite: %v", names)
+	}
+}
+
+func TestRewriteAuthorNoOp(t *testing.T) {
+	dir := newRepo(t)
+	makeCommits(t, dir, "alice", "alice@test.com", 5, "noop")
+
+	beforeCount := getCommitCount(t, dir)
+	beforeTrees := getTreeHashes(t, dir)
+	beforeNames := getAuthorNames(t, dir)
+
+	stdout, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name", "nonexistent", "--new-name", "something")
+	if code != 0 {
+		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	afterCount := getCommitCount(t, dir)
+	if afterCount != beforeCount {
+		t.Errorf("commit count changed: before=%d, after=%d", beforeCount, afterCount)
+	}
+
+	afterNames := getAuthorNames(t, dir)
+	if !slicesEqual(beforeNames, afterNames) {
+		t.Errorf("author names changed for no-op rewrite: before=%v, after=%v", beforeNames, afterNames)
+	}
+
+	afterTrees := getTreeHashes(t, dir)
+	if !slicesEqual(beforeTrees, afterTrees) {
+		t.Errorf("tree hashes changed for no-op rewrite")
+	}
+}
+
+func TestRewriteAuthorIdempotent(t *testing.T) {
+	dir := newRepo(t)
+	makeCommits(t, dir, "oldname", "old@test.com", 5, "idem")
+
+	// First rewrite
+	stdout, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	if code != 0 {
+		t.Fatalf("first rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	afterFirstCount := getCommitCount(t, dir)
+	afterFirstTrees := getTreeHashes(t, dir)
+
+	// Second rewrite (same arguments -- should be a no-op)
+	stdout, stderr, code = runSafegit(t, dir, "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	if code != 0 {
+		t.Fatalf("second rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	afterSecondCount := getCommitCount(t, dir)
+	if afterSecondCount != afterFirstCount {
+		t.Errorf("commit count changed between runs: first=%d, second=%d", afterFirstCount, afterSecondCount)
+	}
+
+	afterSecondTrees := getTreeHashes(t, dir)
+	if !slicesEqual(afterFirstTrees, afterSecondTrees) {
+		t.Errorf("tree hashes changed between runs")
+	}
+
+	names := getAuthorNames(t, dir)
+	if containsName(names, "oldname") {
+		t.Errorf("author name 'oldname' still present after two rewrites: %v", names)
+	}
+}
+
+func TestRewriteAuthorRootCommit(t *testing.T) {
+	// Create a new repo from scratch (not using newRepo, so we control the root commit's author)
+	dir := t.TempDir()
+
+	cmds := [][]string{
+		{"git", "init", "--initial-branch=main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	// Create the root commit with author "oldname"
+	rootFile := filepath.Join(dir, "root.txt")
+	if err := os.WriteFile(rootFile, []byte("root"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "add", "root.txt")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add root.txt: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "commit", "-m", "root commit")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=oldname",
+		"GIT_AUTHOR_EMAIL=old@test.com",
+		"GIT_COMMITTER_NAME=oldname",
+		"GIT_COMMITTER_EMAIL=old@test.com",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit root: %v\n%s", err, out)
+	}
+
+	// Add 3 more commits by "oldname"
+	makeCommits(t, dir, "oldname", "old@test.com", 3, "root")
+
+	// Initialize safegit in the repo (rewrite-author requires it)
+	runSafegit(t, dir, "config", "commit.casMaxAttempts", "200")
+
+	stdout, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	if code != 0 {
+		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	names := getAuthorNames(t, dir)
+	if containsName(names, "oldname") {
+		t.Errorf("author name 'oldname' still present after rewrite: %v", names)
+	}
+
+	// Verify root commit was rewritten: the earliest commit should have author "newname"
+	cmd = exec.Command("git", "log", "--format=%an", "--reverse")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) == 0 {
+		t.Fatal("no commits found")
+	}
+	if lines[0] != "newname" {
+		t.Errorf("root commit author = %q, want 'newname'", lines[0])
+	}
+
+	afterCount := getCommitCount(t, dir)
+	if afterCount != 4 {
+		t.Errorf("expected 4 commits, got %d", afterCount)
+	}
+}
+
+func TestRewriteAuthorDryRun(t *testing.T) {
+	dir := newRepo(t)
+	makeCommits(t, dir, "oldname", "old@test.com", 5, "dry")
+
+	beforeNames := getAuthorNames(t, dir)
+	beforeCount := getCommitCount(t, dir)
+
+	// --dry-run is a global flag, placed before the command name
+	stdout, stderr, code := runSafegit(t, dir, "--dry-run", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	if code != 0 {
+		t.Fatalf("dry-run rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// stdout should mention "Would rewrite"
+	if !strings.Contains(stdout, "Would rewrite") {
+		t.Errorf("dry-run output missing 'Would rewrite': %s", stdout)
+	}
+
+	// Author names UNCHANGED (nothing was modified)
+	afterNames := getAuthorNames(t, dir)
+	if !slicesEqual(beforeNames, afterNames) {
+		t.Errorf("author names changed during dry-run: before=%v, after=%v", beforeNames, afterNames)
+	}
+
+	// Commit count unchanged
+	afterCount := getCommitCount(t, dir)
+	if afterCount != beforeCount {
+		t.Errorf("commit count changed during dry-run: before=%d, after=%d", beforeCount, afterCount)
+	}
+}
+
+func TestRewriteAuthorMissingFlags(t *testing.T) {
+	dir := newRepo(t)
+
+	// No flags at all
+	_, _, code := runSafegit(t, dir, "rewrite-author")
+	if code == 0 {
+		t.Error("rewrite-author with no flags should fail, but exited 0")
+	}
+
+	// Missing --new-name
+	_, _, code = runSafegit(t, dir, "rewrite-author", "--old-name", "foo")
+	if code == 0 {
+		t.Error("rewrite-author without --new-name should fail, but exited 0")
+	}
+}
