@@ -8,6 +8,7 @@ import (
 	"fmt"
 	mrand "math/rand"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -198,6 +199,18 @@ func (p *Pipeline) tryCommit(
 		}
 	}
 
+	// Step 2.5: Run pre-commit hook (if present) against the tmp index.
+	// Skipped for --dry-run and --force (matching git's --no-verify).
+	if !req.DryRun && !req.Force {
+		gitDir, err := git.GitDir(ctx)
+		if err != nil {
+			return nil, false, fmt.Errorf("resolving git dir: %w", err)
+		}
+		if err := runPreCommitHook(ctx, gitDir, tmpIdx.IndexPath, repoRoot); err != nil {
+			return nil, false, err
+		}
+	}
+
 	// Step 3: Build tree
 	treeSHA, err := git.WriteTree(ctx, tmpIdx.IndexPath)
 	if err != nil {
@@ -384,4 +397,32 @@ func isTransientRefError(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "cannot lock ref") || strings.Contains(msg, "Unable to create")
+}
+
+// runPreCommitHook runs .git/hooks/pre-commit with GIT_INDEX_FILE pointing
+// at the tmp index so the hook sees the correct staged files. Returns nil if
+// no hook exists (matching git's behavior). Returns an error if the hook
+// exits non-zero, which aborts the commit.
+func runPreCommitHook(ctx context.Context, gitDir, indexPath, repoRoot string) error {
+	hookPath := filepath.Join(gitDir, "hooks", "pre-commit")
+	info, err := os.Stat(hookPath)
+	if err != nil {
+		// No hook file -- nothing to run
+		return nil
+	}
+	if info.Mode()&0111 == 0 {
+		// Hook exists but is not executable -- skip (matches git behavior)
+		return nil
+	}
+
+	cmd := exec.CommandContext(ctx, hookPath)
+	cmd.Dir = repoRoot
+	cmd.Env = append(os.Environ(), "GIT_INDEX_FILE="+indexPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("pre-commit hook failed: %w", err)
+	}
+	return nil
 }
