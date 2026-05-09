@@ -80,17 +80,26 @@ func captureSnapshot(ctx context.Context) (rewriteSnapshot, error) {
 		return snap, fmt.Errorf("reading committer names: %w", err)
 	}
 
-	// Parent hashes (space-separated per line) -> parent counts
-	parentLines, err := logLines(ctx, "%P")
+	// Parent hashes (space-separated per line) -> parent counts.
+	// Root commits produce empty lines (no parents), so we must NOT use
+	// logLines (which drops empty lines via splitNonEmpty). Instead, split
+	// raw output preserving empty entries.
+	out, _, err = git.Run(ctx, "log", "--all", "--topo-order", "--format=%P")
 	if err != nil {
 		return snap, fmt.Errorf("reading parent hashes: %w", err)
 	}
-	snap.ParentCounts = make([]int, len(parentLines))
-	for i, line := range parentLines {
-		if line == "" {
-			snap.ParentCounts[i] = 0
-		} else {
-			snap.ParentCounts[i] = len(strings.Fields(line))
+	parentRaw := strings.TrimRight(out, "\n")
+	if parentRaw == "" {
+		snap.ParentCounts = nil
+	} else {
+		parentLines := strings.Split(parentRaw, "\n")
+		snap.ParentCounts = make([]int, len(parentLines))
+		for i, line := range parentLines {
+			if line == "" {
+				snap.ParentCounts[i] = 0
+			} else {
+				snap.ParentCounts[i] = len(strings.Fields(line))
+			}
 		}
 	}
 
@@ -285,6 +294,12 @@ func compareSnapshots(before, after rewriteSnapshot, oldName string) []string {
 		if beforeMsg != afterMsg {
 			failures = append(failures, fmt.Sprintf(
 				"tag %q message changed: before=%q, after=%q", tag, beforeMsg, afterMsg))
+		}
+	}
+	for tag := range after.TagToMessage {
+		if _, ok := before.TagToMessage[tag]; !ok {
+			failures = append(failures, fmt.Sprintf(
+				"tag %q present in after snapshot but missing from before", tag))
 		}
 	}
 
