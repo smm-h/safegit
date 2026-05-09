@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.3
+
+- **Pre-commit hook support.** `safegit commit` now runs `.git/hooks/pre-commit` with `GIT_INDEX_FILE` pointing to the tmp index, so hooks see the correct staged files. Skipped with `--force` (matching git's `--no-verify`) and `--dry-run`. Previously, the plumbing-based pipeline bypassed git hooks entirely.
+- **Directory deletion support.** `git rm --cached` now retries with `-r` when the target is a tracked directory. Previously, committing a deleted directory failed with "not removing recursively without -r".
+
 ## 0.6.2
 
 - **Migrated rlsbl layout.** Hooks moved from `scripts/` to `.rlsbl/hooks/`. Experiment scripts and stress tests moved from `scripts/` to `testdata/`. Two-step pre-push hook (rlsbl changelog check + safegit stress tests).
