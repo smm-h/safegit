@@ -335,3 +335,206 @@ func compareIntSlices(label string, before, after []int) string {
 	}
 	return ""
 }
+
+// rewriteCommits walks all commits in dependency order (parents before
+// children) and creates new commit objects wherever the author/committer
+// name matches oldName or a parent SHA was remapped by an earlier rewrite.
+// Returns the old-to-new SHA mapping, the count of commits whose name was
+// actually changed, and any error.
+func rewriteCommits(ctx context.Context, oldName, newName string) (map[string]string, int, error) {
+	// Get all commits in topo-order with parents before children.
+	out, _, err := git.Run(ctx, "rev-list", "--all", "--topo-order", "--reverse")
+	if err != nil {
+		return nil, 0, fmt.Errorf("listing commits: %w", err)
+	}
+
+	shas := splitNonEmpty(out)
+	shaMap := make(map[string]string, len(shas))
+	nameChanged := 0
+
+	for _, sha := range shas {
+		info, err := git.ParseCommit(ctx, sha)
+		if err != nil {
+			return nil, 0, fmt.Errorf("parsing commit %s: %w", sha, err)
+		}
+
+		// Remap parent SHAs through earlier rewrites.
+		remappedParents := make([]string, len(info.Parents))
+		parentRemapped := false
+		for i, p := range info.Parents {
+			if mapped, ok := shaMap[p]; ok && mapped != p {
+				remappedParents[i] = mapped
+				parentRemapped = true
+			} else {
+				remappedParents[i] = p
+			}
+		}
+
+		// Check if author or committer name matches oldName.
+		author := info.Author
+		committer := info.Committer
+		thisNameChanged := false
+
+		if author.Name == oldName {
+			author.Name = newName
+			thisNameChanged = true
+		}
+		if committer.Name == oldName {
+			committer.Name = newName
+			thisNameChanged = true
+		}
+
+		if thisNameChanged {
+			nameChanged++
+		}
+
+		// If nothing changed (no name match and no parent remapped),
+		// this commit keeps its original SHA.
+		if !thisNameChanged && !parentRemapped {
+			shaMap[sha] = sha
+			continue
+		}
+
+		// Create a new commit object with the (potentially updated)
+		// author/committer and remapped parents. Tree, message, emails,
+		// and dates are preserved exactly.
+		newSHA, err := git.CommitTreeWithAuthor(ctx, info.Tree, remappedParents, info.Message, author, committer)
+		if err != nil {
+			return nil, 0, fmt.Errorf("creating rewritten commit for %s: %w", sha, err)
+		}
+		shaMap[sha] = newSHA
+	}
+
+	return shaMap, nameChanged, nil
+}
+
+// updateRefs updates all branch and tag refs to point to rewritten commits.
+// For annotated tags, the tag object itself is rewritten if its target commit
+// changed or its tagger name matches oldName. Stash refs are skipped.
+func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName string) error {
+	out, _, err := git.Run(ctx, "for-each-ref", "--format=%(refname) %(objecttype) %(objectname)", "refs/heads/", "refs/tags/")
+	if err != nil {
+		return fmt.Errorf("listing refs: %w", err)
+	}
+
+	lines := splitNonEmpty(out)
+	for _, line := range lines {
+		parts := strings.SplitN(line, " ", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		refname, objecttype, objectname := parts[0], parts[1], parts[2]
+
+		// Skip stash refs.
+		if strings.HasPrefix(refname, "refs/stash") {
+			continue
+		}
+
+		switch objecttype {
+		case "commit":
+			// Branch or lightweight tag pointing directly at a commit.
+			newSHA, ok := shaMap[objectname]
+			if !ok || newSHA == objectname {
+				continue
+			}
+			if err := git.UpdateRef(ctx, refname, newSHA, objectname); err != nil {
+				return fmt.Errorf("updating ref %s: %w", refname, err)
+			}
+
+		case "tag":
+			// Annotated tag object -- rewrite if its target changed or
+			// tagger name matches.
+			newTagSHA, err := rewriteAnnotatedTag(ctx, objectname, shaMap, oldName, newName)
+			if err != nil {
+				return fmt.Errorf("rewriting annotated tag %s: %w", refname, err)
+			}
+			if newTagSHA == objectname {
+				continue
+			}
+			if err := git.UpdateRef(ctx, refname, newTagSHA, objectname); err != nil {
+				return fmt.Errorf("updating annotated tag ref %s: %w", refname, err)
+			}
+		}
+	}
+
+	// Handle detached HEAD: if HEAD is not on a branch, update it directly.
+	_, _, symErr := git.Run(ctx, "symbolic-ref", "HEAD")
+	if symErr != nil {
+		// HEAD is detached.
+		headSHA, err := git.RevParse(ctx, "HEAD")
+		if err != nil {
+			return fmt.Errorf("reading detached HEAD: %w", err)
+		}
+		if newSHA, ok := shaMap[headSHA]; ok && newSHA != headSHA {
+			if err := git.UpdateRef(ctx, "HEAD", newSHA, headSHA); err != nil {
+				return fmt.Errorf("updating detached HEAD: %w", err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// rewriteAnnotatedTag rewrites an annotated tag object if its target commit
+// was remapped or its tagger name matches oldName. Returns the new tag object
+// SHA, or the original SHA if nothing changed.
+func rewriteAnnotatedTag(ctx context.Context, tagObjectSHA string, shaMap map[string]string, oldName, newName string) (string, error) {
+	out, _, err := git.Run(ctx, "cat-file", "-p", tagObjectSHA)
+	if err != nil {
+		return "", fmt.Errorf("reading tag object %s: %w", tagObjectSHA, err)
+	}
+
+	// Split into header and body at the first blank line.
+	headerEnd := strings.Index(out, "\n\n")
+	var headerSection, body string
+	if headerEnd < 0 {
+		headerSection = out
+	} else {
+		headerSection = out[:headerEnd]
+		body = out[headerEnd+2:]
+	}
+
+	lines := strings.Split(headerSection, "\n")
+	changed := false
+
+	for i, line := range lines {
+		spIdx := strings.IndexByte(line, ' ')
+		if spIdx < 0 {
+			continue
+		}
+		key := line[:spIdx]
+		val := line[spIdx+1:]
+
+		switch key {
+		case "object":
+			if newSHA, ok := shaMap[val]; ok && newSHA != val {
+				lines[i] = "object " + newSHA
+				changed = true
+			}
+		case "tagger":
+			// Format: "Name <email> timestamp timezone"
+			// Re-use parseIdentity logic inline: find " <" to split name.
+			ltIdx := strings.LastIndex(val, " <")
+			if ltIdx >= 0 {
+				taggerName := val[:ltIdx]
+				if taggerName == oldName {
+					lines[i] = "tagger " + newName + val[ltIdx:]
+					changed = true
+				}
+			}
+		}
+	}
+
+	if !changed {
+		return tagObjectSHA, nil
+	}
+
+	// Reconstruct the full tag object content.
+	content := strings.Join(lines, "\n") + "\n\n" + body
+
+	newSHA, _, err := git.RunWithEnvStdin(ctx, nil, []byte(content), "hash-object", "-t", "tag", "-w", "--stdin")
+	if err != nil {
+		return "", fmt.Errorf("writing rewritten tag object: %w", err)
+	}
+	return strings.TrimSpace(newSHA), nil
+}
