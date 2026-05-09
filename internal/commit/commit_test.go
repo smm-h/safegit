@@ -606,6 +606,186 @@ func TestCrossBranchPreservesMainIndex(t *testing.T) {
 	}
 }
 
+func TestCommitDirectoryDeletion(t *testing.T) {
+	dir, _, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
+
+	// Create a directory with two files and commit them
+	subDir := filepath.Join(dir, "subdir")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"one.txt", "two.txt"} {
+		if err := os.WriteFile(filepath.Join(subDir, name), []byte(name+"\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	p := newPipeline(sgDir)
+	addResult, err := p.Execute(context.Background(), CommitRequest{
+		Message: "add subdir",
+		Files:   []string{"subdir/one.txt", "subdir/two.txt"},
+	})
+	if err != nil {
+		t.Fatalf("add commit: %v", err)
+	}
+	treeHasFile(t, addResult.SHA, "subdir/one.txt")
+	treeHasFile(t, addResult.SHA, "subdir/two.txt")
+
+	// Delete the entire directory from disk
+	if err := os.RemoveAll(subDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Commit the deletion by specifying the directory path
+	delResult, err := p.Execute(context.Background(), CommitRequest{
+		Message: "delete subdir",
+		Files:   []string{"subdir"},
+	})
+	if err != nil {
+		t.Fatalf("delete commit: %v", err)
+	}
+
+	// Verify neither file remains in the tree
+	treeLacksFile(t, delResult.SHA, "subdir/one.txt")
+	treeLacksFile(t, delResult.SHA, "subdir/two.txt")
+}
+
+func TestPreCommitHook(t *testing.T) {
+	dir, gitDir, sgDir := testutil.InitRepo(t, repo.Init)
+	testutil.Chdir(t, dir)
+
+	t.Run("no hook", func(t *testing.T) {
+		// Commit should succeed when no hook exists
+		if err := os.WriteFile(filepath.Join(dir, "nohook.txt"), []byte("ok\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		p := newPipeline(sgDir)
+		result, err := p.Execute(context.Background(), CommitRequest{
+			Message: "no hook present",
+			Files:   []string{"nohook.txt"},
+		})
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		treeHasFile(t, result.SHA, "nohook.txt")
+	})
+
+	// Create hooks directory
+	hooksDir := filepath.Join(gitDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	hookPath := filepath.Join(hooksDir, "pre-commit")
+
+	t.Run("hook passes", func(t *testing.T) {
+		// Install a hook that succeeds (exit 0)
+		if err := os.WriteFile(hookPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "pass.txt"), []byte("pass\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		p := newPipeline(sgDir)
+		result, err := p.Execute(context.Background(), CommitRequest{
+			Message: "hook passes",
+			Files:   []string{"pass.txt"},
+		})
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		treeHasFile(t, result.SHA, "pass.txt")
+	})
+
+	t.Run("hook fails", func(t *testing.T) {
+		// Install a hook that fails (exit 1)
+		if err := os.WriteFile(hookPath, []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "fail.txt"), []byte("fail\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		p := newPipeline(sgDir)
+		_, err := p.Execute(context.Background(), CommitRequest{
+			Message: "hook fails",
+			Files:   []string{"fail.txt"},
+		})
+		if err == nil {
+			t.Fatal("expected error from failing pre-commit hook, got nil")
+		}
+		if !strings.Contains(err.Error(), "pre-commit hook failed") {
+			t.Errorf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("hook skipped with Force", func(t *testing.T) {
+		// Failing hook should be skipped when Force is set
+		if err := os.WriteFile(hookPath, []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "force.txt"), []byte("force\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		p := newPipeline(sgDir)
+		result, err := p.Execute(context.Background(), CommitRequest{
+			Message: "force bypasses hook",
+			Files:   []string{"force.txt"},
+			Force:   true,
+		})
+		if err != nil {
+			t.Fatalf("Execute with Force: %v", err)
+		}
+		treeHasFile(t, result.SHA, "force.txt")
+	})
+
+	t.Run("hook skipped with DryRun", func(t *testing.T) {
+		// Failing hook should be skipped for dry runs
+		if err := os.WriteFile(hookPath, []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "dryrun.txt"), []byte("dryrun\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		p := newPipeline(sgDir)
+		_, err := p.Execute(context.Background(), CommitRequest{
+			Message: "dry run skips hook",
+			Files:   []string{"dryrun.txt"},
+			DryRun:  true,
+		})
+		if err != nil {
+			t.Fatalf("Execute with DryRun: %v", err)
+		}
+	})
+
+	t.Run("hook sees staged files via GIT_INDEX_FILE", func(t *testing.T) {
+		// Install a hook that verifies the staged file is visible
+		hookScript := `#!/bin/sh
+staged=$(git diff --cached --name-only)
+if echo "$staged" | grep -q "visible.txt"; then
+  exit 0
+else
+  echo "pre-commit: visible.txt not found in staged files: $staged" >&2
+  exit 1
+fi
+`
+		if err := os.WriteFile(hookPath, []byte(hookScript), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "visible.txt"), []byte("visible\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		p := newPipeline(sgDir)
+		result, err := p.Execute(context.Background(), CommitRequest{
+			Message: "hook sees staged files",
+			Files:   []string{"visible.txt"},
+		})
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		treeHasFile(t, result.SHA, "visible.txt")
+	})
+}
+
 func TestInitialCommit(t *testing.T) {
 	// Create a git repo with NO initial commit (empty repo)
 	dir := t.TempDir()
