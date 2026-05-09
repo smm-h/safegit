@@ -175,3 +175,218 @@ func TestGitDir(t *testing.T) {
 		t.Errorf("GitDir = %q, expected to end with .git", gitDir)
 	}
 }
+
+func TestParseCommit(t *testing.T) {
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	// Make a second commit so HEAD has a parent
+	Run(ctx, "commit", "--allow-empty", "-m", "second")
+	sha, err := RevParse(ctx, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := ParseCommit(ctx, sha)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(info.Tree) != 40 {
+		t.Errorf("Tree = %q, want 40-char SHA", info.Tree)
+	}
+	if len(info.Parents) != 1 {
+		t.Errorf("Parents = %v, want exactly 1 parent", info.Parents)
+	}
+	if info.Author.Name != "Test" {
+		t.Errorf("Author.Name = %q, want %q", info.Author.Name, "Test")
+	}
+	if info.Author.Email != "test@test.com" {
+		t.Errorf("Author.Email = %q, want %q", info.Author.Email, "test@test.com")
+	}
+	if info.Committer.Name != "Test" {
+		t.Errorf("Committer.Name = %q, want %q", info.Committer.Name, "Test")
+	}
+	if info.Message != "second" {
+		t.Errorf("Message = %q, want %q", info.Message, "second")
+	}
+}
+
+func TestParseCommitRootCommit(t *testing.T) {
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	// Find the root commit (the initial --allow-empty commit)
+	out, _, err := Run(ctx, "rev-list", "--max-parents=0", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootSHA := strings.TrimSpace(out)
+
+	info, err := ParseCommit(ctx, rootSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(info.Parents) != 0 {
+		t.Errorf("Root commit Parents = %v, want empty", info.Parents)
+	}
+}
+
+func TestParseCommitMerge(t *testing.T) {
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	// Create a branch from the initial commit, make commits on each, merge
+	Run(ctx, "checkout", "-b", "feature")
+	Run(ctx, "commit", "--allow-empty", "-m", "feature commit")
+	Run(ctx, "checkout", "main")
+	Run(ctx, "commit", "--allow-empty", "-m", "main commit")
+	Run(ctx, "merge", "feature", "--no-ff", "-m", "merge")
+
+	sha, err := RevParse(ctx, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := ParseCommit(ctx, sha)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(info.Parents) != 2 {
+		t.Errorf("Merge commit Parents = %v (len %d), want 2 parents", info.Parents, len(info.Parents))
+	}
+}
+
+func TestParseCommitMultiLineMessage(t *testing.T) {
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	// Create a commit with a multi-line message including an internal blank line
+	wantMsg := "line1\n\nline3"
+	Run(ctx, "commit", "--allow-empty", "-m", wantMsg)
+
+	sha, err := RevParse(ctx, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := ParseCommit(ctx, sha)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.Message != wantMsg {
+		t.Errorf("Message = %q, want %q", info.Message, wantMsg)
+	}
+}
+
+func TestCommitTreeWithAuthor(t *testing.T) {
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	treeSHA, _, err := Run(ctx, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	treeSHA = strings.TrimSpace(treeSHA)
+
+	headSHA, err := RevParse(ctx, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	author := AuthorInfo{Name: "Alice Author", Email: "alice@example.com", Date: "1700000000 +0000"}
+	committer := AuthorInfo{Name: "Bob Committer", Email: "bob@example.com", Date: "1700000001 +0100"}
+
+	newSHA, err := CommitTreeWithAuthor(ctx, treeSHA, []string{headSHA}, "custom commit", author, committer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(newSHA) != 40 {
+		t.Fatalf("CommitTreeWithAuthor returned %q, want 40-char SHA", newSHA)
+	}
+
+	info, err := ParseCommit(ctx, newSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.Author.Name != author.Name {
+		t.Errorf("Author.Name = %q, want %q", info.Author.Name, author.Name)
+	}
+	if info.Author.Email != author.Email {
+		t.Errorf("Author.Email = %q, want %q", info.Author.Email, author.Email)
+	}
+	if info.Author.Date != author.Date {
+		t.Errorf("Author.Date = %q, want %q", info.Author.Date, author.Date)
+	}
+	if info.Committer.Name != committer.Name {
+		t.Errorf("Committer.Name = %q, want %q", info.Committer.Name, committer.Name)
+	}
+	if info.Committer.Email != committer.Email {
+		t.Errorf("Committer.Email = %q, want %q", info.Committer.Email, committer.Email)
+	}
+	if info.Committer.Date != committer.Date {
+		t.Errorf("Committer.Date = %q, want %q", info.Committer.Date, committer.Date)
+	}
+	if info.Message != "custom commit" {
+		t.Errorf("Message = %q, want %q", info.Message, "custom commit")
+	}
+}
+
+func TestCommitTreeWithAuthorMultipleParents(t *testing.T) {
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	// Create two commits to use as parents
+	Run(ctx, "commit", "--allow-empty", "-m", "commit A")
+	shaA, err := RevParse(ctx, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	Run(ctx, "commit", "--allow-empty", "-m", "commit B")
+	shaB, err := RevParse(ctx, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	treeSHA, _, err := Run(ctx, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	treeSHA = strings.TrimSpace(treeSHA)
+
+	author := AuthorInfo{Name: "Test", Email: "test@test.com", Date: "1700000000 +0000"}
+	committer := author
+
+	newSHA, err := CommitTreeWithAuthor(ctx, treeSHA, []string{shaA, shaB}, "multi-parent", author, committer)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := ParseCommit(ctx, newSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(info.Parents) != 2 {
+		t.Fatalf("Parents = %v (len %d), want 2 parents", info.Parents, len(info.Parents))
+	}
+
+	parentSet := map[string]bool{info.Parents[0]: true, info.Parents[1]: true}
+	if !parentSet[shaA] {
+		t.Errorf("Parents %v does not contain shaA %s", info.Parents, shaA)
+	}
+	if !parentSet[shaB] {
+		t.Errorf("Parents %v does not contain shaB %s", info.Parents, shaB)
+	}
+}

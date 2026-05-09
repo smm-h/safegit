@@ -228,3 +228,122 @@ func CommitMessage(ctx context.Context, rev string) (string, error) {
 	}
 	return strings.TrimRight(out, "\n"), nil
 }
+
+// AuthorInfo holds the name, email, and raw git date for an author or committer.
+type AuthorInfo struct {
+	Name  string
+	Email string
+	Date  string // raw git date format: "1234567890 +0200"
+}
+
+// CommitInfo holds the parsed contents of a git commit object.
+type CommitInfo struct {
+	Tree      string
+	Parents   []string
+	Author    AuthorInfo
+	Committer AuthorInfo
+	Message   string
+}
+
+// parseIdentity parses a raw author/committer line value into AuthorInfo.
+// Format: "Name Here <email@example.com> 1234567890 +0200"
+func parseIdentity(raw string) AuthorInfo {
+	// Name = everything before the last " <"
+	// Email = content between "<" and ">"
+	// Date = everything after "> "
+	ltIdx := strings.LastIndex(raw, " <")
+	if ltIdx < 0 {
+		return AuthorInfo{Name: raw}
+	}
+	name := raw[:ltIdx]
+	rest := raw[ltIdx+2:] // after " <"
+
+	gtIdx := strings.Index(rest, ">")
+	if gtIdx < 0 {
+		return AuthorInfo{Name: name}
+	}
+	email := rest[:gtIdx]
+	date := strings.TrimSpace(rest[gtIdx+1:])
+
+	return AuthorInfo{Name: name, Email: email, Date: date}
+}
+
+// ParseCommit reads and parses a commit object by SHA using git cat-file.
+func ParseCommit(ctx context.Context, sha string) (CommitInfo, error) {
+	out, _, err := Run(ctx, "cat-file", "-p", sha)
+	if err != nil {
+		return CommitInfo{}, err
+	}
+
+	// Split into header section and body at the first blank line.
+	var info CommitInfo
+	headerEnd := strings.Index(out, "\n\n")
+	var headerSection, body string
+	if headerEnd < 0 {
+		headerSection = out
+	} else {
+		headerSection = out[:headerEnd]
+		body = out[headerEnd+2:] // skip the "\n\n"
+	}
+
+	// Trim exactly one trailing newline from the message if present.
+	if strings.HasSuffix(body, "\n") {
+		body = body[:len(body)-1]
+	}
+	info.Message = body
+
+	// Parse header lines. Continuation lines (starting with space) belong
+	// to the previous header and are skipped.
+	lines := strings.Split(headerSection, "\n")
+	for _, line := range lines {
+		if len(line) > 0 && line[0] == ' ' {
+			// Continuation of a multi-line header (e.g. gpgsig); skip.
+			continue
+		}
+		spIdx := strings.IndexByte(line, ' ')
+		if spIdx < 0 {
+			continue
+		}
+		key := line[:spIdx]
+		val := line[spIdx+1:]
+
+		switch key {
+		case "tree":
+			info.Tree = val
+		case "parent":
+			info.Parents = append(info.Parents, val)
+		case "author":
+			info.Author = parseIdentity(val)
+		case "committer":
+			info.Committer = parseIdentity(val)
+		// gpgsig and other unknown headers are ignored.
+		}
+	}
+
+	return info, nil
+}
+
+// CommitTreeWithAuthor creates a commit object with explicit author and committer
+// identity, returning the new commit SHA.
+func CommitTreeWithAuthor(ctx context.Context, treeSHA string, parentSHAs []string, message string, author, committer AuthorInfo) (string, error) {
+	args := []string{"commit-tree", treeSHA}
+	for _, p := range parentSHAs {
+		args = append(args, "-p", p)
+	}
+	args = append(args, "-m", message)
+
+	env := []string{
+		"GIT_AUTHOR_NAME=" + author.Name,
+		"GIT_AUTHOR_EMAIL=" + author.Email,
+		"GIT_AUTHOR_DATE=" + author.Date,
+		"GIT_COMMITTER_NAME=" + committer.Name,
+		"GIT_COMMITTER_EMAIL=" + committer.Email,
+		"GIT_COMMITTER_DATE=" + committer.Date,
+	}
+
+	out, _, err := RunWithEnv(ctx, env, args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
