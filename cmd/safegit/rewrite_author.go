@@ -222,8 +222,13 @@ Examples:
 	}
 	total := len(shaMap)
 	parentOnly := total - nameChanged - identity
-	fmt.Printf("Rewrote %d commits (%d had name changes, %d were parent-propagation only)\n",
-		total, nameChanged, parentOnly)
+	if parentOnly == 1 {
+		fmt.Printf("Rewrote %d commits (%d had name changes, %d was inherited (ancestors changed))\n",
+			total, nameChanged, parentOnly)
+	} else {
+		fmt.Printf("Rewrote %d commits (%d had name changes, %d were inherited (ancestors changed))\n",
+			total, nameChanged, parentOnly)
+	}
 
 	// Oplog entry
 	_ = oplog.Append(sgDir, oplog.Entry{

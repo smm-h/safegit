@@ -57,6 +57,9 @@ func main() {
 	case "doctor":
 		runDoctor(flags, cmdArgs)
 	case "version":
+		if len(cmdArgs) > 0 && (cmdArgs[0] == "--help" || cmdArgs[0] == "-h") {
+			commandHelp("version", "Print version and build info.")
+		}
 		runVersion(flags)
 	case "checkout":
 		os.Exit(runCheckout(flags, cmdArgs))
@@ -172,7 +175,7 @@ Commands:
   bisect      Bisect (guarded: checks for uncommitted work)
   push        Push with pre-pre-push hooks and retry logic
   hook        Manage pre-pre-push hooks (list, run, install)
-  rewrite-author Rewrite author/committer name across all history
+  rewrite-author Rewrite author/committer name and email across all history
   cherry-pick Cherry-pick commits (guarded)
   revert      Revert commits (guarded)
   config      Show or set configuration values
@@ -213,6 +216,12 @@ func mustGitDir(flags globalFlags) string {
 		abs = gitDir
 	}
 	return abs
+}
+
+// commandHelp prints per-command help and exits.
+func commandHelp(cmd, usage string) {
+	fmt.Fprintf(os.Stderr, "Usage: safegit %s\n\n%s\n", cmd, usage)
+	os.Exit(0)
 }
 
 // die prints an error for the given subcommand and exits with code.
