@@ -66,7 +66,8 @@ func runRewriteAuthor(flags globalFlags, args []string) {
 
 	// Dry-run mode
 	if flags.dryRun {
-		out, _, err := git.Run(ctx, "rev-list", "--all", "--topo-order", "--reverse")
+		dryArgs := append([]string{"rev-list", "--topo-order", "--reverse"}, refGlobs...)
+		out, _, err := git.Run(ctx, dryArgs...)
 		if err != nil {
 			die(flags, cmd, 1, fmt.Sprintf("listing commits: %v", err))
 		}
@@ -200,6 +201,10 @@ type rewriteSnapshot struct {
 	TagToMessage   map[string]string   // tag name -> subject of the commit it points to
 }
 
+// refGlobs limits rev-list/log walks to branches, tags, and remote tracking
+// refs, excluding refs/stash, refs/notes, and other non-standard refs.
+var refGlobs = []string{"--glob=refs/heads", "--glob=refs/tags", "--glob=refs/remotes"}
+
 // captureSnapshot collects all verification data points from the current
 // repository state using git plumbing commands. Each data type uses a
 // separate git log call for straightforward parsing.
@@ -207,7 +212,8 @@ func captureSnapshot(ctx context.Context) (rewriteSnapshot, error) {
 	var snap rewriteSnapshot
 
 	// Commit count
-	out, _, err := git.Run(ctx, "rev-list", "--all", "--count")
+	args := append([]string{"rev-list", "--count"}, refGlobs...)
+	out, _, err := git.Run(ctx, args...)
 	if err != nil {
 		return snap, fmt.Errorf("counting commits: %w", err)
 	}
@@ -255,7 +261,8 @@ func captureSnapshot(ctx context.Context) (rewriteSnapshot, error) {
 	// Root commits produce empty lines (no parents), so we must NOT use
 	// logLines (which drops empty lines via splitNonEmpty). Instead, split
 	// raw output preserving empty entries.
-	out, _, err = git.Run(ctx, "log", "--all", "--topo-order", "--format=%P")
+	parentArgs := append([]string{"log", "--topo-order", "--format=%P"}, refGlobs...)
+	out, _, err = git.Run(ctx, parentArgs...)
 	if err != nil {
 		return snap, fmt.Errorf("reading parent hashes: %w", err)
 	}
@@ -309,7 +316,8 @@ func captureSnapshot(ctx context.Context) (rewriteSnapshot, error) {
 // logLines runs git log --all --topo-order with the given format and
 // returns non-empty output lines.
 func logLines(ctx context.Context, format string) ([]string, error) {
-	out, _, err := git.Run(ctx, "log", "--all", "--topo-order", "--format="+format)
+	args := append([]string{"log", "--topo-order", "--format=" + format}, refGlobs...)
+	out, _, err := git.Run(ctx, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -514,7 +522,8 @@ func compareIntSlices(label string, before, after []int) string {
 // actually changed, and any error.
 func rewriteCommits(ctx context.Context, oldName, newName string) (map[string]string, int, error) {
 	// Get all commits in topo-order with parents before children.
-	out, _, err := git.Run(ctx, "rev-list", "--all", "--topo-order", "--reverse")
+	args := append([]string{"rev-list", "--topo-order", "--reverse"}, refGlobs...)
+	out, _, err := git.Run(ctx, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("listing commits: %w", err)
 	}
