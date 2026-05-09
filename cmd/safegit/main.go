@@ -80,6 +80,8 @@ func main() {
 		os.Exit(runUnlock(flags, cmdArgs))
 	case "undo":
 		runUndo(flags, cmdArgs)
+	case "rewrite-author":
+		runRewriteAuthor(flags, cmdArgs)
 	case "cherry-pick":
 		os.Exit(runGuardedPassthrough(flags, "cherry-pick", cmdArgs))
 	case "revert":
@@ -167,6 +169,7 @@ Commands:
   bisect      Bisect (guarded: checks for uncommitted work)
   push        Push with pre-pre-push hooks and retry logic
   hook        Manage pre-pre-push hooks (list, run, install)
+  rewrite-author Rewrite author/committer name across all history
   cherry-pick Cherry-pick commits (guarded)
   revert      Revert commits (guarded)
   config      Show or set configuration values

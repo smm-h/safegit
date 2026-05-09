@@ -60,6 +60,9 @@ func runUndo(flags globalFlags, args []string) {
 	}
 
 	// Check if the op is undoable
+	if entry.Op == "rewrite-author" {
+		die(flags, cmd, 1, "cannot undo rewrite-author: this operation rewrites all repository history")
+	}
 	targetKey, ok := undoableOps[entry.Op]
 	if !ok {
 		die(flags, cmd, 1, fmt.Sprintf("cannot undo %q", entry.Op))

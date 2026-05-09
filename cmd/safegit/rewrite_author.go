@@ -3,11 +3,182 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
 	"github.com/smm-h/safegit/internal/git"
+	"github.com/smm-h/safegit/internal/oplog"
+	"github.com/smm-h/safegit/internal/repo"
 )
+
+func runRewriteAuthor(flags globalFlags, args []string) {
+	const cmd = "rewrite-author"
+
+	// Parse command-specific flags
+	var oldName, newName string
+	push := false
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--old-name":
+			if i+1 >= len(args) {
+				die(flags, cmd, 2, "--old-name requires a value")
+			}
+			i++
+			oldName = args[i]
+		case "--new-name":
+			if i+1 >= len(args) {
+				die(flags, cmd, 2, "--new-name requires a value")
+			}
+			i++
+			newName = args[i]
+		case "--push":
+			push = true
+		default:
+			die(flags, cmd, 2, fmt.Sprintf("unknown argument: %s", args[i]))
+		}
+	}
+
+	if oldName == "" {
+		die(flags, cmd, 2, "--old-name is required")
+	}
+	if newName == "" {
+		die(flags, cmd, 2, "--new-name is required")
+	}
+
+	gitDir := mustGitDir(flags)
+	if err := repo.EnsureInitialized(gitDir); err != nil {
+		die(flags, cmd, 4, err.Error())
+	}
+
+	sgDir := repo.SafegitDir(gitDir)
+	ctx := context.Background()
+
+	// Check for uncommitted changes
+	statusOut, _, err := git.Run(ctx, "status", "--porcelain")
+	if err != nil {
+		die(flags, cmd, 1, fmt.Sprintf("checking working tree: %v", err))
+	}
+	if strings.TrimSpace(statusOut) != "" {
+		die(flags, cmd, 1, "working tree is dirty; commit or stash changes before rewriting history")
+	}
+
+	// Dry-run mode
+	if flags.dryRun {
+		out, _, err := git.Run(ctx, "rev-list", "--all", "--topo-order", "--reverse")
+		if err != nil {
+			die(flags, cmd, 1, fmt.Sprintf("listing commits: %v", err))
+		}
+		shas := splitNonEmpty(out)
+
+		var affected []string
+		for _, sha := range shas {
+			info, err := git.ParseCommit(ctx, sha)
+			if err != nil {
+				die(flags, cmd, 1, fmt.Sprintf("parsing commit %s: %v", sha, err))
+			}
+			if info.Author.Name == oldName || info.Committer.Name == oldName {
+				affected = append(affected, sha)
+			}
+		}
+
+		fmt.Printf("Would rewrite %d of %d commits (author/committer name: %s -> %s)\n",
+			len(affected), len(shas), oldName, newName)
+		limit := len(affected)
+		if limit > 5 {
+			limit = 5
+		}
+		for _, sha := range affected[:limit] {
+			info, _ := git.ParseCommit(ctx, sha)
+			fmt.Printf("  %s  author=%s committer=%s\n", sha[:12], info.Author.Name, info.Committer.Name)
+		}
+		if len(affected) > 5 {
+			fmt.Printf("  ... and %d more\n", len(affected)-5)
+		}
+		return
+	}
+
+	// Actual rewrite
+	fmt.Println("Capturing pre-rewrite snapshot...")
+	before, err := captureSnapshot(ctx)
+	if err != nil {
+		die(flags, cmd, 1, fmt.Sprintf("capturing pre-rewrite snapshot: %v", err))
+	}
+
+	fmt.Println("Rewriting commits...")
+	shaMap, nameChanged, err := rewriteCommits(ctx, oldName, newName)
+	if err != nil {
+		die(flags, cmd, 1, fmt.Sprintf("rewriting commits: %v", err))
+	}
+
+	fmt.Println("Updating refs...")
+	if err := updateRefs(ctx, shaMap, oldName, newName); err != nil {
+		die(flags, cmd, 1, fmt.Sprintf("updating refs: %v", err))
+	}
+
+	fmt.Println("Capturing post-rewrite snapshot...")
+	after, err := captureSnapshot(ctx)
+	if err != nil {
+		die(flags, cmd, 1, fmt.Sprintf("capturing post-rewrite snapshot: %v", err))
+	}
+
+	fmt.Println("Verifying...")
+	failures := compareSnapshots(before, after, oldName)
+
+	// Also verify working tree is clean after rewrite
+	statusOut, _, err = git.Run(ctx, "status", "--porcelain")
+	if err != nil {
+		failures = append(failures, fmt.Sprintf("checking working tree after rewrite: %v", err))
+	} else if strings.TrimSpace(statusOut) != "" {
+		failures = append(failures, "working tree is dirty after rewrite")
+	}
+
+	if len(failures) > 0 {
+		for _, f := range failures {
+			fmt.Fprintf(os.Stderr, "  FAIL: %s\n", f)
+		}
+		die(flags, cmd, 1, "VERIFICATION FAILED")
+	}
+
+	// Count checks: compareSnapshots runs 12 categories + tag-to-message per tag + working tree = 13 base checks
+	fmt.Println("Verification passed: all checks OK")
+
+	// Summary
+	identity := 0
+	for k, v := range shaMap {
+		if k == v {
+			identity++
+		}
+	}
+	total := len(shaMap)
+	parentOnly := total - nameChanged - identity
+	fmt.Printf("Rewrote %d commits (%d had name changes, %d were parent-propagation only)\n",
+		total, nameChanged, parentOnly)
+
+	// Oplog entry
+	_ = oplog.Append(sgDir, oplog.Entry{
+		Op: "rewrite-author",
+		Extra: map[string]interface{}{
+			"oldName":          oldName,
+			"newName":          newName,
+			"commitsRewritten": len(shaMap),
+			"nameChanged":      nameChanged,
+		},
+	})
+
+	// Push if requested
+	if push {
+		fmt.Println("Force-pushing all branches and tags...")
+		if _, _, err := git.Run(ctx, "push", "origin", "--all", "--force"); err != nil {
+			die(flags, cmd, 1, fmt.Sprintf("pushing branches: %v", err))
+		}
+		if _, _, err := git.Run(ctx, "push", "origin", "--tags", "--force"); err != nil {
+			die(flags, cmd, 1, fmt.Sprintf("pushing tags: %v", err))
+		}
+		fmt.Println("Push complete.")
+	}
+}
 
 // rewriteSnapshot captures the state of a repository's history for
 // verification before and after an author-rewrite operation. Fields
