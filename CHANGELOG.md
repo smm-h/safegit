@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1
+
+- **Fix: `rewrite-author` now updates remote tracking refs.** Previously, `refs/remotes/` were walked during commit rewriting but not updated, causing the post-rewrite snapshot to see both old and new commits and failing verification with doubled commit counts.
+
 ## 0.7.0
 
 - **`rewrite-author` command.** `safegit rewrite-author --old-name X --new-name Y` rewrites author/committer names across all repository history using native Go git plumbing (no external dependencies like git-filter-repo). Includes a 13-check verification framework comparing pre/post-rewrite state: commit count, tag count, branch names, tag names, old name absence, commit messages, author dates, committer dates, author emails, tree hashes, parent topology, working tree cleanliness, and tag-to-message mapping. Supports `--dry-run` for preview, `--push` for automatic force-push, annotated tag rewriting, merge commits, and multiple branches. Logged to oplog (not undoable).
