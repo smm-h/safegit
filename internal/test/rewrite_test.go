@@ -576,6 +576,65 @@ func TestRewriteAuthorDryRun(t *testing.T) {
 	}
 }
 
+func TestRewriteAuthorAnnotatedTags(t *testing.T) {
+	dir := newRepo(t)
+	makeCommits(t, dir, "oldname", "old@test.com", 5, "f")
+
+	// Create an annotated tag on HEAD
+	cmd := exec.Command("git", "tag", "-a", "v1.0", "-m", "release v1.0")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_COMMITTER_NAME=oldname",
+		"GIT_COMMITTER_EMAIL=old@test.com",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git tag -a: %v\n%s", err, out)
+	}
+
+	// Record the commit message the tag points to
+	cmd = exec.Command("git", "log", "-1", "--format=%s", "v1.0")
+	cmd.Dir = dir
+	beforeMsg, _ := cmd.Output()
+
+	_, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	if code != 0 {
+		t.Fatalf("rewrite-author failed (exit %d): %s", code, stderr)
+	}
+
+	// Tag still exists
+	cmd = exec.Command("git", "tag", "-l", "v1.0")
+	cmd.Dir = dir
+	tagOut, _ := cmd.Output()
+	if !strings.Contains(string(tagOut), "v1.0") {
+		t.Error("tag v1.0 missing after rewrite")
+	}
+
+	// Tag still points to same commit message
+	cmd = exec.Command("git", "log", "-1", "--format=%s", "v1.0")
+	cmd.Dir = dir
+	afterMsg, _ := cmd.Output()
+	if string(beforeMsg) != string(afterMsg) {
+		t.Errorf("tag message changed: %q -> %q", beforeMsg, afterMsg)
+	}
+
+	// Tag object has rewritten tagger
+	cmd = exec.Command("git", "cat-file", "-p", "v1.0")
+	cmd.Dir = dir
+	tagContent, _ := cmd.Output()
+	if strings.Contains(string(tagContent), "oldname") {
+		t.Error("annotated tag still contains oldname in tagger field")
+	}
+	if !strings.Contains(string(tagContent), "newname") {
+		t.Error("annotated tag does not contain newname in tagger field")
+	}
+
+	// No oldname in commit authors
+	names := getAuthorNames(t, dir)
+	if containsName(names, "oldname") {
+		t.Error("oldname still present in author names")
+	}
+}
+
 func TestRewriteAuthorMissingFlags(t *testing.T) {
 	dir := newRepo(t)
 
