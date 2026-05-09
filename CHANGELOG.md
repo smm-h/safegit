@@ -2,6 +2,7 @@
 
 ## 0.7.0
 
+- **`rewrite-author` command.** `safegit rewrite-author --old-name X --new-name Y` rewrites author/committer names across all repository history using native Go git plumbing (no external dependencies like git-filter-repo). Includes a 13-check verification framework comparing pre/post-rewrite state: commit count, tag count, branch names, tag names, old name absence, commit messages, author dates, committer dates, author emails, tree hashes, parent topology, working tree cleanliness, and tag-to-message mapping. Supports `--dry-run` for preview, `--push` for automatic force-push, annotated tag rewriting, merge commits, and multiple branches. Logged to oplog (not undoable).
 - **Pre-commit hook support.** `safegit commit` now runs `.git/hooks/pre-commit` with `GIT_INDEX_FILE` pointing to the tmp index, so hooks see the correct staged files. Skipped with `--force` (matching git's `--no-verify`) and `--dry-run`. Previously, the plumbing-based pipeline bypassed git hooks entirely.
 - **Directory deletion support.** `git rm --cached` now retries with `-r` when the target is a tracked directory. Previously, committing a deleted directory failed with "not removing recursively without -r".
 
