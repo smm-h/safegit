@@ -16,7 +16,7 @@ func runRewriteAuthor(flags globalFlags, args []string) {
 	const cmd = "rewrite-author"
 
 	// Parse command-specific flags
-	var oldName, newName string
+	var oldName, newName, oldEmail, newEmail string
 	push := false
 
 	for i := 0; i < len(args); i++ {
@@ -33,6 +33,18 @@ func runRewriteAuthor(flags globalFlags, args []string) {
 			}
 			i++
 			newName = args[i]
+		case "--old-email":
+			if i+1 >= len(args) {
+				die(flags, cmd, 2, "--old-email requires a value")
+			}
+			i++
+			oldEmail = args[i]
+		case "--new-email":
+			if i+1 >= len(args) {
+				die(flags, cmd, 2, "--new-email requires a value")
+			}
+			i++
+			newEmail = args[i]
 		case "--push":
 			push = true
 		default:
@@ -45,6 +57,9 @@ func runRewriteAuthor(flags globalFlags, args []string) {
 	}
 	if newName == "" {
 		die(flags, cmd, 2, "--new-name is required")
+	}
+	if (oldEmail == "") != (newEmail == "") {
+		die(flags, cmd, 2, "--old-email and --new-email must be used together")
 	}
 
 	gitDir := mustGitDir(flags)
@@ -79,7 +94,9 @@ func runRewriteAuthor(flags globalFlags, args []string) {
 			if err != nil {
 				die(flags, cmd, 1, fmt.Sprintf("parsing commit %s: %v", sha, err))
 			}
-			if info.Author.Name == oldName || info.Committer.Name == oldName {
+			nameMatch := info.Author.Name == oldName || info.Committer.Name == oldName
+			emailMatch := oldEmail != "" && (info.Author.Email == oldEmail || info.Committer.Email == oldEmail)
+			if nameMatch || emailMatch {
 				affected = append(affected, sha)
 			}
 		}
@@ -108,7 +125,7 @@ func runRewriteAuthor(flags globalFlags, args []string) {
 	}
 
 	fmt.Println("Rewriting commits...")
-	shaMap, nameChanged, err := rewriteCommits(ctx, oldName, newName)
+	shaMap, nameChanged, err := rewriteCommits(ctx, oldName, newName, oldEmail, newEmail)
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("rewriting commits: %v", err))
 	}
@@ -125,7 +142,7 @@ func runRewriteAuthor(flags globalFlags, args []string) {
 	}
 
 	fmt.Println("Verifying...")
-	failures := compareSnapshots(before, after, oldName)
+	failures := compareSnapshots(before, after, oldName, oldEmail)
 
 	// Also verify working tree is clean after rewrite
 	statusOut, _, err = git.Run(ctx, "status", "--porcelain")
@@ -392,7 +409,7 @@ func buildTagToMessage(ctx context.Context, tagNames []string) (map[string]strin
 // oldName is the author name that should no longer appear after the
 // rewrite. Returns a slice of failure descriptions; an empty slice
 // means all checks passed.
-func compareSnapshots(before, after rewriteSnapshot, oldName string) []string {
+func compareSnapshots(before, after rewriteSnapshot, oldName, oldEmail string) []string {
 	var failures []string
 
 	// 1. Commit count
@@ -451,8 +468,18 @@ func compareSnapshots(before, after rewriteSnapshot, oldName string) []string {
 	}
 
 	// 9. Author emails
-	if msg := compareStringSlices("author emails", before.AuthorEmails, after.AuthorEmails); msg != "" {
-		failures = append(failures, msg)
+	if oldEmail != "" {
+		for i, email := range after.AuthorEmails {
+			if email == oldEmail {
+				failures = append(failures, fmt.Sprintf(
+					"old email %q still present in author at commit index %d", oldEmail, i))
+				break
+			}
+		}
+	} else {
+		if msg := compareStringSlices("author emails", before.AuthorEmails, after.AuthorEmails); msg != "" {
+			failures = append(failures, msg)
+		}
 	}
 
 	// 10. Tree hashes
@@ -523,7 +550,7 @@ func compareIntSlices(label string, before, after []int) string {
 // name matches oldName or a parent SHA was remapped by an earlier rewrite.
 // Returns the old-to-new SHA mapping, the count of commits whose name was
 // actually changed, and any error.
-func rewriteCommits(ctx context.Context, oldName, newName string) (map[string]string, int, error) {
+func rewriteCommits(ctx context.Context, oldName, newName, oldEmail, newEmail string) (map[string]string, int, error) {
 	// Get all commits in topo-order with parents before children.
 	args := append([]string{"rev-list", "--topo-order", "--reverse"}, refGlobs...)
 	out, _, err := git.Run(ctx, args...)
@@ -565,6 +592,16 @@ func rewriteCommits(ctx context.Context, oldName, newName string) (map[string]st
 		if committer.Name == oldName {
 			committer.Name = newName
 			thisNameChanged = true
+		}
+		if oldEmail != "" {
+			if author.Email == oldEmail {
+				author.Email = newEmail
+				thisNameChanged = true
+			}
+			if committer.Email == oldEmail {
+				committer.Email = newEmail
+				thisNameChanged = true
+			}
 		}
 
 		if thisNameChanged {
