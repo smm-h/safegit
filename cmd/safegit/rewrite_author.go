@@ -1,0 +1,322 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/smm-h/safegit/internal/git"
+)
+
+// rewriteSnapshot captures the state of a repository's history for
+// verification before and after an author-rewrite operation. Fields
+// ordered by topo-order are parallel slices -- index i in each slice
+// corresponds to the same commit.
+type rewriteSnapshot struct {
+	CommitCount    int
+	TagCount       int
+	BranchNames    []string
+	TagNames       []string
+	Messages       []string            // full commit messages, topo-order
+	AuthorDates    []string            // topo-order
+	CommitterDates []string            // topo-order
+	AuthorEmails   []string            // topo-order
+	AuthorNames    []string            // topo-order
+	CommitterNames []string            // topo-order
+	TreeHashes     []string            // topo-order
+	ParentCounts   []int               // topo-order
+	TagToMessage   map[string]string   // tag name -> subject of the commit it points to
+}
+
+// captureSnapshot collects all verification data points from the current
+// repository state using git plumbing commands. Each data type uses a
+// separate git log call for straightforward parsing.
+func captureSnapshot(ctx context.Context) (rewriteSnapshot, error) {
+	var snap rewriteSnapshot
+
+	// Commit count
+	out, _, err := git.Run(ctx, "rev-list", "--all", "--count")
+	if err != nil {
+		return snap, fmt.Errorf("counting commits: %w", err)
+	}
+	count := 0
+	fmt.Sscanf(strings.TrimSpace(out), "%d", &count)
+	snap.CommitCount = count
+
+	// Tree hashes
+	snap.TreeHashes, err = logLines(ctx, "%T")
+	if err != nil {
+		return snap, fmt.Errorf("reading tree hashes: %w", err)
+	}
+
+	// Author dates
+	snap.AuthorDates, err = logLines(ctx, "%ai")
+	if err != nil {
+		return snap, fmt.Errorf("reading author dates: %w", err)
+	}
+
+	// Committer dates
+	snap.CommitterDates, err = logLines(ctx, "%ci")
+	if err != nil {
+		return snap, fmt.Errorf("reading committer dates: %w", err)
+	}
+
+	// Author emails
+	snap.AuthorEmails, err = logLines(ctx, "%ae")
+	if err != nil {
+		return snap, fmt.Errorf("reading author emails: %w", err)
+	}
+
+	// Author names
+	snap.AuthorNames, err = logLines(ctx, "%an")
+	if err != nil {
+		return snap, fmt.Errorf("reading author names: %w", err)
+	}
+
+	// Committer names
+	snap.CommitterNames, err = logLines(ctx, "%cn")
+	if err != nil {
+		return snap, fmt.Errorf("reading committer names: %w", err)
+	}
+
+	// Parent hashes (space-separated per line) -> parent counts
+	parentLines, err := logLines(ctx, "%P")
+	if err != nil {
+		return snap, fmt.Errorf("reading parent hashes: %w", err)
+	}
+	snap.ParentCounts = make([]int, len(parentLines))
+	for i, line := range parentLines {
+		if line == "" {
+			snap.ParentCounts[i] = 0
+		} else {
+			snap.ParentCounts[i] = len(strings.Fields(line))
+		}
+	}
+
+	// Full commit messages: use \x01 as a record separator before each
+	// message body (%B can contain newlines).
+	out, _, err = git.Run(ctx, "log", "--all", "--topo-order", "--format=%x01%B")
+	if err != nil {
+		return snap, fmt.Errorf("reading commit messages: %w", err)
+	}
+	snap.Messages = splitMessages(out)
+
+	// Branch names
+	out, _, err = git.Run(ctx, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
+	if err != nil {
+		return snap, fmt.Errorf("reading branch names: %w", err)
+	}
+	snap.BranchNames = splitSorted(out)
+
+	// Tag names
+	out, _, err = git.Run(ctx, "tag", "-l")
+	if err != nil {
+		return snap, fmt.Errorf("reading tag names: %w", err)
+	}
+	snap.TagNames = splitSorted(out)
+	snap.TagCount = len(snap.TagNames)
+
+	// Tag-to-message map
+	snap.TagToMessage, err = buildTagToMessage(ctx, snap.TagNames)
+	if err != nil {
+		return snap, fmt.Errorf("building tag-to-message map: %w", err)
+	}
+
+	return snap, nil
+}
+
+// logLines runs git log --all --topo-order with the given format and
+// returns non-empty output lines.
+func logLines(ctx context.Context, format string) ([]string, error) {
+	out, _, err := git.Run(ctx, "log", "--all", "--topo-order", "--format="+format)
+	if err != nil {
+		return nil, err
+	}
+	return splitNonEmpty(out), nil
+}
+
+// splitNonEmpty splits on newlines and drops empty entries.
+func splitNonEmpty(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	lines := strings.Split(s, "\n")
+	result := make([]string, 0, len(lines))
+	for _, l := range lines {
+		if l != "" {
+			result = append(result, l)
+		}
+	}
+	return result
+}
+
+// splitSorted splits on newlines, drops empties, and sorts the result.
+func splitSorted(s string) []string {
+	lines := splitNonEmpty(s)
+	sort.Strings(lines)
+	return lines
+}
+
+// splitMessages parses the output of git log --format=%x01%B into
+// individual commit messages. Each record starts with \x01, followed
+// by the full message body (which may span multiple lines).
+func splitMessages(raw string) []string {
+	parts := strings.Split(raw, "\x01")
+	var msgs []string
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed == "" {
+			continue
+		}
+		msgs = append(msgs, trimmed)
+	}
+	return msgs
+}
+
+// buildTagToMessage maps each tag name to the subject line of the
+// commit it ultimately points to (dereferencing annotated tags).
+func buildTagToMessage(ctx context.Context, tagNames []string) (map[string]string, error) {
+	m := make(map[string]string, len(tagNames))
+	for _, tag := range tagNames {
+		// Dereference to commit in case of annotated tags.
+		sha, _, err := git.Run(ctx, "rev-parse", tag+"^{commit}")
+		if err != nil {
+			// Tag might not point to a commit (e.g. a tag on a blob); skip.
+			continue
+		}
+		sha = strings.TrimSpace(sha)
+		subject, _, err := git.Run(ctx, "log", "-1", "--format=%s", sha)
+		if err != nil {
+			continue
+		}
+		m[tag] = strings.TrimSpace(subject)
+	}
+	return m, nil
+}
+
+// compareSnapshots compares a before and after snapshot to verify that a
+// history rewrite preserved everything except author/committer names.
+// oldName is the author name that should no longer appear after the
+// rewrite. Returns a slice of failure descriptions; an empty slice
+// means all checks passed.
+func compareSnapshots(before, after rewriteSnapshot, oldName string) []string {
+	var failures []string
+
+	// 1. Commit count
+	if before.CommitCount != after.CommitCount {
+		failures = append(failures, fmt.Sprintf(
+			"commit count changed: before=%d, after=%d",
+			before.CommitCount, after.CommitCount))
+	}
+
+	// 2. Tag count
+	if before.TagCount != after.TagCount {
+		failures = append(failures, fmt.Sprintf(
+			"tag count changed: before=%d, after=%d",
+			before.TagCount, after.TagCount))
+	}
+
+	// 3. Branch names
+	if msg := compareStringSlices("branch names", before.BranchNames, after.BranchNames); msg != "" {
+		failures = append(failures, msg)
+	}
+
+	// 4. Tag names
+	if msg := compareStringSlices("tag names", before.TagNames, after.TagNames); msg != "" {
+		failures = append(failures, msg)
+	}
+
+	// 5. Old name must not appear in author or committer names
+	for i, name := range after.AuthorNames {
+		if name == oldName {
+			failures = append(failures, fmt.Sprintf(
+				"old author name %q still present in author at commit index %d", oldName, i))
+			break
+		}
+	}
+	for i, name := range after.CommitterNames {
+		if name == oldName {
+			failures = append(failures, fmt.Sprintf(
+				"old author name %q still present in committer at commit index %d", oldName, i))
+			break
+		}
+	}
+
+	// 6. Messages
+	if msg := compareStringSlices("messages", before.Messages, after.Messages); msg != "" {
+		failures = append(failures, msg)
+	}
+
+	// 7. Author dates
+	if msg := compareStringSlices("author dates", before.AuthorDates, after.AuthorDates); msg != "" {
+		failures = append(failures, msg)
+	}
+
+	// 8. Committer dates
+	if msg := compareStringSlices("committer dates", before.CommitterDates, after.CommitterDates); msg != "" {
+		failures = append(failures, msg)
+	}
+
+	// 9. Author emails
+	if msg := compareStringSlices("author emails", before.AuthorEmails, after.AuthorEmails); msg != "" {
+		failures = append(failures, msg)
+	}
+
+	// 10. Tree hashes
+	if msg := compareStringSlices("tree hashes", before.TreeHashes, after.TreeHashes); msg != "" {
+		failures = append(failures, msg)
+	}
+
+	// 11. Parent counts
+	if msg := compareIntSlices("parent counts", before.ParentCounts, after.ParentCounts); msg != "" {
+		failures = append(failures, msg)
+	}
+
+	// 12. Tag-to-message mapping
+	for tag, beforeMsg := range before.TagToMessage {
+		afterMsg, ok := after.TagToMessage[tag]
+		if !ok {
+			failures = append(failures, fmt.Sprintf(
+				"tag %q missing from after snapshot", tag))
+			continue
+		}
+		if beforeMsg != afterMsg {
+			failures = append(failures, fmt.Sprintf(
+				"tag %q message changed: before=%q, after=%q", tag, beforeMsg, afterMsg))
+		}
+	}
+
+	return failures
+}
+
+// compareStringSlices reports the first difference between two string slices.
+// Returns an empty string if they are identical.
+func compareStringSlices(label string, before, after []string) string {
+	if len(before) != len(after) {
+		return fmt.Sprintf("%s: length differs: before=%d, after=%d", label, len(before), len(after))
+	}
+	for i := range before {
+		if before[i] != after[i] {
+			return fmt.Sprintf("%s: differ at index %d: before=%q, after=%q",
+				label, i, before[i], after[i])
+		}
+	}
+	return ""
+}
+
+// compareIntSlices reports the first difference between two int slices.
+// Returns an empty string if they are identical.
+func compareIntSlices(label string, before, after []int) string {
+	if len(before) != len(after) {
+		return fmt.Sprintf("%s: length differs: before=%d, after=%d", label, len(before), len(after))
+	}
+	for i := range before {
+		if before[i] != after[i] {
+			return fmt.Sprintf("%s: differ at index %d: before=%d, after=%d",
+				label, i, before[i], after[i])
+		}
+	}
+	return ""
+}
