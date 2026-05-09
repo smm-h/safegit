@@ -153,11 +153,18 @@ func AddFile(ctx context.Context, indexPath, filePath string) error {
 	return err
 }
 
-// RmCached removes a file from a custom index without touching the working tree.
+// RmCached removes a file or directory from a custom index without touching the working tree.
 func RmCached(ctx context.Context, indexPath, filePath string) error {
 	env := []string{"GIT_INDEX_FILE=" + indexPath}
 	_, _, err := RunWithEnv(ctx, env, "rm", "--cached", "--", filePath)
+	if err != nil && isDirectoryRmError(err) {
+		_, _, err = RunWithEnv(ctx, env, "rm", "-r", "--cached", "--", filePath)
+	}
 	return err
+}
+
+func isDirectoryRmError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "not removing") && strings.Contains(err.Error(), "recursively without -r")
 }
 
 // IsTracked checks whether a file is tracked by git (present in HEAD tree).
