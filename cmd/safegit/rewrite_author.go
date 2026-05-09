@@ -142,7 +142,7 @@ func runRewriteAuthor(flags globalFlags, args []string) {
 	}
 
 	fmt.Println("Verifying...")
-	failures := compareSnapshots(before, after, oldName, oldEmail)
+	failures := compareSnapshots(before, after, oldName, newName, oldEmail)
 
 	// Also verify working tree is clean after rewrite
 	statusOut, _, err = git.Run(ctx, "status", "--porcelain")
@@ -409,7 +409,7 @@ func buildTagToMessage(ctx context.Context, tagNames []string) (map[string]strin
 // oldName is the author name that should no longer appear after the
 // rewrite. Returns a slice of failure descriptions; an empty slice
 // means all checks passed.
-func compareSnapshots(before, after rewriteSnapshot, oldName, oldEmail string) []string {
+func compareSnapshots(before, after rewriteSnapshot, oldName, newName, oldEmail string) []string {
 	var failures []string
 
 	// 1. Commit count
@@ -437,18 +437,21 @@ func compareSnapshots(before, after rewriteSnapshot, oldName, oldEmail string) [
 	}
 
 	// 5. Old name must not appear in author or committer names
-	for i, name := range after.AuthorNames {
-		if name == oldName {
-			failures = append(failures, fmt.Sprintf(
-				"old author name %q still present in author at commit index %d", oldName, i))
-			break
+	//    (skip when old and new names are identical -- email-only rewrite)
+	if oldName != newName {
+		for i, name := range after.AuthorNames {
+			if name == oldName {
+				failures = append(failures, fmt.Sprintf(
+					"old author name %q still present in author at commit index %d", oldName, i))
+				break
+			}
 		}
-	}
-	for i, name := range after.CommitterNames {
-		if name == oldName {
-			failures = append(failures, fmt.Sprintf(
-				"old author name %q still present in committer at commit index %d", oldName, i))
-			break
+		for i, name := range after.CommitterNames {
+			if name == oldName {
+				failures = append(failures, fmt.Sprintf(
+					"old author name %q still present in committer at commit index %d", oldName, i))
+				break
+			}
 		}
 	}
 
