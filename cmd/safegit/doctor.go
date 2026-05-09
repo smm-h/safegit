@@ -47,6 +47,15 @@ Flags:
 
 	// --uninstall: remove safegit from this repo and exit.
 	if uninstall {
+		if !flags.force {
+			fmt.Printf("Remove safegit from this repository? [y/N] ")
+			var answer string
+			fmt.Scanln(&answer)
+			if answer != "y" && answer != "Y" {
+				fmt.Println("Aborted.")
+				return
+			}
+		}
 		if err := repo.Uninstall(gitDir); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)

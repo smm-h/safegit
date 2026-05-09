@@ -111,8 +111,8 @@ Examples:
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("checking working tree: %v", err))
 	}
-	if strings.TrimSpace(statusOut) != "" {
-		die(flags, cmd, 1, "working tree is dirty; commit or stash changes before rewriting history")
+	if strings.TrimSpace(statusOut) != "" && !flags.force {
+		die(flags, cmd, 1, "working tree is dirty; commit changes or use --force to skip this check")
 	}
 
 	// Dry-run mode
@@ -166,6 +166,24 @@ Examples:
 			fmt.Printf("  ... and %d more\n", len(affected)-5)
 		}
 		return
+	}
+
+	// Confirmation prompt (skipped with --force)
+	if !flags.force {
+		countArgs := append([]string{"rev-list", "--topo-order", "--reverse"}, refGlobs...)
+		out, _, err := git.Run(ctx, countArgs...)
+		if err != nil {
+			die(flags, cmd, 1, fmt.Sprintf("listing commits: %v", err))
+		}
+		total := len(splitNonEmpty(out))
+
+		fmt.Printf("About to rewrite %d commits. This cannot be undone. Proceed? [y/N] ", total)
+		var answer string
+		fmt.Scanln(&answer)
+		if answer != "y" && answer != "Y" {
+			fmt.Println("Aborted.")
+			return
+		}
 	}
 
 	// Actual rewrite
@@ -240,6 +258,17 @@ Examples:
 			"nameChanged":      nameChanged,
 		},
 	})
+
+	// Push confirmation (skipped with --force)
+	if push && !flags.force {
+		fmt.Printf("Force-push ALL branches and tags to origin? [y/N] ")
+		var answer string
+		fmt.Scanln(&answer)
+		if answer != "y" && answer != "Y" {
+			fmt.Println("Push skipped.")
+			push = false
+		}
+	}
 
 	// Push if requested
 	if push {
