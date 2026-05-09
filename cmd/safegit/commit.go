@@ -31,27 +31,37 @@ func runCommit(flags globalFlags, args []string) {
 			files = append(files, args[i])
 			continue
 		}
-		switch args[i] {
+		flag, val, hasVal := splitFlagValue(args[i])
+		switch flag {
 		case "--":
 			pastSeparator = true
 		case "-m":
-			if i+1 >= len(args) {
+			if hasVal {
+				messages = append(messages, val)
+			} else if i+1 >= len(args) {
 				die(flags, "commit", 2, "-m requires an argument")
+			} else {
+				i++
+				messages = append(messages, args[i])
 			}
-			i++
-			messages = append(messages, args[i])
 		case "-F":
-			if i+1 >= len(args) {
+			if hasVal {
+				messageFile = val
+			} else if i+1 >= len(args) {
 				die(flags, "commit", 2, "-F requires an argument")
+			} else {
+				i++
+				messageFile = args[i]
 			}
-			i++
-			messageFile = args[i]
 		case "--branch":
-			if i+1 >= len(args) {
+			if hasVal {
+				branch = val
+			} else if i+1 >= len(args) {
 				die(flags, "commit", 2, "--branch requires an argument")
+			} else {
+				i++
+				branch = args[i]
 			}
-			i++
-			branch = args[i]
 		case "--allow-empty":
 			allowEmpty = true
 		case "--amend":

@@ -20,31 +20,44 @@ func runRewriteAuthor(flags globalFlags, args []string) {
 	push := false
 
 	for i := 0; i < len(args); i++ {
-		switch args[i] {
+		flag, val, hasVal := splitFlagValue(args[i])
+		switch flag {
 		case "--old-name":
-			if i+1 >= len(args) {
+			if hasVal {
+				oldName = val
+			} else if i+1 >= len(args) {
 				die(flags, cmd, 2, "--old-name requires a value")
+			} else {
+				i++
+				oldName = args[i]
 			}
-			i++
-			oldName = args[i]
 		case "--new-name":
-			if i+1 >= len(args) {
+			if hasVal {
+				newName = val
+			} else if i+1 >= len(args) {
 				die(flags, cmd, 2, "--new-name requires a value")
+			} else {
+				i++
+				newName = args[i]
 			}
-			i++
-			newName = args[i]
 		case "--old-email":
-			if i+1 >= len(args) {
+			if hasVal {
+				oldEmail = val
+			} else if i+1 >= len(args) {
 				die(flags, cmd, 2, "--old-email requires a value")
+			} else {
+				i++
+				oldEmail = args[i]
 			}
-			i++
-			oldEmail = args[i]
 		case "--new-email":
-			if i+1 >= len(args) {
+			if hasVal {
+				newEmail = val
+			} else if i+1 >= len(args) {
 				die(flags, cmd, 2, "--new-email requires a value")
+			} else {
+				i++
+				newEmail = args[i]
 			}
-			i++
-			newEmail = args[i]
 		case "--push":
 			push = true
 		default:

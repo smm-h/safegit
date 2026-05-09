@@ -104,7 +104,8 @@ func parseGlobalFlags(args []string) (globalFlags, []string) {
 			rest = append(rest, args[i:]...)
 			break
 		}
-		switch args[i] {
+		flag, val, hasVal := splitFlagValue(args[i])
+		switch flag {
 		case "--quiet", "-q":
 			f.quiet = true
 		case "--verbose", "-v":
@@ -116,7 +117,9 @@ func parseGlobalFlags(args []string) (globalFlags, []string) {
 		case "--force", "-f":
 			f.force = true
 		case "--config":
-			if i+1 < len(args) {
+			if hasVal {
+				f.configPath = val
+			} else if i+1 < len(args) {
 				i++
 				f.configPath = args[i]
 			} else {
@@ -260,6 +263,16 @@ func parseFileSpecs(files []string, flags globalFlags, cmd string) []commit.File
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// splitFlagValue splits a flag argument at the first '=' sign. For example,
+// "--config=/path" returns ("--config", "/path", true). If there is no '='
+// or the argument doesn't start with '-', it returns (arg, "", false).
+func splitFlagValue(arg string) (flag, value string, hasValue bool) {
+	if idx := strings.Index(arg, "="); idx >= 0 && strings.HasPrefix(arg, "-") {
+		return arg[:idx], arg[idx+1:], true
+	}
+	return arg, "", false
 }
 
 // isHunkSpec returns true if s looks like a hunk specifier (digits, commas, dashes only).

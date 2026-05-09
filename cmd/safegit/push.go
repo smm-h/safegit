@@ -47,7 +47,8 @@ func runPush(flags globalFlags, args []string) int {
 	var positional []string
 
 	for i := 0; i < len(args); i++ {
-		switch args[i] {
+		flag, _, _ := splitFlagValue(args[i])
+		switch flag {
 		case "--no-pre-pre-push":
 			noPrePrePush = true
 		case "--force", "-f":
