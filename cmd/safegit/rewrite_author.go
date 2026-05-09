@@ -583,7 +583,7 @@ func rewriteCommits(ctx context.Context, oldName, newName string) (map[string]st
 // For annotated tags, the tag object itself is rewritten if its target commit
 // changed or its tagger name matches oldName. Stash refs are skipped.
 func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName string) error {
-	out, _, err := git.Run(ctx, "for-each-ref", "--format=%(refname) %(objecttype) %(objectname)", "refs/heads/", "refs/tags/")
+	out, _, err := git.Run(ctx, "for-each-ref", "--format=%(refname) %(objecttype) %(objectname)", "refs/heads/", "refs/tags/", "refs/remotes/")
 	if err != nil {
 		return fmt.Errorf("listing refs: %w", err)
 	}
@@ -598,6 +598,12 @@ func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName 
 
 		// Skip stash refs.
 		if strings.HasPrefix(refname, "refs/stash") {
+			continue
+		}
+
+		// Skip symbolic refs like refs/remotes/origin/HEAD -- updating
+		// them with git update-ref would convert them to regular refs.
+		if strings.HasPrefix(refname, "refs/remotes/") && strings.HasSuffix(refname, "/HEAD") {
 			continue
 		}
 
