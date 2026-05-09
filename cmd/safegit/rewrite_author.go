@@ -522,20 +522,37 @@ func compareSnapshots(before, after rewriteSnapshot, oldName, newName, oldEmail 
 	}
 
 	// 5. Old name must not appear in author or committer names
-	//    (skip when oldName is empty or old and new names are identical)
+	//    (skip when oldName is empty or old and new names are identical).
+	//    When AND matching (oldEmail != ""), commits with oldName but a
+	//    different email are intentionally preserved -- only check that no
+	//    commit has BOTH the old name AND the old email.
 	if oldName != "" && oldName != newName {
-		for i, name := range after.AuthorNames {
-			if name == oldName {
-				failures = append(failures, fmt.Sprintf(
-					"old author name %q still present in author at commit index %d", oldName, i))
-				break
+		if oldEmail != "" {
+			// AND matching: only flag commits where both name and email match.
+			for i, name := range after.AuthorNames {
+				if name == oldName && i < len(after.AuthorEmails) && after.AuthorEmails[i] == oldEmail {
+					failures = append(failures, fmt.Sprintf(
+						"old author name %q with old email %q still present at commit index %d", oldName, oldEmail, i))
+					break
+				}
 			}
-		}
-		for i, name := range after.CommitterNames {
-			if name == oldName {
-				failures = append(failures, fmt.Sprintf(
-					"old author name %q still present in committer at commit index %d", oldName, i))
-				break
+			// CommitterNames don't have a parallel CommitterEmails slice in
+			// the snapshot, so skip the AND check for committers.
+		} else {
+			// Name-only matching: oldName must not appear at all.
+			for i, name := range after.AuthorNames {
+				if name == oldName {
+					failures = append(failures, fmt.Sprintf(
+						"old author name %q still present in author at commit index %d", oldName, i))
+					break
+				}
+			}
+			for i, name := range after.CommitterNames {
+				if name == oldName {
+					failures = append(failures, fmt.Sprintf(
+						"old author name %q still present in committer at commit index %d", oldName, i))
+					break
+				}
 			}
 		}
 	}

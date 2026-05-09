@@ -122,7 +122,7 @@ func TestRewriteAuthorBasic(t *testing.T) {
 	beforeCount := getCommitCount(t, dir)
 	beforeTrees := getTreeHashes(t, dir)
 
-	stdout, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -158,7 +158,7 @@ func TestRewriteAuthorMixedAuthors(t *testing.T) {
 	makeCommits(t, dir, "alice", "alice@test.com", 5, "alice")
 	makeCommits(t, dir, "bob", "bob@test.com", 5, "bob")
 
-	stdout, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name", "alice", "--new-name", "alice-new")
+	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "alice", "--new-name", "alice-new")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -221,7 +221,7 @@ func TestRewriteAuthorWithTags(t *testing.T) {
 
 	beforeCount := getCommitCount(t, dir)
 
-	stdout, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -311,7 +311,7 @@ func TestRewriteAuthorMerge(t *testing.T) {
 	beforeCount := getCommitCount(t, dir)
 	beforeTrees := getTreeHashes(t, dir)
 
-	stdout, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -378,7 +378,7 @@ func TestRewriteAuthorMultipleBranches(t *testing.T) {
 
 	beforeCount := getCommitCount(t, dir)
 
-	stdout, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -413,7 +413,7 @@ func TestRewriteAuthorNoOp(t *testing.T) {
 	beforeTrees := getTreeHashes(t, dir)
 	beforeNames := getAuthorNames(t, dir)
 
-	stdout, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name", "nonexistent", "--new-name", "something")
+	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "nonexistent", "--new-name", "something")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -439,7 +439,7 @@ func TestRewriteAuthorIdempotent(t *testing.T) {
 	makeCommits(t, dir, "oldname", "old@test.com", 5, "idem")
 
 	// First rewrite
-	stdout, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
 	if code != 0 {
 		t.Fatalf("first rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -448,7 +448,7 @@ func TestRewriteAuthorIdempotent(t *testing.T) {
 	afterFirstTrees := getTreeHashes(t, dir)
 
 	// Second rewrite (same arguments -- should be a no-op)
-	stdout, stderr, code = runSafegit(t, dir, "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	stdout, stderr, code = runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
 	if code != 0 {
 		t.Fatalf("second rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -514,7 +514,7 @@ func TestRewriteAuthorRootCommit(t *testing.T) {
 	// Initialize safegit in the repo (rewrite-author requires it)
 	runSafegit(t, dir, "config", "commit.casMaxAttempts", "200")
 
-	stdout, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -596,7 +596,7 @@ func TestRewriteAuthorAnnotatedTags(t *testing.T) {
 	cmd.Dir = dir
 	beforeMsg, _ := cmd.Output()
 
-	_, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	_, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (exit %d): %s", code, stderr)
 	}
@@ -722,20 +722,11 @@ func TestRewriteAuthorANDMatching(t *testing.T) {
 	makeCommits(t, dir, "alice", "alice@work.com", 3, "work")
 	makeCommits(t, dir, "alice", "alice@home.com", 3, "home")
 
-	// Note: the command's internal verifier (compareSnapshots) has a known issue
-	// with AND matching -- it unconditionally rejects oldName ("alice") appearing
-	// in ANY commit, even though AND matching intentionally preserves commits
-	// that don't match both criteria. The rewrite itself works correctly, but
-	// the post-rewrite verification reports a false failure. We check the actual
-	// commit data below regardless of exit code.
-	_, _, code := runSafegit(t, dir, "--force", "rewrite-author",
+	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author",
 		"--old-name=alice", "--new-name=alice-new",
 		"--old-email=alice@work.com", "--new-email=new@work.com")
-
-	// Exit code 1 is expected due to the verification bug described above.
-	// When the verifier is fixed, this should be updated to expect code 0.
-	if code != 1 {
-		t.Logf("unexpected exit code %d (expected 1 due to known verifier limitation)", code)
+	if code != 0 {
+		t.Fatalf("rewrite-author AND matching failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
 
 	// AND matching: only commits with BOTH alice + alice@work.com should be rewritten
