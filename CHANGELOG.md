@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.2
+
+- **Fix: `rewrite-author` now excludes stash and notes refs.** `rev-list --all` includes `refs/stash` and `refs/notes`, which are not covered by `updateRefs`. Replaced with explicit ref globs (`refs/heads`, `refs/tags`, `refs/remotes`) so only branch, tag, and remote tracking refs are walked and rewritten.
+- **Test: annotated tag rewrite coverage.** Added integration test verifying annotated tags are rewritten correctly (tagger name updated, target commit remapped).
+
 ## 0.7.1
 
 - **Fix: `rewrite-author` now updates remote tracking refs.** Previously, `refs/remotes/` were walked during commit rewriting but not updated, causing the post-rewrite snapshot to see both old and new commits and failing verification with doubled commit counts.
