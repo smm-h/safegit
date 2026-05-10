@@ -125,7 +125,7 @@ These need to be decided before implementation:
 
 ## Files and Directories That May Change
 
-- `cmd/safegit/` -- commit subcommand flag registration (if opt-in/opt-out flags are added)
+- Root package (main) -- commit subcommand flag registration (if opt-in/opt-out flags are added)
 - `internal/commit/` or equivalent -- trailer injection into commit messages before passing to git
 - Possibly a new `internal/trailer/` package -- encapsulates env var reading, trailer formatting, and fallback chain logic
 - `internal/test/` -- integration tests for trailer behavior (env var set, env var absent, amend, undo)

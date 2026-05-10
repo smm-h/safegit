@@ -23,7 +23,7 @@ teammates, CI, and code review tools see nothing unusual.
 From source (requires Go 1.24+):
 
 ```
-go install github.com/smm-h/safegit/cmd/safegit@latest
+go install github.com/smm-h/safegit@latest
 ```
 
 Pre-built binaries are available on

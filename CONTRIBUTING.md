@@ -8,7 +8,7 @@
 ## Build
 
 ```sh
-go build -o safegit ./cmd/safegit
+go build -o safegit .
 ```
 
 ## Test

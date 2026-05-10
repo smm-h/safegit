@@ -29,7 +29,7 @@ func TestMain(m *testing.M) {
 	defer os.RemoveAll(tmpDir)
 
 	binPath := filepath.Join(tmpDir, "safegit")
-	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/safegit")
+	cmd := exec.Command("go", "build", "-o", binPath, ".")
 	cmd.Dir = projectRoot()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to build safegit: %v\n%s\n", err, out)
