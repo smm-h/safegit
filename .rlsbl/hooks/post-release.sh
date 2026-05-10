@@ -5,5 +5,5 @@
 set -euo pipefail
 
 echo "Installing safegit v$RLSBL_VERSION..."
-go install ./cmd/safegit/
+go install .
 echo "Installed: $(which safegit)"

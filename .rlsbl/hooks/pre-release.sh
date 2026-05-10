@@ -10,7 +10,7 @@ echo "  go vet..."
 go vet ./...
 
 echo "  go build..."
-go build -o /dev/null ./cmd/safegit
+go build -o /dev/null .
 
 echo "  go test..."
 go test ./... -race -short -count=1
