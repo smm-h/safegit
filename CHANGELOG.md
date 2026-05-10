@@ -23,7 +23,6 @@
 ## 0.7.2
 
 - **Fix: `rewrite-author` now excludes stash and notes refs.** `rev-list --all` includes `refs/stash` and `refs/notes`, which are not covered by `updateRefs`. Replaced with explicit ref globs (`refs/heads`, `refs/tags`, `refs/remotes`) so only branch, tag, and remote tracking refs are walked and rewritten.
-- **Test: annotated tag rewrite coverage.** Added integration test verifying annotated tags are rewritten correctly (tagger name updated, target commit remapped).
 
 ## 0.7.1
 
@@ -37,13 +36,7 @@
 
 ## 0.6.2
 
-- **Migrated rlsbl layout.** Hooks moved from `scripts/` to `.rlsbl/hooks/`. Experiment scripts and stress tests moved from `scripts/` to `testdata/`. Two-step pre-push hook (rlsbl changelog check + safegit stress tests).
-- **Bumped GitHub Actions to Node.js 24.** `checkout@v6`, `setup-go@v6`, `goreleaser@v7`. Added `*.local-only` gitignore pattern.
-
 ## 0.6.1
-
-- **Post-release hook.** `scripts/post-release.sh` auto-installs the safegit binary locally on release via `go install`.
-- **Removed stale experiment script.** `bug-02-reword-no-retry.sh` tested the removed `reword` command.
 
 ## 0.6.0
 
@@ -67,10 +60,6 @@
 
 - **macOS ARM64 build.** `doctor_darwin.go` failed `go vet` on ARM64 due to `[]int8` to `string` conversion. Fixed by converting through `[]byte`.
 
-### Changed
-
-- **`IsInitialized` now checks for the `.git/safegit/` directory instead of `config.json`.**
-
 ## 0.4.0
 
 ### CLI consolidation (24 -> 20 commands)
@@ -86,11 +75,6 @@
 
 - **`--format json` flag and all JSON output.** Every command now produces only human-readable output. The JSON envelope infrastructure (`emitJSON`, `jsonResponse`, `jsonError`, `--format` flag) is gone. 9 of 22 commands silently ignored `--format json` anyway (all guarded passthroughs), making the feature inconsistent. Agents already parse human output and git's native formats directly.
 
-### Fixed
-
-- Pre-push hook skips stress tests for tag-only pushes (no code changed, no point re-testing)
-- CLAUDE.md and README updated to remove references to dropped commands (stash, tag, fetch, status, diff, log, show)
-
 ## 0.2.0
 
 ### Removed commands
@@ -105,27 +89,17 @@ Seven commands dropped to reduce surface area and eliminate code that adds no co
 - **`safegit tag`** -- Unguarded passthrough with zero safegit logic. Agents can use `git tag` directly with no risk since tags don't affect the working tree or index.
 - **`safegit fetch`** -- Unguarded passthrough with zero safegit logic. Fetch only updates remote-tracking refs, which is safe to do concurrently. Use `git fetch` directly.
 
-### Other
-
-- Add blocking stress tests to pre-push hook (skip with `SKIP_STRESS=1`)
-- Add WSL compatibility note to README
-
 ## 0.1.6
 
 - Fix: `safegit unwip` now refuses to restore when files were modified since the wip was created, preventing silent data loss from overwriting another agent's edits
 - Fix: platform-specific NFS detection refined into separate linux/darwin/windows files (replaces combined doctor_unix.go)
 - Fix: goreleaser ldflags inject version string into release binaries
 - Add Dockerfile for building safegit from source
-- Add CONTRIBUTING.md with build, test, and release instructions
-- Reorganize docs: design.md moved to todo/.done/, future features extracted to todo/future-features.md, req.md and research.md moved to docs/
 
 ## 0.1.5
 
 - Add CAS retry jitter (1-10ms random sleep) to break thundering-herd stampedes under heavy concurrency
 - Prevent potential slice mutation in oplog.Append
-- pre-push hook now supports Go projects with VERSION file
-- CI matrix expanded to macOS and Go 1.25
-- Integration tests for cherry-pick, tag, stash passthrough and worktree lock sharing
 
 ## 0.1.4
 
@@ -134,14 +108,12 @@ Seven commands dropped to reduce surface area and eliminate code that adds no co
 - `--branch` now errors if the target branch does not exist (prevents orphan branches from typos)
 - Config validation rejects zero values (consistent with `safegit config` CLI behavior)
 - Coord guard diffs against HEAD directly instead of relying on the main index (eliminates false dirty-tree refusals)
-- Mark unimplemented design.md features: inotify/kqueue wakeup, queue files, standalone stage/unstage
 
 ## 0.1.3
 
 - Fix goreleaser config: add `main: ./cmd/safegit` so release binaries build correctly
 - Drop Windows from build targets (Unix-only syscalls in lock, oplog, index, hooks packages)
 - Fix push JSON output: hook failures now emit `ok: false` with error details
-- Fix CI: skip stress tests with `-short` to prevent flaky failures
 
 ## 0.1.2
 
@@ -155,9 +127,6 @@ Seven commands dropped to reduce surface area and eliminate code that adds no co
 - Fix uninstall now cleans shared worktree lock directory
 - Fix GC reports all removal errors instead of just the last one
 - Fix amend/reword SyncMainIndex guarded for cross-branch operations
-- Add known limitations section to README (cross-machine, PID reuse, submodules)
-- Remove stale NEXT.md
-- Update design.md: push backoff values, stage/unstage status, lock mechanism
 
 ## 0.1.1
 
@@ -188,20 +157,6 @@ Seven commands dropped to reduce surface area and eliminate code that adds no co
 - **Wip no longer reverts files in the working tree.** Previously, `safegit wip` would snapshot files and revert them to HEAD. Now it only snapshots and creates wip-locks. This prevents clobbering another agent's uncommitted edits in a shared worktree. Users who need to revert files after wip should do so manually.
 - **Wip commit message format changed** from `files: a.txt, b.txt` (comma-separated) to one `file: <path>` line per file. This fixes parsing failures for filenames containing commas. Old wip commits using the legacy format are still supported for restore.
 - `safegit unwip` no longer accepts `--force` (the clean-check it bypassed was removed)
-
-### Code quality
-- Split `main.go` (1800 lines) into 10 focused files
-- Consolidated 5 duplicated `*Die` functions into a single `die()` helper
-- Extracted shared hunk-spec parsing into `parseFileSpecs()`
-- JSON output no longer emits `"error": null` and `"warnings": null` on success
-- All git passthrough commands now route through `git.RunPassthrough` for `--no-optional-locks`
-- Shared test helpers extracted into `internal/testutil`
-
-### Testing
-- Added unit tests for CLI flag parsing, hunk specs, and helpers
-- Added tests for amend CAS retry, cross-branch index preservation, and empty repo commits
-- Made hooks output configurable for test capture via `hooks.SetOutput`
-- Bug experiment scripts in `scripts/experiments/` for regression verification
 
 ## 0.1.0
 
