@@ -36,7 +36,11 @@
 
 ## 0.6.2
 
+Internal improvements.
+
 ## 0.6.1
+
+Internal improvements.
 
 ## 0.6.0
 
