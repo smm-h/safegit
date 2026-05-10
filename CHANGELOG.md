@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0
+
+- **`--flag=value` syntax.** All commands now accept `--flag=value` in addition to `--flag value`. Applies globally (e.g., `--config=/path`) and to commit (`-m="msg"`, `-F=path`, `--branch=name`), push, and rewrite-author flags.
+- **Per-command `--help`.** Every command now responds to `--help`/`-h` with flag descriptions and examples. Validation errors in rewrite-author include a usage hint.
+- **`--old-name` is now optional in `rewrite-author`.** Email-only rewrites work with just `--old-email`/`--new-email`. When both name and email flags are specified, matching uses AND logic (both must match).
+- **`--verbose` output.** `--verbose` now produces detailed output for commit (files, ref, tree, SHA), push (remote URL, hook results, retries), doctor (per-check timing), and rewrite-author (per-commit and per-ref details).
+- **Confirmation prompts for `rewrite-author`.** Prompts before rewriting history and before force-pushing. Skipped with `--force`. `--force` also skips the dirty-tree check.
+- **Confirmation prompt for `doctor --uninstall`.** Prompts before removing safegit from a repository. Skipped with `--force`.
+- **Output improvements.** "Parent-propagation only" replaced with "inherited (ancestors changed)". Singular/plural grammar fixed. Dry-run output includes email mapping when email flags are set.
+- **Annotated tag email rewriting.** Tagger email is now rewritten alongside tagger name when `--old-email`/`--new-email` are specified.
+
 ## 0.7.3
 
 - **Email rewriting.** `safegit rewrite-author` now accepts `--old-email` and `--new-email` flags to rewrite author/committer emails alongside names. Supports email-only rewrites when `--old-name` and `--new-name` are the same.
