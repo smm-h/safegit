@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.1
+
+- **Standard `go install` path.** Moved main package from `cmd/safegit/` to project root. `go install github.com/smm-h/safegit@latest` now works without the `cmd/safegit` suffix.
+
 ## 0.8.0
 
 - **`--flag=value` syntax.** All commands now accept `--flag=value` in addition to `--flag value`. Applies globally (e.g., `--config=/path`) and to commit (`-m="msg"`, `-F=path`, `--branch=name`), push, and rewrite-author flags.
