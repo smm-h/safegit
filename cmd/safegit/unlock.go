@@ -12,6 +12,13 @@ import (
 )
 
 func runUnlock(flags globalFlags, args []string) int {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		commandHelp("unlock <ref> [--force]", `Release a stale ref lock.
+
+Flags:
+  --force, -f          Override a lock held by a live process`)
+	}
+
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

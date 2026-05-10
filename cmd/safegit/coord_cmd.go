@@ -50,6 +50,10 @@ func syncMainIndex(flags globalFlags, op string) {
 }
 
 func runCheckout(flags globalFlags, args []string) int {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		commandHelp("checkout [git checkout args...]", "Checkout a ref (guarded: checks for uncommitted work).")
+	}
+
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -96,6 +100,10 @@ func runCheckout(flags globalFlags, args []string) int {
 }
 
 func runPull(flags globalFlags, args []string) int {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		commandHelp("pull [git pull args...]", "Fetch and merge (guarded, default --ff-only).")
+	}
+
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -174,6 +182,10 @@ func runPull(flags globalFlags, args []string) int {
 }
 
 func runMerge(flags globalFlags, args []string) int {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		commandHelp("merge [git merge args...]", "Merge a branch (guarded: checks for uncommitted work).")
+	}
+
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -216,6 +228,10 @@ func runMerge(flags globalFlags, args []string) int {
 }
 
 func runRebase(flags globalFlags, args []string) int {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		commandHelp("rebase [git rebase args...]", "Rebase onto upstream (guarded: checks for uncommitted work).")
+	}
+
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -256,6 +272,10 @@ func runRebase(flags globalFlags, args []string) int {
 }
 
 func runReset(flags globalFlags, args []string) int {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		commandHelp("reset [git reset args...]", "Reset HEAD (guarded for --hard).")
+	}
+
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -304,6 +324,10 @@ func runReset(flags globalFlags, args []string) int {
 }
 
 func runBisect(flags globalFlags, args []string) int {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		commandHelp("bisect [git bisect args...]", "Bisect (guarded: checks for uncommitted work).")
+	}
+
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -349,8 +373,22 @@ func runBisect(flags globalFlags, args []string) int {
 	return 0
 }
 
+// guardedHelp maps guarded passthrough commands to their help descriptions.
+var guardedHelp = map[string]string{
+	"cherry-pick": "Cherry-pick commits (guarded: checks for uncommitted work).",
+	"revert":      "Revert commits (guarded: checks for uncommitted work).",
+}
+
 // runGuardedPassthrough runs a coordination check, then passes through to git.
 func runGuardedPassthrough(flags globalFlags, gitCmd string, args []string) int {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		desc := guardedHelp[gitCmd]
+		if desc == "" {
+			desc = fmt.Sprintf("Guarded wrapper around git %s.", gitCmd)
+		}
+		commandHelp(fmt.Sprintf("%s [git %s args...]", gitCmd, gitCmd), desc)
+	}
+
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

@@ -17,6 +17,15 @@ func runHook(flags globalFlags, args []string) int {
 		return 2
 	}
 
+	if args[0] == "--help" || args[0] == "-h" {
+		commandHelp("hook <subcommand>", `Manage pre-pre-push hooks.
+
+Subcommands:
+  list                 List installed hooks
+  run [name]           Run hooks (or a specific hook by name)
+  install <path>       Install a hook from a file path`)
+	}
+
 	sub := args[0]
 	subArgs := args[1:]
 

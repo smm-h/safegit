@@ -8,6 +8,15 @@ import (
 )
 
 func runConfig(flags globalFlags, args []string) int {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		commandHelp("config [<key> [<value>]]", `Show or set configuration values.
+
+Usage:
+  safegit config                    Show all config
+  safegit config <key>              Get a value
+  safegit config <key> <value>      Set a value`)
+	}
+
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
