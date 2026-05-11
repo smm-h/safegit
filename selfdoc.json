@@ -1,0 +1,10 @@
+{
+  "language": "go",
+  "source": ["."],
+  "docs": "docs/",
+  "output": "docs/_build/",
+  "deploy": {
+    "provider": "cloudflare-pages",
+    "project": "safegit"
+  }
+}
