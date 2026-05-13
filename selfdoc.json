@@ -3,6 +3,7 @@
   "source": ["."],
   "docs": "docs/",
   "output": "docs/_build/",
+  "base_url": "https://safegit.smmh.dev",
   "deploy": {
     "provider": "cloudflare-pages",
     "project": "safegit"
