@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.0
+
+- **Session trailers.** Commits made inside Claude Code automatically get a `Claude-Code-Session-Id` git trailer for agent session traceability. Read from the `CLAUDE_CODE_SESSION_ID` environment variable. Amending from a different session preserves both session IDs as an audit trail.
+- **Skip-worktree preservation.** `SyncMainIndex` now saves and restores skip-worktree flags across `git read-tree`. Previously, every `safegit commit`, checkout, pull, merge, rebase, reset, bisect, cherry-pick, and revert cleared all skip-worktree flags.
+
 ## 0.8.1
 
 - **Standard `go install` path.** Moved main package from `cmd/safegit/` to project root. `go install github.com/smm-h/safegit@latest` now works without the `cmd/safegit` suffix.
