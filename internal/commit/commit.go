@@ -19,6 +19,7 @@ import (
 	"github.com/smm-h/safegit/internal/oplog"
 	"github.com/smm-h/safegit/internal/repo"
 	"github.com/smm-h/safegit/internal/stage"
+	"github.com/smm-h/safegit/internal/trailer"
 )
 
 // Exit codes for commit-specific errors.
@@ -228,8 +229,8 @@ func (p *Pipeline) tryCommit(
 		}
 	}
 
-	// Step 4: Build commit object
-	commitSHA, err := git.CommitTree(ctx, treeSHA, parentSHA, req.Message)
+	// Step 4: Build commit object (with session trailer if CLAUDE_CODE_SESSION_ID is set)
+	commitSHA, err := git.CommitTree(ctx, treeSHA, parentSHA, trailer.Inject(req.Message))
 	if err != nil {
 		return nil, false, &CommitError{Code: ExitCommitTree, Message: fmt.Sprintf("commit-tree failed: %v", err)}
 	}
