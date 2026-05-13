@@ -179,11 +179,47 @@ func IsTracked(ctx context.Context, filePath string) (bool, error) {
 	return true, nil
 }
 
+// ListSkipWorktreeFiles returns the paths of all files with the skip-worktree
+// flag set in the main index. It parses `git ls-files -v` output, selecting
+// lines that start with "S " (the skip-worktree indicator).
+func ListSkipWorktreeFiles(ctx context.Context) ([]string, error) {
+	out, _, err := Run(ctx, "ls-files", "-v")
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "S ") {
+			files = append(files, line[2:])
+		}
+	}
+	return files, nil
+}
+
 // SyncMainIndex updates the main .git/index to match the given treeish.
 // This makes git status/diff reflect the committed state after safegit commits.
+// Skip-worktree flags are preserved across the read-tree rebuild.
 func SyncMainIndex(ctx context.Context, treeish string) error {
-	_, _, err := Run(ctx, "read-tree", treeish)
-	return err
+	// Collect skip-worktree files before read-tree clears the index.
+	skipFiles, err := ListSkipWorktreeFiles(ctx)
+	if err != nil {
+		// Non-fatal: proceed without preservation.
+		skipFiles = nil
+	}
+
+	_, _, err = Run(ctx, "read-tree", treeish)
+	if err != nil {
+		return err
+	}
+
+	// Restore skip-worktree flags.
+	for _, f := range skipFiles {
+		if _, _, rerr := Run(ctx, "update-index", "--skip-worktree", f); rerr != nil {
+			// Non-fatal: log and continue with remaining files.
+			fmt.Fprintf(os.Stderr, "safegit: warning: failed to restore skip-worktree on %s: %v\n", f, rerr)
+		}
+	}
+	return nil
 }
 
 // RunPassthrough executes a git command with stdin/stdout/stderr wired to
