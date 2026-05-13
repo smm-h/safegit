@@ -1,5 +1,35 @@
 # safegit
 
+Concurrency-safe Git wrapper (Go CLI). When multiple AI agent sessions share one repo, standard git races on `.git/index` -- files leak between commits. safegit isolates each commit via per-invocation temporary indexes and CAS-retry ref updates. Output is standard git commits, transparent to CI and teammates.
+
+## Commands
+
+- `commit -m "msg" -- file1 file2` -- atomic commit (handles tracked and untracked files)
+- `commit --amend --branch <name>` -- cross-branch amend/reword
+- `undo` -- reverse last commit/amend/reword via oplog
+- `push` -- push with pre-pre-push hooks and retry
+- `doctor --fix` -- health checks, garbage collection, repair
+- `config` -- show/set configuration
+- `unlock` -- release stale ref locks
+- `hook` -- manage pre-pre-push hooks
+- `rewrite-author` -- rewrite author/committer across history
+- Guarded passthroughs: `checkout`, `pull`, `merge`, `rebase`, `reset`, `bisect`, `cherry-pick`, `revert`
+
+## Architecture
+
+| Package | Role |
+|---------|------|
+| `internal/commit` | Two-phase commit pipeline, file staging |
+| `internal/stage` | Index staging, hunk spec parsing |
+| `internal/git` | All git plumbing calls (sole interface to git) |
+| `internal/lock` | Per-ref locking with PID liveness checks |
+| `internal/oplog` | Append-only operation log (undo, audit) |
+| `internal/coord` | Coordination guards for tree-mutating commands |
+| `internal/index` | Temporary index file management |
+| `internal/hooks` | Pre-pre-push hook management |
+| `internal/repo` | Configuration and repository state |
+| `internal/test` | Integration tests (build + run safegit as subprocess) |
+
 ## Build and test
 
 - `go build -o safegit .` to build
