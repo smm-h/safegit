@@ -320,6 +320,8 @@ func (p *Pipeline) tryCommit(
 }
 
 // resolveFiles validates and returns absolute paths for all requested files.
+// Relative paths are resolved against the current working directory (not the
+// repo root), matching how users specify files from their shell.
 func (p *Pipeline) resolveFiles(ctx context.Context, repoRoot string, files []string, force bool) ([]string, error) {
 	abs := make([]string, 0, len(files))
 	for _, f := range files {
@@ -327,7 +329,14 @@ func (p *Pipeline) resolveFiles(ctx context.Context, repoRoot string, files []st
 		if filepath.IsAbs(f) {
 			absPath = filepath.Clean(f)
 		} else {
-			absPath = filepath.Join(repoRoot, f)
+			// Resolve relative to cwd, not repo root. When the user runs
+			// safegit from a subdirectory, "file.txt" means "subdir/file.txt"
+			// relative to the repo root.
+			var err error
+			absPath, err = filepath.Abs(f)
+			if err != nil {
+				return nil, fmt.Errorf("resolving path %s: %w", f, err)
+			}
 		}
 
 		// Must be inside the repo
