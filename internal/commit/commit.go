@@ -339,6 +339,13 @@ func (p *Pipeline) resolveFiles(ctx context.Context, repoRoot string, files []st
 			}
 		}
 
+		// Resolve symlinks so absPath matches repoRoot, which comes from
+		// git rev-parse --show-toplevel (git resolves symlinks). On macOS,
+		// /var is a symlink to /private/var, so without this, filepath.Rel
+		// produces a path starting with ".." and the file is rejected as
+		// outside the repository.
+		absPath = resolveSymlinks(absPath)
+
 		// Must be inside the repo
 		rel, err := filepath.Rel(repoRoot, absPath)
 		if err != nil || strings.HasPrefix(rel, "..") {
@@ -370,6 +377,22 @@ func (p *Pipeline) resolveFiles(ctx context.Context, repoRoot string, files []st
 		abs = append(abs, absPath)
 	}
 	return abs, nil
+}
+
+// resolveSymlinks resolves symlinks in a path to produce a canonical absolute
+// path. If the file doesn't exist, it resolves the parent directory instead
+// (for new files or deletions). If the parent doesn't exist either, the path
+// is returned unchanged (it will fail at the os.Lstat check later).
+func resolveSymlinks(absPath string) string {
+	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+		return resolved
+	}
+	// File may not exist yet; resolve parent directory instead
+	dir := filepath.Dir(absPath)
+	if resolvedDir, err := filepath.EvalSymlinks(dir); err == nil {
+		return filepath.Join(resolvedDir, filepath.Base(absPath))
+	}
+	return absPath
 }
 
 // stageFile stages a single file into the tmp index.
