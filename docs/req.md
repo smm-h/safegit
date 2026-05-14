@@ -1,3 +1,7 @@
+---
+description: "Requirements for safegit: multi-agent concurrency safety, lock-free design, standard Git compatibility, CLI and hooks support, and crash recovery."
+---
+
 # safegit Requirements
 
 ## Core: Multi-Agent Safety

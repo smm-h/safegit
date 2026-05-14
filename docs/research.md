@@ -1,3 +1,7 @@
+---
+description: "Research survey of Git alternatives for AI-safe concurrent version control: Jujutsu, GitButler, Sapling, and go-git compared for multi-agent safety."
+---
+
 # Git Alternatives for AI-Safe Concurrent Version Control
 
 The core problem: Git's staging area (`.git/index`) is a single global file per worktree. When multiple AI agent sessions run `git add` / `git commit` concurrently, they race on this shared resource -- one session can accidentally commit another's staged files, or overwrite the index mid-operation. Worktrees are the standard mitigation but add complexity and have their own edge cases (stale lock files, orphan branches).
