@@ -14,6 +14,7 @@ import (
 	"github.com/smm-h/safegit/internal/git"
 	"github.com/smm-h/safegit/internal/repo"
 	"github.com/smm-h/safegit/internal/stage"
+	"github.com/smm-h/strictcli/go/strictcli"
 )
 
 // Set via -ldflags "-X main.version=..." at build time.
@@ -22,10 +23,11 @@ var version = ""
 
 func init() {
 	if version != "" {
+		version = strings.TrimPrefix(version, "v")
 		return
 	}
 	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "(devel)" {
-		version = info.Main.Version
+		version = strings.TrimPrefix(info.Main.Version, "v")
 	} else {
 		version = "dev"
 	}
@@ -35,106 +37,97 @@ func init() {
 type globalFlags struct {
 	quiet      bool
 	verbose    bool
-	noColor    bool
 	dryRun     bool
 	force      bool
 	configPath string
 }
 
 func main() {
-	flags, args := parseGlobalFlags(os.Args[1:])
+	app := strictcli.NewApp("safegit", version, "concurrency-safe git for multi-agent use")
 
-	if len(args) == 0 {
-		printUsage(flags)
-		os.Exit(0)
-	}
+	app.GlobalFlag(strictcli.BoolFlag("quiet", "suppress non-essential output", strictcli.Short("q")))
+	app.GlobalFlag(strictcli.BoolFlag("verbose", "verbose output"))
+	app.GlobalFlag(strictcli.BoolFlag("dry-run", "preview changes without writing", strictcli.Short("n")))
+	app.GlobalFlag(strictcli.BoolFlag("force", "force operation", strictcli.Short("f")))
+	app.GlobalFlag(strictcli.StringFlag("config", "config file path", strictcli.Default("")))
 
-	cmd := args[0]
-	cmdArgs := args[1:]
-	switch cmd {
-	case "commit":
-		runCommit(flags, cmdArgs)
-	case "doctor":
-		runDoctor(flags, cmdArgs)
-	case "version":
-		if len(cmdArgs) > 0 && (cmdArgs[0] == "--help" || cmdArgs[0] == "-h") {
-			commandHelp("version", "Print version and build info.")
+	pt := func(name string, args []string, globals map[string]interface{}) int {
+		gf := globalsToFlags(globals)
+		switch name {
+		case "commit":
+			runCommit(gf, args)
+			return 0
+		case "undo":
+			runUndo(gf, args)
+			return 0
+		case "doctor":
+			runDoctor(gf, args)
+			return 0
+		case "rewrite-author":
+			runRewriteAuthor(gf, args)
+			return 0
+		case "version":
+			runVersion(gf)
+			return 0
+		case "checkout":
+			return runCheckout(gf, args)
+		case "pull":
+			return runPull(gf, args)
+		case "merge":
+			return runMerge(gf, args)
+		case "rebase":
+			return runRebase(gf, args)
+		case "reset":
+			return runReset(gf, args)
+		case "bisect":
+			return runBisect(gf, args)
+		case "push":
+			return runPush(gf, args)
+		case "hook":
+			return runHook(gf, args)
+		case "config":
+			return runConfig(gf, args)
+		case "unlock":
+			return runUnlock(gf, args)
+		case "cherry-pick":
+			return runGuardedPassthrough(gf, "cherry-pick", args)
+		case "revert":
+			return runGuardedPassthrough(gf, "revert", args)
 		}
-		runVersion(flags)
-	case "checkout":
-		os.Exit(runCheckout(flags, cmdArgs))
-	case "pull":
-		os.Exit(runPull(flags, cmdArgs))
-	case "merge":
-		os.Exit(runMerge(flags, cmdArgs))
-	case "rebase":
-		os.Exit(runRebase(flags, cmdArgs))
-	case "reset":
-		os.Exit(runReset(flags, cmdArgs))
-	case "bisect":
-		os.Exit(runBisect(flags, cmdArgs))
-	case "push":
-		os.Exit(runPush(flags, cmdArgs))
-	case "hook":
-		os.Exit(runHook(flags, cmdArgs))
-	case "config":
-		os.Exit(runConfig(flags, cmdArgs))
-	case "unlock":
-		os.Exit(runUnlock(flags, cmdArgs))
-	case "undo":
-		runUndo(flags, cmdArgs)
-	case "rewrite-author":
-		runRewriteAuthor(flags, cmdArgs)
-	case "cherry-pick":
-		os.Exit(runGuardedPassthrough(flags, "cherry-pick", cmdArgs))
-	case "revert":
-		os.Exit(runGuardedPassthrough(flags, "revert", cmdArgs))
-	case "help", "--help", "-h":
-		printUsage(flags)
-	default:
-		unknownCommand(flags, cmd)
-		os.Exit(2)
+		return 1
 	}
+
+	app.Passthrough("commit", "stage and commit files atomically", pt)
+	app.Passthrough("undo", "reverse last commit/amend/reword via oplog", pt)
+	app.Passthrough("checkout", "checkout a ref (guarded)", pt)
+	app.Passthrough("pull", "fetch and merge (guarded, default --ff-only)", pt)
+	app.Passthrough("merge", "merge a branch (guarded)", pt)
+	app.Passthrough("rebase", "rebase onto upstream (guarded)", pt)
+	app.Passthrough("reset", "reset HEAD (guarded for --hard)", pt)
+	app.Passthrough("bisect", "bisect (guarded)", pt)
+	app.Passthrough("push", "push with pre-hooks and retry", pt)
+	app.Passthrough("hook", "manage pre-pre-push hooks", pt)
+	app.Passthrough("config", "show or set configuration values", pt)
+	app.Passthrough("unlock", "release a stale ref lock", pt)
+	app.Passthrough("doctor", "health checks and repair", pt)
+	app.Passthrough("rewrite-author", "rewrite author/committer across history", pt)
+	app.Passthrough("cherry-pick", "cherry-pick commits (guarded)", pt)
+	app.Passthrough("revert", "revert commits (guarded)", pt)
+	app.Passthrough("version", "print version and build info", pt)
+
+	app.Run()
 }
 
-func parseGlobalFlags(args []string) (globalFlags, []string) {
-	var f globalFlags
-	var rest []string
-
-	for i := 0; i < len(args); i++ {
-		// "--" is the file separator for commit; pass it and everything after through.
-		if args[i] == "--" {
-			rest = append(rest, args[i:]...)
-			break
-		}
-		flag, val, hasVal := splitFlagValue(args[i])
-		switch flag {
-		case "--quiet", "-q":
-			f.quiet = true
-		case "--verbose", "-v":
-			f.verbose = true
-		case "--no-color":
-			f.noColor = true
-		case "--dry-run", "-n":
-			f.dryRun = true
-		case "--force", "-f":
-			f.force = true
-		case "--config":
-			if hasVal {
-				f.configPath = val
-			} else if i+1 < len(args) {
-				i++
-				f.configPath = args[i]
-			} else {
-				fmt.Fprintln(os.Stderr, "--config requires an argument")
-				os.Exit(2)
-			}
-		default:
-			// Not a global flag -- pass through (subcommand name or subcommand flag).
-			rest = append(rest, args[i])
-		}
+// globalsToFlags converts the strictcli globals map to the globalFlags struct.
+// strictcli converts flag names like "dry-run" to map keys "dry_run".
+func globalsToFlags(globals map[string]interface{}) globalFlags {
+	return globalFlags{
+		quiet:      globals["quiet"].(bool),
+		verbose:    globals["verbose"].(bool),
+		dryRun:     globals["dry_run"].(bool),
+		force:      globals["force"].(bool),
+		configPath: globals["config"].(string),
 	}
-	return f, rest
 }
 
 func runVersion(flags globalFlags) {
@@ -150,48 +143,6 @@ func gitVersion() string {
 		return "unknown"
 	}
 	return strings.TrimSpace(string(out))
-}
-
-func printUsage(flags globalFlags) {
-	fmt.Print(usageText())
-}
-
-func unknownCommand(flags globalFlags, cmd string) {
-	fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
-	fmt.Fprint(os.Stderr, usageText())
-}
-
-func usageText() string {
-	return `Usage: safegit <command> [options]
-
-Commands:
-  commit      Stage and commit files atomically (--amend to amend/reword)
-  undo        Reverse the last commit/amend/reword using the oplog
-  checkout    Checkout a ref (guarded: checks for uncommitted work)
-  pull        Fetch + merge (guarded, default --ff-only)
-  merge       Merge a branch (guarded)
-  rebase      Rebase onto upstream (guarded)
-  reset       Reset (guarded for --hard)
-  bisect      Bisect (guarded: checks for uncommitted work)
-  push        Push with pre-pre-push hooks and retry logic
-  hook        Manage pre-pre-push hooks (list, run, install)
-  rewrite-author Rewrite author/committer name and email across all history
-  cherry-pick Cherry-pick commits (guarded)
-  revert      Revert commits (guarded)
-  config      Show or set configuration values
-  unlock      Release a stale ref lock (--force to override live holder)
-  doctor      Health checks (--fix to repair, --uninstall to remove)
-  version     Print version and build info
-  help        Print this help
-
-Global flags:
-  --config <path>       Override config.json path
-  --quiet, -q           Suppress non-essential output
-  --verbose, -v         Verbose output
-  --no-color            Disable colored output
-  --dry-run, -n         Show what would be done without doing it
-  --force, -f           Skip safety checks (bypass coordination guard)
-`
 }
 
 // loadConfig loads the safegit config, using the override path if --config was set.
