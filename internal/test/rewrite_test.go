@@ -900,15 +900,9 @@ func TestRewriteAuthorHelpFlag(t *testing.T) {
 		t.Fatalf("rewrite-author --help failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
 
-	// commandHelp prints to stderr
+	// strictcli intercepts --help and shows the command description
 	combined := stdout + stderr
-	if !strings.Contains(combined, "--old-name") {
-		t.Errorf("help output should contain '--old-name', got: %s", combined)
-	}
-	if !strings.Contains(combined, "--new-name") {
-		t.Errorf("help output should contain '--new-name', got: %s", combined)
-	}
-	if !strings.Contains(combined, "--old-email") {
-		t.Errorf("help output should contain '--old-email', got: %s", combined)
+	if !strings.Contains(combined, "rewrite author/committer across history") {
+		t.Errorf("help output should contain command description, got: %s", combined)
 	}
 }
