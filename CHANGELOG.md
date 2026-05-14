@@ -3,6 +3,7 @@
 ## 0.9.1
 
 - **Fix: file paths from subdirectories.** `safegit commit` now resolves relative file paths against the current working directory, not the repo root. Previously, running `safegit commit -m "msg" -- file.txt` from a subdirectory would fail with "does not exist and is not tracked."
+- **Fix: macOS symlink compatibility.** File paths are now resolved through symlinks before validation, fixing "is outside the repository" errors on macOS where `/var` is a symlink to `/private/var`.
 
 ## 0.9.0
 
