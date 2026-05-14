@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1
+
+- **Fix: file paths from subdirectories.** `safegit commit` now resolves relative file paths against the current working directory, not the repo root. Previously, running `safegit commit -m "msg" -- file.txt` from a subdirectory would fail with "does not exist and is not tracked."
+
 ## 0.9.0
 
 - **Session trailers.** Commits made inside Claude Code automatically get a `Claude-Code-Session-Id` git trailer for agent session traceability. Read from the `CLAUDE_CODE_SESSION_ID` environment variable. Amending from a different session preserves both session IDs as an audit trail.
