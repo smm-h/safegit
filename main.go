@@ -87,8 +87,7 @@ func main() {
 		allowEmpty := kwargs["allow_empty"].(bool)
 		trailers := kwargsStrSlice(kwargs["trailer"])
 		files := kwargsStrSlice(kwargs["files"])
-		_ = trailers // Phase 7 will wire trailers into CommitRequest
-		runCommit(gf, messages, messageFile, branch, amend, allowEmpty, files)
+		runCommit(gf, messages, messageFile, branch, amend, allowEmpty, trailers, files)
 		return 0
 	},
 		strictcli.WithFlags(

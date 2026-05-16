@@ -59,6 +59,7 @@ type CommitRequest struct {
 	Files      []string   // plain file paths (whole-file staging)
 	FileSpecs  []FileSpec // files with optional hunk selection (takes priority over Files)
 	Branch     string     // empty = current branch
+	Trailers   []string   // user-provided trailers ("Key: Value" format)
 	AllowEmpty bool
 	Force      bool // skip gitignore check
 	DryRun     bool
@@ -229,8 +230,9 @@ func (p *Pipeline) tryCommit(
 		}
 	}
 
-	// Step 4: Build commit object (with session trailer if CLAUDE_CODE_SESSION_ID is set)
-	commitSHA, err := git.CommitTree(ctx, treeSHA, parentSHA, trailer.Inject(req.Message))
+	// Step 4: Build commit object (with user trailers and session trailer)
+	msg := trailer.AppendCustom(req.Message, req.Trailers)
+	commitSHA, err := git.CommitTree(ctx, treeSHA, parentSHA, trailer.Inject(msg))
 	if err != nil {
 		return nil, false, &CommitError{Code: ExitCommitTree, Message: fmt.Sprintf("commit-tree failed: %v", err)}
 	}

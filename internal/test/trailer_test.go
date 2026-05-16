@@ -100,6 +100,75 @@ func TestSessionTrailer_CommitWithoutEnv(t *testing.T) {
 	}
 }
 
+func TestCustomTrailer_SingleTrailer(t *testing.T) {
+	dir := newRepo(t)
+
+	if err := os.WriteFile(filepath.Join(dir, "custom.txt"), []byte("hello\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runSafegit(t, dir, "commit", "--trailer", "Agent: test123", "-m", "test commit", "--", "custom.txt")
+	if code != 0 {
+		t.Fatalf("commit failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	msg := commitMessage(t, dir, "HEAD")
+	if !strings.Contains(msg, "Agent: test123") {
+		t.Errorf("expected custom trailer in commit message, got:\n%s", msg)
+	}
+}
+
+func TestCustomTrailer_MultipleTrailers(t *testing.T) {
+	dir := newRepo(t)
+
+	if err := os.WriteFile(filepath.Join(dir, "multi.txt"), []byte("hello\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runSafegit(t, dir, "commit", "--trailer", "A: 1", "--trailer", "B: 2", "-m", "test", "--", "multi.txt")
+	if code != 0 {
+		t.Fatalf("commit failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	msg := commitMessage(t, dir, "HEAD")
+	if !strings.Contains(msg, "A: 1") {
+		t.Errorf("expected trailer A: 1 in commit message, got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "B: 2") {
+		t.Errorf("expected trailer B: 2 in commit message, got:\n%s", msg)
+	}
+}
+
+func TestCustomTrailer_WithSessionTrailer(t *testing.T) {
+	dir := newRepo(t)
+
+	if err := os.WriteFile(filepath.Join(dir, "both.txt"), []byte("hello\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Commit with both --trailer and CLAUDE_CODE_SESSION_ID
+	env := []string{"CLAUDE_CODE_SESSION_ID=session-xyz"}
+	stdout, stderr, code := runSafegitEnv(t, dir, env, "commit", "--trailer", "Agent: bot1", "-m", "test", "--", "both.txt")
+	if code != 0 {
+		t.Fatalf("commit failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	msg := commitMessage(t, dir, "HEAD")
+	if !strings.Contains(msg, "Agent: bot1") {
+		t.Errorf("expected custom trailer in commit message, got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "Claude-Code-Session-Id: session-xyz") {
+		t.Errorf("expected session trailer in commit message, got:\n%s", msg)
+	}
+
+	// Custom trailer should come before the session trailer
+	customIdx := strings.Index(msg, "Agent: bot1")
+	sessionIdx := strings.Index(msg, "Claude-Code-Session-Id: session-xyz")
+	if customIdx >= sessionIdx {
+		t.Errorf("expected custom trailer before session trailer, got custom at %d, session at %d in:\n%s", customIdx, sessionIdx, msg)
+	}
+}
+
 func TestSessionTrailer_AmendDifferentSession(t *testing.T) {
 	dir := newRepo(t)
 

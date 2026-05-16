@@ -109,6 +109,61 @@ func TestInject_EmptyEnvVar(t *testing.T) {
 	}
 }
 
+func TestAppendCustom_EmptyTrailers(t *testing.T) {
+	msg := "some commit message"
+	got := AppendCustom(msg, nil)
+	if got != msg {
+		t.Errorf("expected message unchanged for nil trailers, got %q", got)
+	}
+
+	got = AppendCustom(msg, []string{})
+	if got != msg {
+		t.Errorf("expected message unchanged for empty trailers, got %q", got)
+	}
+}
+
+func TestAppendCustom_OneTrailer(t *testing.T) {
+	msg := "add new feature"
+	got := AppendCustom(msg, []string{"Agent: test123"})
+
+	expected := "add new feature\n\nAgent: test123\n"
+	if got != expected {
+		t.Errorf("expected:\n%q\ngot:\n%q", expected, got)
+	}
+}
+
+func TestAppendCustom_MultipleTrailers(t *testing.T) {
+	msg := "add new feature"
+	got := AppendCustom(msg, []string{"Agent: test123", "Review: approved"})
+
+	expected := "add new feature\n\nAgent: test123\nReview: approved\n"
+	if got != expected {
+		t.Errorf("expected:\n%q\ngot:\n%q", expected, got)
+	}
+}
+
+func TestAppendCustom_ExistingTrailerBlock(t *testing.T) {
+	msg := "subject line\n\nSigned-off-by: Test User <test@test.com>\n"
+	got := AppendCustom(msg, []string{"Agent: test123"})
+
+	// Should append directly to the existing trailer block (no extra blank line)
+	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
+	last := lines[len(lines)-1]
+	if last != "Agent: test123" {
+		t.Errorf("expected last line to be custom trailer, got %q", last)
+	}
+
+	secondLast := lines[len(lines)-2]
+	if !strings.HasPrefix(secondLast, "Signed-off-by:") {
+		t.Errorf("expected second-to-last line to be existing trailer, got %q", secondLast)
+	}
+
+	// Should NOT have two blank lines
+	if strings.Contains(got, "\n\n\n") {
+		t.Errorf("should not have double blank lines, got %q", got)
+	}
+}
+
 func TestInject_TrailingNewlines(t *testing.T) {
 	t.Setenv(envVar, "session-123")
 	msg := "subject\n\n\n"

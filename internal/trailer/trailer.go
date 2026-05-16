@@ -48,6 +48,33 @@ func Inject(message string) string {
 	return trimmed + "\n\n" + trailer + "\n"
 }
 
+// AppendCustom appends user-provided trailers to the commit message.
+// Each trailer should be in "Key: Value" format. If trailers is empty,
+// the message is returned unchanged. Follows the same format as Inject:
+// appends to an existing trailer block, or adds a blank line separator first.
+func AppendCustom(message string, trailers []string) string {
+	if len(trailers) == 0 {
+		return message
+	}
+
+	trimmed := strings.TrimRight(message, "\n")
+	lines := strings.Split(trimmed, "\n")
+
+	var b strings.Builder
+	if endsWithTrailerBlock(lines) {
+		b.WriteString(trimmed)
+		b.WriteByte('\n')
+	} else {
+		b.WriteString(trimmed)
+		b.WriteString("\n\n")
+	}
+	for _, t := range trailers {
+		b.WriteString(t)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 // endsWithTrailerBlock returns true if the lines end with a block of
 // trailer-format lines preceded by a blank line (or if the entire message
 // is trailer lines, which happens with single-line messages that look like trailers).

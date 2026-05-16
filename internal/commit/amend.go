@@ -22,6 +22,7 @@ type AmendRequest struct {
 	Message   string     // empty = keep existing message
 	FileSpecs []FileSpec // files to stage into the amended commit
 	Branch    string     // target branch ref; empty = HEAD
+	Trailers  []string   // user-provided trailers ("Key: Value" format)
 	Force     bool       // skip gitignore check
 	DryRun    bool
 }
@@ -161,8 +162,9 @@ func (p *Pipeline) tryAmend(
 	}
 
 	// Create new commit with parent = HEAD^ (replacing HEAD),
-	// injecting session trailer if CLAUDE_CODE_SESSION_ID is set.
-	commitSHA, err := git.CommitTree(ctx, treeSHA, parentSHA, trailer.Inject(message))
+	// injecting user trailers and session trailer.
+	msg := trailer.AppendCustom(message, req.Trailers)
+	commitSHA, err := git.CommitTree(ctx, treeSHA, parentSHA, trailer.Inject(msg))
 	if err != nil {
 		return nil, false, &CommitError{Code: ExitCommitTree, Message: fmt.Sprintf("commit-tree failed: %v", err)}
 	}
@@ -238,9 +240,10 @@ func (p *Pipeline) tryAmend(
 
 // RewordRequest holds inputs for a reword operation.
 type RewordRequest struct {
-	Message string // required
-	Branch  string // target branch ref; empty = HEAD
-	DryRun  bool
+	Message  string   // required
+	Branch   string   // target branch ref; empty = HEAD
+	Trailers []string // user-provided trailers ("Key: Value" format)
+	DryRun   bool
 }
 
 // RewordResult is the JSON-serializable output of a successful reword.
@@ -322,7 +325,8 @@ func (p *Pipeline) tryReword(
 		parentSHA = ""
 	}
 
-	commitSHA, err := git.CommitTree(ctx, treeSHA, parentSHA, trailer.Inject(req.Message))
+	msg := trailer.AppendCustom(req.Message, req.Trailers)
+	commitSHA, err := git.CommitTree(ctx, treeSHA, parentSHA, trailer.Inject(msg))
 	if err != nil {
 		return nil, false, &CommitError{Code: ExitCommitTree, Message: fmt.Sprintf("commit-tree failed: %v", err)}
 	}

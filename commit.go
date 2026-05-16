@@ -10,7 +10,7 @@ import (
 	"github.com/smm-h/safegit/internal/repo"
 )
 
-func runCommit(flags globalFlags, messages []string, messageFile string, branch string, amend bool, allowEmpty bool, files []string) {
+func runCommit(flags globalFlags, messages []string, messageFile string, branch string, amend bool, allowEmpty bool, trailers []string, files []string) {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -31,7 +31,7 @@ func runCommit(flags globalFlags, messages []string, messageFile string, branch 
 			die(flags, "commit", 2, "-F cannot be used with --amend")
 		}
 
-		runCommitAmend(flags, gitDir, messages, branch, files)
+		runCommitAmend(flags, gitDir, messages, branch, trailers, files)
 		return
 	}
 
@@ -77,6 +77,7 @@ func runCommit(flags globalFlags, messages []string, messageFile string, branch 
 		Message:    msg,
 		FileSpecs:  fileSpecs,
 		Branch:     branch,
+		Trailers:   trailers,
 		AllowEmpty: allowEmpty,
 		Force:      flags.force,
 		DryRun:     flags.dryRun,
@@ -108,7 +109,7 @@ func runCommit(flags globalFlags, messages []string, messageFile string, branch 
 }
 
 // runCommitAmend handles the --amend path: amend with files, or reword without.
-func runCommitAmend(flags globalFlags, gitDir string, messages []string, branch string, files []string) {
+func runCommitAmend(flags globalFlags, gitDir string, messages []string, branch string, trailers []string, files []string) {
 	sgDir := repo.SafegitDir(gitDir)
 	cfg, err := loadConfig(flags, gitDir)
 	if err != nil {
@@ -140,6 +141,7 @@ func runCommitAmend(flags globalFlags, gitDir string, messages []string, branch 
 			Message:   msg,
 			FileSpecs: fileSpecs,
 			Branch:    branch,
+			Trailers:  trailers,
 			Force:     flags.force,
 			DryRun:    flags.dryRun,
 		})
@@ -188,9 +190,10 @@ func runCommitAmend(flags globalFlags, gitDir string, messages []string, branch 
 		}
 
 		result, err := p.Reword(context.Background(), commit.RewordRequest{
-			Message: msg,
-			Branch:  branch,
-			DryRun:  flags.dryRun,
+			Message:  msg,
+			Branch:   branch,
+			Trailers: trailers,
+			DryRun:   flags.dryRun,
 		})
 		if err != nil {
 			code := 1
