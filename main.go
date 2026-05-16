@@ -54,9 +54,6 @@ func main() {
 	pt := func(name string, args []string, globals map[string]interface{}) int {
 		gf := globalsToFlags(globals)
 		switch name {
-		case "commit":
-			runCommit(gf, args)
-			return 0
 		case "checkout":
 			return runCheckout(gf, args)
 		case "merge":
@@ -75,7 +72,37 @@ func main() {
 		return 1
 	}
 
-	app.Passthrough("commit", "stage and commit files atomically", pt)
+	app.Command("commit", "stage and commit files atomically", func(kwargs map[string]interface{}) int {
+		gf := globalsToFlags(kwargs)
+		messages := kwargsStrSlice(kwargs["m"])
+		var messageFile string
+		if v := kwargs["F"]; v != nil {
+			messageFile = v.(string)
+		}
+		var branch string
+		if v := kwargs["branch"]; v != nil {
+			branch = v.(string)
+		}
+		amend := kwargs["amend"].(bool)
+		allowEmpty := kwargs["allow_empty"].(bool)
+		trailers := kwargsStrSlice(kwargs["trailer"])
+		files := kwargsStrSlice(kwargs["files"])
+		_ = trailers // Phase 7 will wire trailers into CommitRequest
+		runCommit(gf, messages, messageFile, branch, amend, allowEmpty, files)
+		return 0
+	},
+		strictcli.WithFlags(
+			strictcli.StringFlag("m", "commit message (repeatable)", strictcli.Short("m"), strictcli.Repeatable()),
+			strictcli.StringFlag("F", "read commit message from file", strictcli.Short("F"), strictcli.Default(nil)),
+			strictcli.StringFlag("branch", "commit to a different branch", strictcli.Default(nil)),
+			strictcli.BoolFlag("amend", "amend the current HEAD commit"),
+			strictcli.BoolFlag("allow-empty", "allow commits with no file changes"),
+			strictcli.StringFlag("trailer", "add a trailer (repeatable)", strictcli.Repeatable()),
+		),
+		strictcli.WithArgs(
+			strictcli.NewArg("files", "files to commit (supports hunk specs: file.go:1,3)", strictcli.ArgRequired(false), strictcli.Variadic()),
+		),
+	)
 	app.Passthrough("checkout", "checkout a ref (guarded)", pt)
 	app.Passthrough("merge", "merge a branch (guarded)", pt)
 	app.Passthrough("rebase", "rebase onto upstream (guarded)", pt)

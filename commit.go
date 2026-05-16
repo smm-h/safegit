@@ -10,76 +10,16 @@ import (
 	"github.com/smm-h/safegit/internal/repo"
 )
 
-func runCommit(flags globalFlags, args []string) {
+func runCommit(flags globalFlags, messages []string, messageFile string, branch string, amend bool, allowEmpty bool, files []string) {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(4)
 	}
 
-	// Parse commit-specific flags
-	var messages []string
-	var messageFile string
-	var branch string
-	var allowEmpty bool
-	var amend bool
-	var files []string
-	pastSeparator := false
-
-	for i := 0; i < len(args); i++ {
-		if pastSeparator {
-			files = append(files, args[i])
-			continue
-		}
-		flag, val, hasVal := splitFlagValue(args[i])
-		switch flag {
-		case "--help", "-h":
-			commandHelp("commit [flags] -- <file>...", `Stage and commit files atomically with CAS retry.
-
-Flags:
-  -m <message>         Commit message (required)
-  -F <path>            Read commit message from file
-  --branch <name>      Commit to a different branch
-  --amend              Amend the current HEAD commit
-  --allow-empty        Allow commits with no file changes
-
-Files can include hunk specs: file.go:1,3 (hunks 1 and 3 only).`)
-		case "--":
-			pastSeparator = true
-		case "-m":
-			if hasVal {
-				messages = append(messages, val)
-			} else if i+1 >= len(args) {
-				die(flags, "commit", 2, "-m requires an argument")
-			} else {
-				i++
-				messages = append(messages, args[i])
-			}
-		case "-F":
-			if hasVal {
-				messageFile = val
-			} else if i+1 >= len(args) {
-				die(flags, "commit", 2, "-F requires an argument")
-			} else {
-				i++
-				messageFile = args[i]
-			}
-		case "--branch":
-			if hasVal {
-				branch = val
-			} else if i+1 >= len(args) {
-				die(flags, "commit", 2, "--branch requires an argument")
-			} else {
-				i++
-				branch = args[i]
-			}
-		case "--allow-empty":
-			allowEmpty = true
-		case "--amend":
-			amend = true
-		default:
-			die(flags, "commit", 2, fmt.Sprintf("unknown flag: %s", args[i]))
-		}
+	// Validate: -m and -F are mutually exclusive
+	if len(messages) > 0 && messageFile != "" {
+		die(flags, "commit", 2, "-m and -F are mutually exclusive")
 	}
 
 	if amend {
