@@ -21,27 +21,9 @@ type checkResult struct {
 	Detail string
 }
 
-func runDoctor(flags globalFlags, args []string) {
-	// Parse --fix and --uninstall from subcommand args.
-	fix := false
-	uninstall := false
-	for _, a := range args {
-		switch a {
-		case "--help", "-h":
-			commandHelp("doctor [flags]", `Run health checks on the safegit installation.
-
-Flags:
-  --fix                Repair issues (garbage-collect orphan dirs, rotate oplog)
-  --uninstall          Remove safegit from this repository`)
-		case "--fix":
-			fix = true
-		case "--uninstall":
-			uninstall = true
-		default:
-			fmt.Fprintf(os.Stderr, "unknown doctor flag: %s\n", a)
-			os.Exit(2)
-		}
-	}
+func runDoctor(flags globalFlags, kwargs map[string]interface{}) {
+	fix := kwargs["fix"].(bool)
+	uninstall := kwargs["uninstall"].(bool)
 
 	gitDir := mustGitDir(flags)
 

@@ -57,12 +57,6 @@ func main() {
 		case "commit":
 			runCommit(gf, args)
 			return 0
-		case "doctor":
-			runDoctor(gf, args)
-			return 0
-		case "rewrite-author":
-			runRewriteAuthor(gf, args)
-			return 0
 		case "checkout":
 			return runCheckout(gf, args)
 		case "pull":
@@ -130,8 +124,33 @@ func main() {
 	},
 		strictcli.WithArgs(strictcli.NewArg("path", "path to hook script")),
 	)
-	app.Passthrough("doctor", "health checks and repair", pt)
-	app.Passthrough("rewrite-author", "rewrite author/committer across history", pt)
+	app.Command("doctor", "health checks and repair", func(kwargs map[string]interface{}) int {
+		runDoctor(globalsToFlags(kwargs), kwargs)
+		return 0
+	},
+		strictcli.WithMutex(strictcli.MutexGroup{
+			Flags: []strictcli.Flag{
+				strictcli.BoolFlag("diagnose", "run health checks without fixing"),
+				strictcli.BoolFlag("fix", "run health checks and fix issues"),
+				strictcli.BoolFlag("uninstall", "remove safegit from this repository"),
+			},
+		}),
+	)
+	app.Command("rewrite-author", "rewrite author/committer across history", func(kwargs map[string]interface{}) int {
+		return runRewriteAuthor(globalsToFlags(kwargs), kwargs)
+	},
+		strictcli.WithFlags(
+			strictcli.StringFlag("old-name", "current author/committer name to match", strictcli.Default(nil)),
+			strictcli.StringFlag("new-name", "replacement name", strictcli.Default(nil)),
+			strictcli.StringFlag("old-email", "current author/committer email to match", strictcli.Default(nil)),
+			strictcli.StringFlag("new-email", "replacement email", strictcli.Default(nil)),
+			strictcli.BoolFlag("push", "force-push after rewriting"),
+		),
+		strictcli.WithDependencies(
+			strictcli.CoRequired{Flags: []string{"old-name", "new-name"}},
+			strictcli.CoRequired{Flags: []string{"old-email", "new-email"}},
+		),
+	)
 	app.Passthrough("cherry-pick", "cherry-pick commits (guarded)", pt)
 	app.Passthrough("revert", "revert commits (guarded)", pt)
 	app.Command("undo", "reverse last commit/amend/reword via oplog", func(kwargs map[string]interface{}) int {

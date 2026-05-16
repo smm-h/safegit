@@ -160,8 +160,8 @@ func TestRawGitBypassDetection(t *testing.T) {
 		t.Fatalf("raw git commit failed: %v\n%s", err, out)
 	}
 
-	// Run safegit doctor
-	stdout, stderr, code := runSafegit(t, dir, "doctor")
+	// Run safegit doctor --diagnose
+	stdout, stderr, code := runSafegit(t, dir, "doctor", "--diagnose")
 	if code != 0 {
 		t.Fatalf("doctor failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}

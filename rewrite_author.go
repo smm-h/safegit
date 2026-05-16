@@ -12,90 +12,31 @@ import (
 	"github.com/smm-h/safegit/internal/repo"
 )
 
-func runRewriteAuthor(flags globalFlags, args []string) {
+func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 	const cmd = "rewrite-author"
 
-	// Parse command-specific flags
+	// Extract optional string flags (nil when not provided).
 	var oldName, newName, oldEmail, newEmail string
-	push := false
-
-	for i := 0; i < len(args); i++ {
-		flag, val, hasVal := splitFlagValue(args[i])
-		switch flag {
-		case "--help", "-h":
-			commandHelp("rewrite-author [flags]", `Rewrite author/committer identity across all repository history.
-
-Flags:
-  --old-name <name>    Author/committer name to match (required unless --old-email is used)
-  --new-name <name>    Replacement name (required when --old-name is used)
-  --old-email <email>  Author/committer email to match
-  --new-email <email>  Replacement email (required when --old-email is used)
-  --push               Force-push all branches and tags after rewriting
-
-At least one of --old-name or --old-email is required.
-When both --old-name and --old-email are specified, both must match (AND logic).
-
-Global flags (--dry-run, --force, --verbose) are also supported.
-
-Examples:
-  safegit rewrite-author --old-name mhxv --new-name smm-h
-  safegit rewrite-author --old-email old@work.com --new-email new@personal.com
-  safegit rewrite-author --old-name "John" --new-name "Jane" --old-email a@b.com --new-email c@d.com --push
-  safegit --dry-run rewrite-author --old-name mhxv --new-name smm-h`)
-		case "--old-name":
-			if hasVal {
-				oldName = val
-			} else if i+1 >= len(args) {
-				die(flags, cmd, 2, "--old-name requires a value")
-			} else {
-				i++
-				oldName = args[i]
-			}
-		case "--new-name":
-			if hasVal {
-				newName = val
-			} else if i+1 >= len(args) {
-				die(flags, cmd, 2, "--new-name requires a value")
-			} else {
-				i++
-				newName = args[i]
-			}
-		case "--old-email":
-			if hasVal {
-				oldEmail = val
-			} else if i+1 >= len(args) {
-				die(flags, cmd, 2, "--old-email requires a value")
-			} else {
-				i++
-				oldEmail = args[i]
-			}
-		case "--new-email":
-			if hasVal {
-				newEmail = val
-			} else if i+1 >= len(args) {
-				die(flags, cmd, 2, "--new-email requires a value")
-			} else {
-				i++
-				newEmail = args[i]
-			}
-		case "--push":
-			push = true
-		default:
-			die(flags, cmd, 2, fmt.Sprintf("unknown argument: %s", args[i]))
-		}
+	if v := kwargs["old_name"]; v != nil {
+		oldName = v.(string)
 	}
+	if v := kwargs["new_name"]; v != nil {
+		newName = v.(string)
+	}
+	if v := kwargs["old_email"]; v != nil {
+		oldEmail = v.(string)
+	}
+	if v := kwargs["new_email"]; v != nil {
+		newEmail = v.(string)
+	}
+	push := kwargs["push"].(bool)
 
+	// At least one pair must be provided (CoRequired ensures pairs, but both
+	// pairs could be absent).
 	if oldName == "" && oldEmail == "" {
+		fmt.Fprintf(os.Stderr, "error: at least one of --old-name or --old-email is required\n")
 		fmt.Fprintf(os.Stderr, "Run 'safegit rewrite-author --help' for usage.\n")
-		die(flags, cmd, 2, "at least one of --old-name or --old-email is required")
-	}
-	if (oldName == "") != (newName == "") {
-		fmt.Fprintf(os.Stderr, "Run 'safegit rewrite-author --help' for usage.\n")
-		die(flags, cmd, 2, "--old-name and --new-name must be used together")
-	}
-	if (oldEmail == "") != (newEmail == "") {
-		fmt.Fprintf(os.Stderr, "Run 'safegit rewrite-author --help' for usage.\n")
-		die(flags, cmd, 2, "--old-email and --new-email must be used together")
+		return 2
 	}
 
 	gitDir := mustGitDir(flags)
@@ -165,7 +106,7 @@ Examples:
 		if len(affected) > 5 {
 			fmt.Printf("  ... and %d more\n", len(affected)-5)
 		}
-		return
+		return 0
 	}
 
 	// Confirmation prompt (skipped with --force)
@@ -182,7 +123,7 @@ Examples:
 		fmt.Scanln(&answer)
 		if answer != "y" && answer != "Y" {
 			fmt.Println("Aborted.")
-			return
+			return 0
 		}
 	}
 
@@ -284,6 +225,7 @@ Examples:
 		}
 		fmt.Println("Push complete.")
 	}
+	return 0
 }
 
 // rewriteSnapshot captures the state of a repository's history for
