@@ -11,37 +11,6 @@ import (
 	"github.com/smm-h/safegit/internal/repo"
 )
 
-func runHook(flags globalFlags, args []string) int {
-	if len(args) == 0 {
-		hookUsage(flags)
-		return 2
-	}
-
-	if args[0] == "--help" || args[0] == "-h" {
-		commandHelp("hook <subcommand>", `Manage pre-pre-push hooks.
-
-Subcommands:
-  list                 List installed hooks
-  run [name]           Run hooks (or a specific hook by name)
-  install <path>       Install a hook from a file path`)
-	}
-
-	sub := args[0]
-	subArgs := args[1:]
-
-	switch sub {
-	case "list":
-		return hookList(flags)
-	case "run":
-		return hookRun(flags, subArgs)
-	case "install":
-		return hookInstall(flags, subArgs)
-	default:
-		hookUsage(flags)
-		return 2
-	}
-}
-
 // hookList discovers and lists all pre-pre-push hooks.
 func hookList(flags globalFlags) int {
 	gitDir := mustGitDir(flags)
@@ -65,7 +34,7 @@ func hookList(flags globalFlags) int {
 }
 
 // hookRun runs a specific hook by name (or all if no name given).
-func hookRun(flags globalFlags, args []string) int {
+func hookRun(flags globalFlags, name string) int {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -98,9 +67,8 @@ func hookRun(flags globalFlags, args []string) int {
 		fmt.Sprintf("SAFEGIT_HOOK_TIMEOUT_S=%d", timeoutSec),
 	}
 
-	if len(args) > 0 {
+	if name != "" {
 		// Run a specific hook by name
-		name := args[0]
 		discovered, dErr := hooks.Discover(gitDir)
 		if dErr != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", dErr)
@@ -165,14 +133,8 @@ func hookRun(flags globalFlags, args []string) int {
 }
 
 // hookInstall copies a hook file to .git/hooks/ and makes it executable.
-func hookInstall(flags globalFlags, args []string) int {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: safegit hook install <path>")
-		return 2
-	}
-
+func hookInstall(flags globalFlags, srcPath string) int {
 	gitDir := mustGitDir(flags)
-	srcPath := args[0]
 
 	if err := hooks.Install(gitDir, srcPath); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -201,15 +163,4 @@ func synthesizeHookStdin(ctx context.Context) ([]byte, error) {
 	nullSHA := "0000000000000000000000000000000000000000"
 	line := fmt.Sprintf("%s %s %s %s\n", headRef, localSHA, headRef, nullSHA)
 	return []byte(line), nil
-}
-
-func hookUsage(flags globalFlags) {
-	msg := `usage: safegit hook <subcommand>
-
-Subcommands:
-  list             List discovered pre-pre-push hooks
-  run [<name>]     Run a specific hook (or all hooks)
-  install <path>   Copy a hook file to .git/hooks/, chmod +x
-`
-	fmt.Print(msg)
 }

@@ -77,10 +77,6 @@ func main() {
 			return runBisect(gf, args)
 		case "push":
 			return runPush(gf, args)
-		case "hook":
-			return runHook(gf, args)
-		case "config":
-			return runConfig(gf, args)
 		case "cherry-pick":
 			return runGuardedPassthrough(gf, "cherry-pick", args)
 		case "revert":
@@ -97,8 +93,43 @@ func main() {
 	app.Passthrough("reset", "reset HEAD (guarded for --hard)", pt)
 	app.Passthrough("bisect", "bisect (guarded)", pt)
 	app.Passthrough("push", "push with pre-hooks and retry", pt)
-	app.Passthrough("hook", "manage pre-pre-push hooks", pt)
-	app.Passthrough("config", "show or set configuration values", pt)
+	cg := app.Group("config", "show or set configuration values")
+	cg.Command("show", "show all configuration", func(kwargs map[string]interface{}) int {
+		return runConfigShow(globalsToFlags(kwargs))
+	})
+	cg.Command("get", "get a configuration value", func(kwargs map[string]interface{}) int {
+		key := kwargs["key"].(string)
+		return runConfigGet(globalsToFlags(kwargs), key)
+	},
+		strictcli.WithArgs(strictcli.NewArg("key", "configuration key")),
+	)
+	cg.Command("set", "set a configuration value", func(kwargs map[string]interface{}) int {
+		key := kwargs["key"].(string)
+		value := kwargs["value"].(string)
+		return runConfigSet(globalsToFlags(kwargs), key, value)
+	},
+		strictcli.WithArgs(strictcli.NewArg("key", "configuration key"), strictcli.NewArg("value", "configuration value")),
+	)
+
+	hg := app.Group("hook", "manage pre-pre-push hooks")
+	hg.Command("list", "list installed hooks", func(kwargs map[string]interface{}) int {
+		return hookList(globalsToFlags(kwargs))
+	})
+	hg.Command("run", "run hooks", func(kwargs map[string]interface{}) int {
+		var name string
+		if v := kwargs["name"]; v != nil {
+			name = v.(string)
+		}
+		return hookRun(globalsToFlags(kwargs), name)
+	},
+		strictcli.WithArgs(strictcli.NewArg("name", "hook name to run", strictcli.ArgRequired(false))),
+	)
+	hg.Command("install", "install a hook from a file", func(kwargs map[string]interface{}) int {
+		path := kwargs["path"].(string)
+		return hookInstall(globalsToFlags(kwargs), path)
+	},
+		strictcli.WithArgs(strictcli.NewArg("path", "path to hook script")),
+	)
 	app.Passthrough("doctor", "health checks and repair", pt)
 	app.Passthrough("rewrite-author", "rewrite author/committer across history", pt)
 	app.Passthrough("cherry-pick", "cherry-pick commits (guarded)", pt)
