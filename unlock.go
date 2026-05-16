@@ -11,26 +11,12 @@ import (
 	"github.com/smm-h/safegit/internal/repo"
 )
 
-func runUnlock(flags globalFlags, args []string) int {
-	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
-		commandHelp("unlock <ref> [--force]", `Release a stale ref lock.
-
-Flags:
-  --force, -f          Override a lock held by a live process`)
-	}
-
+func runUnlock(flags globalFlags, ref string) int {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 4
 	}
-
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: safegit unlock <ref> [--force]")
-		return 2
-	}
-
-	ref := args[0]
 	if !strings.HasPrefix(ref, "refs/") {
 		ref = "refs/heads/" + ref
 	}

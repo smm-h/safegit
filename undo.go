@@ -22,17 +22,8 @@ var undoableOps = map[string]string{
 	"reword": "oldSha",
 }
 
-func runUndo(flags globalFlags, args []string) {
+func runUndo(flags globalFlags) {
 	const cmd = "undo"
-
-	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
-		commandHelp("undo", "Reverse the last commit, amend, or reword using the oplog.")
-	}
-
-	// No sub-flags beyond global flags
-	if len(args) > 0 {
-		die(flags, cmd, 2, fmt.Sprintf("unknown argument: %s", args[0]))
-	}
 
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {

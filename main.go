@@ -57,9 +57,6 @@ func main() {
 		case "commit":
 			runCommit(gf, args)
 			return 0
-		case "undo":
-			runUndo(gf, args)
-			return 0
 		case "doctor":
 			runDoctor(gf, args)
 			return 0
@@ -84,8 +81,6 @@ func main() {
 			return runHook(gf, args)
 		case "config":
 			return runConfig(gf, args)
-		case "unlock":
-			return runUnlock(gf, args)
 		case "cherry-pick":
 			return runGuardedPassthrough(gf, "cherry-pick", args)
 		case "revert":
@@ -95,7 +90,6 @@ func main() {
 	}
 
 	app.Passthrough("commit", "stage and commit files atomically", pt)
-	app.Passthrough("undo", "reverse last commit/amend/reword via oplog", pt)
 	app.Passthrough("checkout", "checkout a ref (guarded)", pt)
 	app.Passthrough("pull", "fetch and merge (guarded, default --ff-only)", pt)
 	app.Passthrough("merge", "merge a branch (guarded)", pt)
@@ -105,11 +99,20 @@ func main() {
 	app.Passthrough("push", "push with pre-hooks and retry", pt)
 	app.Passthrough("hook", "manage pre-pre-push hooks", pt)
 	app.Passthrough("config", "show or set configuration values", pt)
-	app.Passthrough("unlock", "release a stale ref lock", pt)
 	app.Passthrough("doctor", "health checks and repair", pt)
 	app.Passthrough("rewrite-author", "rewrite author/committer across history", pt)
 	app.Passthrough("cherry-pick", "cherry-pick commits (guarded)", pt)
 	app.Passthrough("revert", "revert commits (guarded)", pt)
+	app.Command("undo", "reverse last commit/amend/reword via oplog", func(kwargs map[string]interface{}) int {
+		runUndo(globalsToFlags(kwargs))
+		return 0
+	})
+	app.Command("unlock", "release a stale ref lock", func(kwargs map[string]interface{}) int {
+		ref := kwargs["ref"].(string)
+		return runUnlock(globalsToFlags(kwargs), ref)
+	},
+		strictcli.WithArgs(strictcli.NewArg("ref", "the ref name to unlock")),
+	)
 	app.Command("version", "print version and build info", func(kwargs map[string]interface{}) int {
 		runVersion(globalsToFlags(kwargs))
 		return 0
