@@ -220,7 +220,7 @@ func TestHookTimeout(t *testing.T) {
 	}
 
 	// Set a very short timeout (2 seconds)
-	runSafegit(t, dir, "config", "hooks.preprepush.timeoutSeconds", "2")
+	runSafegit(t, dir, "config", "set", "hooks.preprepush.timeoutSeconds", "2")
 
 	// Set up a bare remote so push has something to target
 	remoteDir := t.TempDir()
@@ -659,7 +659,7 @@ func TestConfigOverride(t *testing.T) {
 	}
 
 	// Read the config via --config flag
-	stdout, _, code := runSafegit(t, dir, "--config", customCfg, "config", "commit.casMaxAttempts")
+	stdout, _, code := runSafegit(t, dir, "--config", customCfg, "config", "get", "commit.casMaxAttempts")
 	if code != 0 {
 		t.Fatalf("config read failed (code %d)", code)
 	}
@@ -1077,7 +1077,7 @@ func TestWorktree_LockSharing(t *testing.T) {
 
 	// Bump CAS attempts for the worktree too
 	// (safegit config auto-initializes .git/safegit/ on first run)
-	runSafegit(t, wtDir, "config", "commit.casMaxAttempts", "50")
+	runSafegit(t, wtDir, "config", "set", "commit.casMaxAttempts", "50")
 
 	// Create a file in the main repo and commit to main
 	if err := os.WriteFile(filepath.Join(dir, "main_file.txt"), []byte("from main\n"), 0644); err != nil {

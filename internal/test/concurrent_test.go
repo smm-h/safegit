@@ -85,7 +85,7 @@ func newRepo(t *testing.T) string {
 	// Bump CAS max attempts high for concurrent tests to avoid exhaustion.
 	// (safegit config auto-initializes .git/safegit/ on first run)
 	// 200 is enough for TestStress100 (100 parallel commits) with headroom.
-	runSafegit(t, dir, "config", "commit.casMaxAttempts", "200")
+	runSafegit(t, dir, "config", "set", "commit.casMaxAttempts", "200")
 
 	return dir
 }

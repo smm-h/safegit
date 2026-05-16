@@ -512,7 +512,7 @@ func TestRewriteAuthorRootCommit(t *testing.T) {
 	makeCommits(t, dir, "oldname", "old@test.com", 3, "root")
 
 	// Initialize safegit in the repo (rewrite-author requires it)
-	runSafegit(t, dir, "config", "commit.casMaxAttempts", "200")
+	runSafegit(t, dir, "config", "set", "commit.casMaxAttempts", "200")
 
 	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
 	if code != 0 {
