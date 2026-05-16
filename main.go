@@ -365,16 +365,6 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-// splitFlagValue splits a flag argument at the first '=' sign. For example,
-// "--config=/path" returns ("--config", "/path", true). If there is no '='
-// or the argument doesn't start with '-', it returns (arg, "", false).
-func splitFlagValue(arg string) (flag, value string, hasValue bool) {
-	if idx := strings.Index(arg, "="); idx >= 0 && strings.HasPrefix(arg, "-") {
-		return arg[:idx], arg[idx+1:], true
-	}
-	return arg, "", false
-}
-
 // isHunkSpec returns true if s looks like a hunk specifier (digits, commas, dashes only).
 func isHunkSpec(s string) bool {
 	if s == "" {
