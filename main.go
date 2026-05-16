@@ -66,9 +66,6 @@ func main() {
 		case "rewrite-author":
 			runRewriteAuthor(gf, args)
 			return 0
-		case "version":
-			runVersion(gf)
-			return 0
 		case "checkout":
 			return runCheckout(gf, args)
 		case "pull":
@@ -113,9 +110,26 @@ func main() {
 	app.Passthrough("rewrite-author", "rewrite author/committer across history", pt)
 	app.Passthrough("cherry-pick", "cherry-pick commits (guarded)", pt)
 	app.Passthrough("revert", "revert commits (guarded)", pt)
-	app.Passthrough("version", "print version and build info", pt)
+	app.Command("version", "print version and build info", func(kwargs map[string]interface{}) int {
+		runVersion(globalsToFlags(kwargs))
+		return 0
+	})
 
 	app.Run()
+}
+
+// kwargsStrSlice converts a []interface{} value (from repeatable flags or
+// variadic args) to []string. Returns nil if v is nil.
+func kwargsStrSlice(v interface{}) []string {
+	if v == nil {
+		return nil
+	}
+	raw := v.([]interface{})
+	out := make([]string, len(raw))
+	for i, elem := range raw {
+		out[i] = elem.(string)
+	}
+	return out
 }
 
 // globalsToFlags converts the strictcli globals map to the globalFlags struct.
