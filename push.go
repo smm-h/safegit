@@ -28,7 +28,7 @@ type pushRefInfo struct {
 	RemoteSHA string
 }
 
-func runPush(flags globalFlags, args []string) int {
+func runPush(flags globalFlags, noPrePrePush bool, forcePush bool, remote string, refspecs []string) int {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		die(flags, "push",1, err.Error())
@@ -41,38 +41,7 @@ func runPush(flags globalFlags, args []string) int {
 		return 1
 	}
 
-	// Parse push-specific flags
-	noPrePrePush := false
-	forceFlag := flags.force
-	var positional []string
-
-	for i := 0; i < len(args); i++ {
-		flag, _, _ := splitFlagValue(args[i])
-		switch flag {
-		case "--help", "-h":
-			commandHelp("push [flags] [remote] [refspec...]", `Push to remote with pre-pre-push hooks and retry logic.
-
-Flags:
-  --force, -f          Force-push
-  --no-pre-pre-push    Skip pre-pre-push hooks`)
-		case "--no-pre-pre-push":
-			noPrePrePush = true
-		case "--force", "-f":
-			forceFlag = true
-		default:
-			positional = append(positional, args[i])
-		}
-	}
-
-	// Resolve remote and refspecs
-	remote := "origin"
-	var refspecs []string
-	if len(positional) >= 1 {
-		remote = positional[0]
-	}
-	if len(positional) >= 2 {
-		refspecs = positional[1:]
-	}
+	forceFlag := forcePush
 
 	// Resolve the remote URL
 	ctx := context.Background()

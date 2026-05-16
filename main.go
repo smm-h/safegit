@@ -59,8 +59,6 @@ func main() {
 			return 0
 		case "checkout":
 			return runCheckout(gf, args)
-		case "pull":
-			return runPull(gf, args)
 		case "merge":
 			return runMerge(gf, args)
 		case "rebase":
@@ -69,8 +67,6 @@ func main() {
 			return runReset(gf, args)
 		case "bisect":
 			return runBisect(gf, args)
-		case "push":
-			return runPush(gf, args)
 		case "cherry-pick":
 			return runGuardedPassthrough(gf, "cherry-pick", args)
 		case "revert":
@@ -81,12 +77,63 @@ func main() {
 
 	app.Passthrough("commit", "stage and commit files atomically", pt)
 	app.Passthrough("checkout", "checkout a ref (guarded)", pt)
-	app.Passthrough("pull", "fetch and merge (guarded, default --ff-only)", pt)
 	app.Passthrough("merge", "merge a branch (guarded)", pt)
 	app.Passthrough("rebase", "rebase onto upstream (guarded)", pt)
 	app.Passthrough("reset", "reset HEAD (guarded for --hard)", pt)
 	app.Passthrough("bisect", "bisect (guarded)", pt)
-	app.Passthrough("push", "push with pre-hooks and retry", pt)
+	app.Command("push", "push with pre-hooks and retry", func(kwargs map[string]interface{}) int {
+		gf := globalsToFlags(kwargs)
+		noPrePrePush := kwargs["no_pre_pre_push"].(bool)
+		forcePush := kwargs["force_push"].(bool) || kwargs["force"].(bool)
+		remote := "origin"
+		if v := kwargs["remote"]; v != nil {
+			remote = v.(string)
+		}
+		refspecs := kwargsStrSlice(kwargs["refspecs"])
+		return runPush(gf, noPrePrePush, forcePush, remote, refspecs)
+	},
+		strictcli.WithFlags(
+			strictcli.BoolFlag("no-pre-pre-push", "skip pre-pre-push hooks"),
+			strictcli.BoolFlag("force-push", "force push to remote"),
+		),
+		strictcli.WithArgs(
+			strictcli.NewArg("remote", "remote name", strictcli.ArgRequired(false)),
+			strictcli.NewArg("refspecs", "refs to push", strictcli.ArgRequired(false), strictcli.Variadic()),
+		),
+	)
+	app.Command("pull", "fetch and merge (default --ff-only)", func(kwargs map[string]interface{}) int {
+		gf := globalsToFlags(kwargs)
+		// Determine merge mode from mutex group
+		var mode pullMode
+		if kwargs["ff_only"].(bool) {
+			mode = pullFFOnly
+		} else if kwargs["ff"].(bool) {
+			mode = pullFF
+		} else if kwargs["no_ff"].(bool) {
+			mode = pullNoFF
+		}
+		remote := "origin"
+		if v := kwargs["remote"]; v != nil {
+			remote = v.(string)
+		}
+		var branch string
+		if v := kwargs["branch"]; v != nil {
+			branch = v.(string)
+		}
+		return runPull(gf, mode, remote, branch)
+	},
+		strictcli.WithMutex(strictcli.MutexGroup{
+			Flags: []strictcli.Flag{
+				strictcli.BoolFlag("ff-only", "fast-forward only (fail if not possible)"),
+				strictcli.BoolFlag("ff", "fast-forward if possible, merge commit otherwise"),
+				strictcli.BoolFlag("no-ff", "always create a merge commit"),
+			},
+		}),
+		strictcli.WithArgs(
+			strictcli.NewArg("remote", "remote name", strictcli.ArgRequired(false)),
+			strictcli.NewArg("branch", "branch to pull", strictcli.ArgRequired(false)),
+		),
+	)
 	cg := app.Group("config", "show or set configuration values")
 	cg.Command("show", "show all configuration", func(kwargs map[string]interface{}) int {
 		return runConfigShow(globalsToFlags(kwargs))

@@ -99,11 +99,16 @@ func runCheckout(flags globalFlags, args []string) int {
 	return 0
 }
 
-func runPull(flags globalFlags, args []string) int {
-	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
-		commandHelp("pull [git pull args...]", "Fetch and merge (guarded, default --ff-only).")
-	}
+// pullMode represents the fast-forward merge strategy for pull.
+type pullMode int
 
+const (
+	pullFFOnly pullMode = iota // --ff-only: fail if not fast-forward
+	pullFF                     // --ff: fast-forward if possible, merge commit otherwise
+	pullNoFF                   // --no-ff: always create a merge commit
+)
+
+func runPull(flags globalFlags, mode pullMode, remote string, branch string) int {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -115,29 +120,7 @@ func runPull(flags globalFlags, args []string) int {
 		return code
 	}
 
-	// Parse optional remote, branch, --ff-only
 	ctx := context.Background()
-	remote := "origin"
-	branch := ""
-	ffOnly := true // default to ff-only for safety
-	var extra []string
-
-	for _, a := range args {
-		switch a {
-		case "--ff-only":
-			ffOnly = true
-		case "--no-ff":
-			ffOnly = false
-		default:
-			extra = append(extra, a)
-		}
-	}
-	if len(extra) >= 1 {
-		remote = extra[0]
-	}
-	if len(extra) >= 2 {
-		branch = extra[1]
-	}
 
 	// Step 1: fetch
 	fetchArgs := []string{"fetch", remote}
@@ -152,10 +135,14 @@ func runPull(flags globalFlags, args []string) int {
 
 	// Step 2: merge
 	mergeArgs := []string{"merge"}
-	if ffOnly {
+	switch mode {
+	case pullFFOnly:
 		mergeArgs = append(mergeArgs, "--ff-only")
+	case pullNoFF:
+		mergeArgs = append(mergeArgs, "--no-ff")
+	case pullFF:
+		// git's default: fast-forward if possible, merge commit otherwise
 	}
-	// Merge the fetched ref
 	mergeTarget := "FETCH_HEAD"
 	mergeArgs = append(mergeArgs, mergeTarget)
 	stdout, stderr, err := git.Run(ctx, mergeArgs...)
