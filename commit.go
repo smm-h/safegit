@@ -47,7 +47,7 @@ func runCommit(flags globalFlags, messages []string, messageFile string, branch 
 	if len(messages) == 0 {
 		die(flags, "commit", 2, "commit message required (-m or -F)")
 	}
-	if len(files) == 0 {
+	if len(files) == 0 && !allowEmpty {
 		die(flags, "commit", 2, "no files specified (use -- file1 file2 ...)")
 	}
 
