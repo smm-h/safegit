@@ -3,3 +3,4 @@
 {"commits":["b789cf6db64551b6eb9534a221ff9ec5dadd44fe"],"user_facing":true,"description":"**Fix: `--allow-empty` without files.** Previously rejected with \"no files specified\" even when `--allow-empty` was set.","type":"fix"}
 {"commits":["e45278a89bbb3c48d993f112f08c80ad5028c9f9","578820c1cbe88ffa87a2ba29006d845eb7975cc2","09f90143bcf57712fa241572b0ff6df8dbd7fc6f","b42bc7fdbce79e0e9aed6a631ac187da98d365de","c8e6d4fe89a50d97b68af6a32a2e92ab887844e9"],"user_facing":false}
 {"commits":["3255840a91b491317f9d39122077080de680cd7a","65289f3b3803699647637aa8483128608b178ce1","dda151fb18ef15180b34f429280e21660d5838ae"],"user_facing":false}
+{"commits":["5a1bc0bdbe8cc207c1f0fabe8873444788b4ede0","abc00713c45ac9ec5ce5ee0f42441b4c38e49564"],"user_facing":false}
