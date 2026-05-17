@@ -35,6 +35,7 @@ type CommitError struct {
 	Message string
 }
 
+// Error returns the error message.
 func (e *CommitError) Error() string { return e.Message }
 
 // Pipeline orchestrates the full commit flow.
