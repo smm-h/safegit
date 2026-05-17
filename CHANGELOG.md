@@ -2,6 +2,12 @@
 
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- **Fix: docs deploy in post-release hook.** Environment variables are now exported so selfdoc/wrangler can read Cloudflare credentials.
+
 ## 0.10.2
 
 - No user-facing changes.
