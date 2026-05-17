@@ -2,7 +2,7 @@
 description: "Research survey of Git alternatives for AI-safe concurrent version control: Jujutsu, GitButler, Sapling, and go-git compared for multi-agent safety."
 ---
 
-# Git Alternatives for AI-Safe Concurrent Version Control
+# Git Alternatives for AI-Safe Concurrency
 
 The core problem: Git's staging area (`.git/index`) is a single global file per worktree. When multiple AI agent sessions run `git add` / `git commit` concurrently, they race on this shared resource -- one session can accidentally commit another's staged files, or overwrite the index mid-operation. Worktrees are the standard mitigation but add complexity and have their own edge cases (stale lock files, orphan branches).
 
@@ -69,7 +69,7 @@ Total: 332 contributors, 11,192 commits. The top committer (Yuya Nishihara) is n
 
 ### Design Philosophy
 
-The core principles, each deliberate and interconnected:
+Jujutsu's design philosophy is built on a set of core principles that are each deliberate and deeply interconnected. They stem from Martin von Zweigbergk's experience with Git, Mercurial, and Google's internal version control systems, synthesized into a coherent model that eliminates entire categories of user confusion and operational risk:
 
 - **"The working copy is a commit"**: Your working directory is always represented as a real commit. Edits are automatically snapshotted. There is no index/staging area, no stash, no "dirty working tree" -- just commits. This eliminates `add`/`reset`/`stash`/`checkout` confusion, the soft/hard/mixed reset distinction, and staging races entirely.
 - **"Commits are the only user-visible object"**: By making the working copy a commit, the data model becomes radically simple. There is one kind of thing: commits. Branches/bookmarks and tags are just labels pointing at a commit.
@@ -100,7 +100,7 @@ Unique commands with no git equivalent:
 
 ### AI Agent Concurrency Model
 
-This is the most relevant aspect for safe multi-agent use:
+Jujutsu's concurrency story is the most relevant aspect for safe multi-agent use. By eliminating the shared mutable index and replacing lock files with an append-only operation log, Jujutsu makes it structurally impossible for one agent session to corrupt another's staged changes. The key mechanisms are:
 
 - **No staging area / no index**: There is no `git add`. Changes are auto-snapshotted into the working-copy commit. The entire class of "two agents fighting over `.git/index`" bugs is eliminated by design.
 - **Lock-free concurrency**: Instead of lock files, jj uses an append-only operation log. Each command reads the repo state, does its work, writes a new operation atomically. If two agents operate concurrently and create divergent operation heads, jj auto-merges them on the next command.
@@ -204,7 +204,7 @@ Output formats: `--format human` (default), `--format shell` (scripting), `--for
 
 ### AI Agent Concurrency Model
 
-GitButler directly targets multi-agent use:
+GitButler directly targets multi-agent use and is one of the few tools that explicitly designs for AI coding workflows. Its virtual branch model naturally isolates each agent's changes, and the team has invested in first-class integrations with AI agent frameworks including MCP and Claude Code hooks:
 
 - Multiple AI agents get their changes auto-isolated into separate virtual branches
 - Each agent's work is tracked independently -- no staging races
@@ -235,7 +235,7 @@ What breaks or is missing:
 
 ### Architecture
 
-The core is cleanly layered and separable from the GUI:
+GitButler's core is cleanly layered and fully separable from the GUI, making it viable as a headless engine for AI agent workflows. The Rust crate structure enforces clear boundaries between the version control logic, the API surface, and the various frontends (CLI, desktop, and Node.js bindings):
 
 - Layer 1: Core crates (`but-core`, `but-workspace`, `but-graph`, `but-rebase`, `but-hunk-assignment`, `but-hunk-dependency`) -- no UI dependency
 - Layer 2: Unified API (`but-api`) with `#[but_api]` macro generating bindings for direct Rust calls, Tauri IPC, and N-API/Node.js
@@ -297,7 +297,7 @@ Neither Mononoke nor EdenFS is required for local use with Git repositories.
 
 ### Divergence from Git
 
-Sapling uses its own command syntax (`sl` not `git`). Key differences:
+Sapling uses its own command syntax (`sl` not `git`) and introduces several workflow concepts inherited from Mercurial and refined at Meta's scale. While it can operate on standard Git repositories, its mental model differs substantially from Git in areas like branching, history querying, and code review integration. Key differences:
 
 - Stacked commits as a first-class concept
 - Smartlog replaces `git log`
@@ -329,7 +329,7 @@ You are expected to pick one tool (`sl` or `git`) and stick with it on a given r
 
 ### AI Agent Concurrency
 
-Sapling does not specifically address multi-agent staging races. Its simplified commit model reduces confusion but does not provide lock-free concurrency or per-agent isolation.
+Sapling does not specifically address multi-agent staging races or provide any mechanism for concurrent agent isolation. Its simplified commit model removes the staging area confusion that plagues Git, which reduces the surface area for human errors, but it still relies on a shared working copy and does not offer lock-free concurrency, per-agent isolation, or conflict-as-data semantics that would make it safe for multiple AI agents operating simultaneously on the same repository.
 
 ### Key Resources
 
@@ -369,7 +369,7 @@ Maintained by individual contributors, including several original source{d} auth
 
 ### Divergence from Git
 
-go-git's divergence is primarily about missing features rather than behavioral differences. Where it implements a feature, it aims for behavioral compatibility.
+go-git's divergence from standard Git is primarily about missing features rather than intentional behavioral differences. Where it implements a feature, it aims for full behavioral compatibility with the C Git reference implementation. The gaps are significant for production use, however, and several are fundamental operations that most workflows depend on.
 
 Major gaps (as of v5.x stable):
 
@@ -385,7 +385,7 @@ Major gaps (as of v5.x stable):
 
 ### Git Interoperability
 
-How it works: a Go library that reads and writes standard `.git` repositories. Not a CLI -- your Go application calls it programmatically.
+go-git is a pure Go library that reads and writes standard `.git` repositories programmatically. It is not a CLI tool -- your Go application imports it as a dependency and calls its API directly. This makes it well-suited for embedding Git operations into Go services, CI tooling, and infrastructure automation without requiring a system Git binary.
 
 What works:
 
@@ -405,7 +405,7 @@ What is missing:
 
 ### AI Agent Concurrency
 
-go-git does not address multi-agent staging races. It faithfully reproduces git's index model. No worktree support means you cannot even use the standard worktree isolation strategy.
+go-git does not address multi-agent staging races and faithfully reproduces Git's shared index model, including its concurrency limitations. Multiple goroutines or processes writing to the same repository will encounter the same race conditions as standard Git. Furthermore, go-git lacks worktree support entirely, which means you cannot even use the standard Git worktree isolation strategy as a mitigation. It is unsuitable as a foundation for concurrent AI agent workflows without substantial custom locking or isolation built on top.
 
 ### Adopters
 
@@ -484,7 +484,7 @@ The most direct approach -- fork git's C codebase and strip/modify what we don't
 
 ## Conclusion
 
-For the specific problem of making git safe for concurrent AI agent sessions:
+For the specific problem of making Git safe for concurrent AI agent sessions, only two of the four surveyed tools offer architectural solutions. The others are valuable in their own domains but do not address the core staging race condition that arises when multiple agents share a single repository:
 
 - **Jujutsu** solves it architecturally by eliminating the index entirely, using a lock-free operation log, and treating conflicts as data. It is the most principled solution but requires agents to learn `jj` commands instead of `git` commands.
 - **GitButler** solves it practically by isolating each agent's work into virtual branches, with explicit AI agent support (MCP server, Claude Code hooks, JSON output). It has the least disruptive adoption path since everything underneath is standard git.

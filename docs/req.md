@@ -15,7 +15,7 @@ description: "Requirements for safegit: multi-agent concurrency safety, lock-fre
 
 - Lock-free or minimally-locking design preferred over a global mutex
 - If a queue/lock is used, it must notify waiting agents automatically (no polling, no human intervention)
-- Agent crash must not leave the repo in a permanently locked state (stale lock recovery)
+- Agent crash must not leave the repo in a permanently locked state (stale lock recovery within 30 seconds)
 
 ## Git Compatibility
 
