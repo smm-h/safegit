@@ -1,8 +1,11 @@
 version: 2
 
 builds:
-  - env:
+  - main: .
+    env:
       - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
     goos:
       - linux
       - darwin
@@ -23,3 +26,4 @@ checksum:
 
 changelog:
   use: github-native
+

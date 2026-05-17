@@ -23,3 +23,5 @@ dist/
 docs/_build/
 .wrangler/
 .selfdoc/
+
+.rlsbl/lock

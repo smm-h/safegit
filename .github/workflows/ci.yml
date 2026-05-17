@@ -8,15 +8,24 @@ on:
 
 jobs:
   test:
+<<<<<<< /home/m/Projects/safegit/tmpk6gazug1.ours
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
         go-version: ["1.24", "1.25"]
+=======
+    runs-on: ubuntu-latest
+>>>>>>> /home/m/Projects/safegit/tmpszmomgz0.theirs
     steps:
       - uses: actions/checkout@v6
+      # go.mod: go 1.24
       - uses: actions/setup-go@v6
         with:
+<<<<<<< /home/m/Projects/safegit/tmpk6gazug1.ours
           go-version: ${{ matrix.go-version }}
+=======
+          go-version-file: go.mod
+>>>>>>> /home/m/Projects/safegit/tmpszmomgz0.theirs
       - run: go vet ./...
       - run: go test ./... -race -short -timeout=10m

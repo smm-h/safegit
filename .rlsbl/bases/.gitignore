@@ -7,6 +7,7 @@ coverage/
 dist/
 *.egg-info/
 .rlsbl-notes-*.tmp
+.rlsbl/lock
 .credentials.json
 .*-cache.json
 .env
