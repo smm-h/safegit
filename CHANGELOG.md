@@ -2,6 +2,10 @@
 
 # Changelog
 
+## Unreleased
+
+- No user-facing changes.
+
 ## 0.10.1
 
 ### Fixes
