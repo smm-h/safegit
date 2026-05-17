@@ -2,6 +2,12 @@
 
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- **Fix: use published strictcli dependency.** Removed local replace directive so `go install` and CI work correctly.
+
 ## 0.10.0
 
 ### Breaking
