@@ -1,0 +1,1 @@
+{"commits":["b4925f8882b1870dd2221485d17b936fed05d9b7"],"user_facing":true,"description":"**Fix: docs deploy in post-release hook.** Environment variables are now exported so selfdoc/wrangler can read Cloudflare credentials.","type":"fix"}
