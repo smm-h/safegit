@@ -1,0 +1,1 @@
+{"commits":["d1ca6a3c7361459e262440e8d63d9435a11e3488"],"user_facing":true,"description":"**Fix: use published strictcli dependency.** Removed local replace directive so `go install` and CI work correctly.","type":"fix"}
