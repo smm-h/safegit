@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// SessionKey is the git trailer key used to record the Claude Code session ID.
 const SessionKey = "Claude-Code-Session-Id"
 
 const envVar = "CLAUDE_CODE_SESSION_ID"

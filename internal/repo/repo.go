@@ -23,26 +23,32 @@ type Config struct {
 	Log           LogConfig    `json:"log"`
 }
 
+// CommitConfig holds commit-related settings.
 type CommitConfig struct {
 	CASMaxAttempts int `json:"casMaxAttempts"`
 }
 
+// LockConfig holds ref-lock acquisition settings.
 type LockConfig struct {
 	AcquireTimeoutSeconds int `json:"acquireTimeoutSeconds"`
 }
 
+// HooksConfig holds hook-related settings.
 type HooksConfig struct {
 	PrePrePush PrePrePushConfig `json:"preprepush"`
 }
 
+// PrePrePushConfig holds pre-pre-push hook timeout settings.
 type PrePrePushConfig struct {
 	TimeoutSeconds int `json:"timeoutSeconds"`
 }
 
+// PushConfig holds push retry settings.
 type PushConfig struct {
 	RetryAttempts int `json:"retryAttempts"`
 }
 
+// LogConfig holds operation log size settings.
 type LogConfig struct {
 	MaxSizeMB int `json:"maxSizeMB"`
 }
