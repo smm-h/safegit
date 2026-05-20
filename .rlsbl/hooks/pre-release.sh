@@ -6,6 +6,9 @@ set -euo pipefail
 
 echo "Running pre-release checks..."
 
+echo "  Updating CLI schema..."
+go run . --dump-schema
+
 echo "  go vet..."
 go vet ./...
 
