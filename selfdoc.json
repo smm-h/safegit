@@ -4,6 +4,8 @@
   "docs": "docs/",
   "output": "docs/_build/",
   "base_url": "https://safegit.smmh.dev",
+  "versions": [{"version": "0.10.3", "indexed": true}],
+  "locales": [{"code": "en", "label": "English", "default": true}],
   "deploy": {
     "provider": "cloudflare-pages",
     "project": "safegit"
