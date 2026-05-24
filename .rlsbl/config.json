@@ -3,5 +3,6 @@
     "go",
     "docs",
     "docker"
-  ]
+  ],
+  "private": false
 }
