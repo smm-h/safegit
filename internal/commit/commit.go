@@ -73,6 +73,11 @@ type CommitResult struct {
 	Parent   string `json:"parent"`
 	Tree     string `json:"tree"`
 	Attempts int    `json:"attempts"`
+
+	// AutoStagedDeletions lists repo-relative paths of files that were
+	// automatically staged as deletions (e.g., by move detection). Nil
+	// when no auto-staged deletions occurred.
+	AutoStagedDeletions []string `json:"autoStagedDeletions,omitempty"`
 }
 
 // Execute runs the full two-phase commit pipeline.

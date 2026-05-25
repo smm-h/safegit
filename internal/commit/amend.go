@@ -35,6 +35,11 @@ type AmendResult struct {
 	Tree     string `json:"tree"`
 	OldSHA   string `json:"oldSha"`
 	Attempts int    `json:"attempts"`
+
+	// AutoStagedDeletions lists repo-relative paths of files that were
+	// automatically staged as deletions (e.g., by move detection). Nil
+	// when no auto-staged deletions occurred.
+	AutoStagedDeletions []string `json:"autoStagedDeletions,omitempty"`
 }
 
 // Amend rewrites the tip of the current branch with new files staged.
