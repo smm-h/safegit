@@ -10,6 +10,7 @@ order: 90
 
 # API Reference
 
+- [safegit](safegit.html)
 - [internal/commit](internal-commit.html)
 - [internal/coord](internal-coord.html)
 - [internal/git](internal-git.html)
@@ -21,4 +22,3 @@ order: 90
 - [internal/stage](internal-stage.html)
 - [internal/testutil](internal-testutil.html)
 - [internal/trailer](internal-trailer.html)
-- [safegit](safegit.html)
