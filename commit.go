@@ -100,11 +100,14 @@ func runCommit(flags globalFlags, messages []string, messageFile string, branch 
 
 	if !flags.quiet {
 		fmt.Printf("[%s %s] %s\n", refShortName(result.Ref), result.SHA[:8], firstLine(msg))
-		fmt.Printf(" %d file(s) committed", len(files))
+		fmt.Printf(" %d file(s) committed", len(files)+len(result.AutoStagedDeletions))
 		if result.Attempts > 1 {
 			fmt.Printf(" (%d CAS retries)", result.Attempts-1)
 		}
 		fmt.Println()
+		for _, del := range result.AutoStagedDeletions {
+			fmt.Fprintf(os.Stderr, "  auto-staged deletion: %s (rename detected)\n", del)
+		}
 	}
 }
 
@@ -173,6 +176,9 @@ func runCommitAmend(flags globalFlags, gitDir string, messages []string, branch 
 				fmt.Printf(" (%d CAS retries)", result.Attempts-1)
 			}
 			fmt.Println()
+			for _, del := range result.AutoStagedDeletions {
+				fmt.Fprintf(os.Stderr, "  auto-staged deletion: %s (rename detected)\n", del)
+			}
 		}
 	} else {
 		// Reword: change the tip commit message without touching files
