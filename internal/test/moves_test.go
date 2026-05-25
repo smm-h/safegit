@@ -283,7 +283,7 @@ func TestMoveDetection_MoveToSubdirectory(t *testing.T) {
 	}
 
 	// Should auto-stage deletion of foo.txt
-	if !strings.Contains(stderr, "auto-staged deletion:") || !strings.Contains(stderr, "foo.txt") {
+	if !strings.Contains(stderr, "auto-staged deletion: foo.txt (rename detected)") {
 		t.Fatalf("expected auto-staged deletion message for foo.txt, got: %s", stderr)
 	}
 
@@ -329,10 +329,10 @@ func TestMoveDetection_MultipleMoves(t *testing.T) {
 	}
 
 	// Should auto-stage deletion of both a.txt and b.txt
-	if !strings.Contains(stderr, "a.txt") {
+	if !strings.Contains(stderr, "auto-staged deletion: a.txt (rename detected)") {
 		t.Fatalf("expected stderr to mention a.txt deletion, got: %s", stderr)
 	}
-	if !strings.Contains(stderr, "b.txt") {
+	if !strings.Contains(stderr, "auto-staged deletion: b.txt (rename detected)") {
 		t.Fatalf("expected stderr to mention b.txt deletion, got: %s", stderr)
 	}
 
@@ -376,7 +376,7 @@ func TestMoveDetection_PathSimilarityTiebreak(t *testing.T) {
 	}
 
 	// Should auto-stage deletion of src/util/helper.txt (same directory = higher similarity)
-	if !strings.Contains(stderr, "auto-staged deletion:") || !strings.Contains(stderr, "src/util/helper.txt") {
+	if !strings.Contains(stderr, "auto-staged deletion: src/util/helper.txt (rename detected)") {
 		t.Fatalf("expected auto-staged deletion of src/util/helper.txt, got: %s", stderr)
 	}
 
@@ -443,7 +443,7 @@ func TestMoveDetection_EmptyFile(t *testing.T) {
 	}
 
 	// Should auto-stage deletion of empty.txt
-	if !strings.Contains(stderr, "auto-staged deletion:") || !strings.Contains(stderr, "empty.txt") {
+	if !strings.Contains(stderr, "auto-staged deletion: empty.txt (rename detected)") {
 		t.Fatalf("expected auto-staged deletion message for empty.txt, got: %s", stderr)
 	}
 
