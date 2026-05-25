@@ -2,6 +2,12 @@
 
 # Changelog
 
+## 0.11.0
+
+### Features
+
+- **New feature.** Auto-detect file moves on commit. When committing a file that was moved (via `mv`), safegit now automatically stages the deletion of the old path, so the commit records a proper rename. Works with both `commit` and `commit --amend`. Uses exact content matching (move+edit requires listing both paths explicitly).
+
 ## 0.10.3
 
 ### Fixes
