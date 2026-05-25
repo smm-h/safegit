@@ -1,6 +1,6 @@
 ---
 title: safegit
-description: "go:build darwin"
+description: "API reference for the safegit root package — the main entry point that wires up all subcommands for concurrency-safe git operations."
 generated: true
 nav_group: "API Reference"
 nav_order: 12
