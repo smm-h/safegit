@@ -207,6 +207,13 @@ func (p *Pipeline) tryCommit(
 		}
 	}
 
+	// Step 2.3: Detect moves (new files whose content matches a deleted file
+	// in the parent tree) and auto-stage the corresponding deletions.
+	autoStaged, err := detectMoves(ctx, parentSHA, tmpIdx.IndexPath, absFiles, fileSpecs, repoRoot)
+	if err != nil {
+		return nil, false, fmt.Errorf("detect moves: %w", err)
+	}
+
 	// Step 2.5: Run pre-commit hook (if present) against the tmp index.
 	// Skipped for --dry-run and --force (matching git's --no-verify).
 	if !req.DryRun && !req.Force {
@@ -251,11 +258,12 @@ func (p *Pipeline) tryCommit(
 	// DryRun: return result without touching the ref
 	if req.DryRun {
 		return &CommitResult{
-			SHA:      commitSHA,
-			Ref:      ref,
-			Parent:   parentSHA,
-			Tree:     treeSHA,
-			Attempts: attempt,
+			SHA:                 commitSHA,
+			Ref:                 ref,
+			Parent:              parentSHA,
+			Tree:                treeSHA,
+			Attempts:            attempt,
+			AutoStagedDeletions: autoStaged,
 		}, false, nil
 	}
 
@@ -319,11 +327,12 @@ func (p *Pipeline) tryCommit(
 	})
 
 	return &CommitResult{
-		SHA:      commitSHA,
-		Ref:      ref,
-		Parent:   parentSHA,
-		Tree:     treeSHA,
-		Attempts: attempt,
+		SHA:                 commitSHA,
+		Ref:                 ref,
+		Parent:              parentSHA,
+		Tree:                treeSHA,
+		Attempts:            attempt,
+		AutoStagedDeletions: autoStaged,
 	}, false, nil
 }
 

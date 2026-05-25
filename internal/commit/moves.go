@@ -58,6 +58,11 @@ func detectMoves(
 		if fileSpecs[i].Hunks != nil {
 			continue
 		}
+		// Skip files that don't exist on disk — they are deletions, not
+		// new additions that could be the destination of a move.
+		if _, err := os.Lstat(abs); err != nil {
+			continue
+		}
 		rel, err := filepath.Rel(repoRoot, abs)
 		if err != nil {
 			return nil, err

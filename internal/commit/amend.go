@@ -160,6 +160,13 @@ func (p *Pipeline) tryAmend(
 		}
 	}
 
+	// Detect moves: compare against headSHA (the commit being replaced),
+	// since the user's changes are relative to that tree.
+	autoStaged, err := detectMoves(ctx, headSHA, tmpIdx.IndexPath, absFiles, req.FileSpecs, repoRoot)
+	if err != nil {
+		return nil, false, fmt.Errorf("detect moves: %w", err)
+	}
+
 	// Build new tree
 	treeSHA, err := git.WriteTree(ctx, tmpIdx.IndexPath)
 	if err != nil {
@@ -176,12 +183,13 @@ func (p *Pipeline) tryAmend(
 
 	if req.DryRun {
 		return &AmendResult{
-			SHA:      commitSHA,
-			Ref:      ref,
-			Parent:   parentSHA,
-			Tree:     treeSHA,
-			OldSHA:   headSHA,
-			Attempts: attempt,
+			SHA:                 commitSHA,
+			Ref:                 ref,
+			Parent:              parentSHA,
+			Tree:                treeSHA,
+			OldSHA:              headSHA,
+			Attempts:            attempt,
+			AutoStagedDeletions: autoStaged,
 		}, false, nil
 	}
 
@@ -234,12 +242,13 @@ func (p *Pipeline) tryAmend(
 	})
 
 	return &AmendResult{
-		SHA:      commitSHA,
-		Ref:      ref,
-		Parent:   parentSHA,
-		Tree:     treeSHA,
-		OldSHA:   headSHA,
-		Attempts: attempt,
+		SHA:                 commitSHA,
+		Ref:                 ref,
+		Parent:              parentSHA,
+		Tree:                treeSHA,
+		OldSHA:              headSHA,
+		Attempts:            attempt,
+		AutoStagedDeletions: autoStaged,
 	}, false, nil
 }
 
