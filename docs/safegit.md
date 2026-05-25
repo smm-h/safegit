@@ -9,4 +9,4 @@ nav_order: 12
 
 # safegit
 
-:-: ref path="safegit"
+:-: ref path="."

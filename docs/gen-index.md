@@ -1,6 +1,6 @@
 ---
 title: API Reference
-description: "Complete auto-generated API reference index — browse all modules, classes, and functions with their signatures and docstrings."
+description: "Auto-generated API reference index for safegit — browse all internal packages (commit, git, lock, oplog, stage, and more) with links."
 generated: true
 nav_group: "API Reference"
 nav_order: 0
