@@ -2,6 +2,7 @@ package commit
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,6 +24,10 @@ func detectMoves(
 ) ([]string, error) {
 	if parentSHA == "" {
 		return nil, nil
+	}
+
+	if len(absFiles) != len(fileSpecs) {
+		return nil, fmt.Errorf("detectMoves: absFiles length (%d) != fileSpecs length (%d)", len(absFiles), len(fileSpecs))
 	}
 
 	// Get all blobs in the parent tree.
@@ -142,8 +147,10 @@ func pathSimilarity(a, b string) int {
 	partsB := strings.Split(b, "/")
 
 	// Count matching path components from the end (common suffix).
-	ia := len(partsA) - 1
-	ib := len(partsB) - 1
+	// Start from len-2 to skip the basename (already scored above).
+	// Only run the loop when both paths have at least 2 components.
+	ia := len(partsA) - 2
+	ib := len(partsB) - 2
 	for ia >= 0 && ib >= 0 {
 		if partsA[ia] != partsB[ib] {
 			break
