@@ -2,6 +2,13 @@
 
 # Changelog
 
+## 0.11.1
+
+### Fixes
+
+- **Fix.** CI matrix updated to Go 1.25+1.26 to match go.mod requirement.
+- **Fix.** Dockerfile updated to Go 1.25 to match go.mod requirement.
+
 ## 0.11.0
 
 ### Features
