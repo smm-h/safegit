@@ -12,10 +12,9 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-        go-version: ["1.24", "1.25"]
+        go-version: ["1.25", "1.26"]
     steps:
       - uses: actions/checkout@v6
-      # go.mod: go 1.24
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go-version }}
