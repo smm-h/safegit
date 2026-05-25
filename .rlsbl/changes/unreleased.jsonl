@@ -1,0 +1,1 @@
+{"commits":["c91781899660bbfa64ecadbd700216eb4c5fd58a"],"user_facing":true,"description":"**Fix.** CI matrix updated to Go 1.25+1.26 to match go.mod requirement.","type":"fix"}
