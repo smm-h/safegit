@@ -383,3 +383,59 @@ func CommitTreeWithAuthor(ctx context.Context, treeSHA string, parentSHAs []stri
 	}
 	return strings.TrimSpace(out), nil
 }
+
+// TreeEntry represents a blob entry from git ls-tree.
+type TreeEntry struct {
+	BlobSHA string // SHA of the blob object
+	Path    string // repo-relative path
+}
+
+// LsTreeAll returns all blob entries in the given treeish, recursively.
+// Empty trees return an empty slice, not an error.
+func LsTreeAll(ctx context.Context, treeish string) ([]TreeEntry, error) {
+	out, _, err := Run(ctx, "ls-tree", "-r", "-z", treeish)
+	if err != nil {
+		return nil, fmt.Errorf("ls-tree %s: %w", treeish, err)
+	}
+
+	if strings.TrimSpace(out) == "" {
+		return nil, nil
+	}
+
+	var entries []TreeEntry
+	for _, raw := range strings.Split(out, "\x00") {
+		if raw == "" {
+			continue
+		}
+		// Format: "<mode> <type> <sha>\t<path>"
+		tabIdx := strings.IndexByte(raw, '\t')
+		if tabIdx < 0 {
+			continue
+		}
+		path := raw[tabIdx+1:]
+		meta := raw[:tabIdx] // "<mode> <type> <sha>"
+
+		fields := strings.SplitN(meta, " ", 3)
+		if len(fields) < 3 {
+			continue
+		}
+		objType := fields[1]
+		if objType != "blob" {
+			continue
+		}
+		entries = append(entries, TreeEntry{
+			BlobSHA: fields[2],
+			Path:    path,
+		})
+	}
+	return entries, nil
+}
+
+// HashObject returns the blob SHA for a file without writing to the object store.
+func HashObject(ctx context.Context, path string) (string, error) {
+	out, _, err := Run(ctx, "hash-object", "--", path)
+	if err != nil {
+		return "", fmt.Errorf("hash-object %s: %w", path, err)
+	}
+	return strings.TrimSpace(out), nil
+}
