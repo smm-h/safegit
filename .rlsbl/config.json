@@ -4,5 +4,6 @@
     "docs",
     "docker"
   ],
-  "private": false
+  "private": false,
+  "push_timeout": 120
 }
