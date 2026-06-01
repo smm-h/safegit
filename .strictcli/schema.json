@@ -1,22 +1,16 @@
 {
   "commands": {
     "bisect": {
-      "args": [],
-      "flags": [],
       "help": "bisect (guarded)",
       "name": "bisect",
       "passthrough": true
     },
     "checkout": {
-      "args": [],
-      "flags": [],
       "help": "checkout a ref (guarded)",
       "name": "checkout",
       "passthrough": true
     },
     "cherry-pick": {
-      "args": [],
-      "flags": [],
       "help": "cherry-pick commits (guarded)",
       "name": "cherry-pick",
       "passthrough": true
@@ -32,129 +26,77 @@
       ],
       "flags": [
         {
-          "choices": null,
           "default": [],
-          "env": null,
           "help": "commit message (repeatable)",
-          "hidden": false,
           "name": "m",
-          "negatable": null,
           "repeatable": true,
           "short": "m",
           "type": "str"
         },
         {
-          "choices": null,
-          "default": null,
-          "env": null,
           "help": "read commit message from file",
-          "hidden": false,
           "name": "F",
-          "negatable": null,
-          "repeatable": false,
           "short": "F",
           "type": "str"
         },
         {
-          "choices": null,
-          "default": null,
-          "env": null,
           "help": "commit to a different branch",
-          "hidden": false,
           "name": "branch",
-          "negatable": null,
-          "repeatable": false,
-          "short": null,
           "type": "str"
         },
         {
-          "choices": null,
           "default": false,
-          "env": null,
           "help": "amend the current HEAD commit",
-          "hidden": false,
           "name": "amend",
           "negatable": true,
-          "repeatable": false,
-          "short": null,
           "type": "bool"
         },
         {
-          "choices": null,
           "default": false,
-          "env": null,
           "help": "allow commits with no file changes",
-          "hidden": false,
           "name": "allow-empty",
           "negatable": true,
-          "repeatable": false,
-          "short": null,
           "type": "bool"
         },
         {
-          "choices": null,
           "default": [],
-          "env": null,
           "help": "add a trailer (repeatable)",
-          "hidden": false,
           "name": "trailer",
-          "negatable": null,
           "repeatable": true,
-          "short": null,
           "type": "str"
         }
       ],
       "help": "stage and commit files atomically",
-      "name": "commit",
-      "passthrough": false
+      "name": "commit"
     },
     "doctor": {
-      "args": [],
       "flags": [
         {
-          "choices": null,
           "default": false,
-          "env": null,
           "help": "run health checks without fixing",
-          "hidden": false,
           "name": "diagnose",
           "negatable": true,
-          "repeatable": false,
-          "short": null,
           "type": "bool"
         },
         {
-          "choices": null,
           "default": false,
-          "env": null,
           "help": "run health checks and fix issues",
-          "hidden": false,
           "name": "fix",
           "negatable": true,
-          "repeatable": false,
-          "short": null,
           "type": "bool"
         },
         {
-          "choices": null,
           "default": false,
-          "env": null,
           "help": "remove safegit from this repository",
-          "hidden": false,
           "name": "uninstall",
           "negatable": true,
-          "repeatable": false,
-          "short": null,
           "type": "bool"
         }
       ],
       "help": "health checks and repair",
-      "name": "doctor",
-      "passthrough": false
+      "name": "doctor"
     },
     "merge": {
-      "args": [],
-      "flags": [],
       "help": "merge a branch (guarded)",
       "name": "merge",
       "passthrough": true
@@ -164,65 +106,46 @@
         {
           "help": "remote name",
           "name": "remote",
-          "required": false,
-          "variadic": false
+          "required": false
         },
         {
           "help": "branch to pull",
           "name": "branch",
-          "required": false,
-          "variadic": false
+          "required": false
         }
       ],
       "flags": [
         {
-          "choices": null,
           "default": false,
-          "env": null,
           "help": "fast-forward only (fail if not possible)",
-          "hidden": false,
           "name": "ff-only",
           "negatable": true,
-          "repeatable": false,
-          "short": null,
           "type": "bool"
         },
         {
-          "choices": null,
           "default": false,
-          "env": null,
           "help": "fast-forward if possible, merge commit otherwise",
-          "hidden": false,
           "name": "ff",
           "negatable": true,
-          "repeatable": false,
-          "short": null,
           "type": "bool"
         },
         {
-          "choices": null,
           "default": false,
-          "env": null,
           "help": "always create a merge commit",
-          "hidden": false,
           "name": "no-ff",
           "negatable": true,
-          "repeatable": false,
-          "short": null,
           "type": "bool"
         }
       ],
       "help": "fetch and merge (default --ff-only)",
-      "name": "pull",
-      "passthrough": false
+      "name": "pull"
     },
     "push": {
       "args": [
         {
           "help": "remote name",
           "name": "remote",
-          "required": false,
-          "variadic": false
+          "required": false
         },
         {
           "help": "refs to push",
@@ -233,214 +156,159 @@
       ],
       "flags": [
         {
-          "choices": null,
           "default": false,
-          "env": null,
           "help": "skip pre-pre-push hooks",
-          "hidden": false,
           "name": "no-pre-pre-push",
           "negatable": true,
-          "repeatable": false,
-          "short": null,
           "type": "bool"
         },
         {
-          "choices": null,
           "default": false,
-          "env": null,
           "help": "force push to remote",
-          "hidden": false,
           "name": "force-push",
           "negatable": true,
-          "repeatable": false,
-          "short": null,
           "type": "bool"
         }
       ],
       "help": "push with pre-hooks and retry",
-      "name": "push",
-      "passthrough": false
+      "name": "push"
     },
     "rebase": {
-      "args": [],
-      "flags": [],
       "help": "rebase onto upstream (guarded)",
       "name": "rebase",
       "passthrough": true
     },
     "reset": {
-      "args": [],
-      "flags": [],
       "help": "reset HEAD (guarded for --hard)",
       "name": "reset",
       "passthrough": true
     },
     "revert": {
-      "args": [],
-      "flags": [],
       "help": "revert commits (guarded)",
       "name": "revert",
       "passthrough": true
     },
     "rewrite-author": {
-      "args": [],
       "flags": [
         {
-          "choices": null,
-          "default": null,
-          "env": null,
           "help": "current author/committer name to match",
-          "hidden": false,
           "name": "old-name",
-          "negatable": null,
-          "repeatable": false,
-          "short": null,
           "type": "str"
         },
         {
-          "choices": null,
-          "default": null,
-          "env": null,
           "help": "replacement name",
-          "hidden": false,
           "name": "new-name",
-          "negatable": null,
-          "repeatable": false,
-          "short": null,
           "type": "str"
         },
         {
-          "choices": null,
-          "default": null,
-          "env": null,
           "help": "current author/committer email to match",
-          "hidden": false,
           "name": "old-email",
-          "negatable": null,
-          "repeatable": false,
-          "short": null,
           "type": "str"
         },
         {
-          "choices": null,
-          "default": null,
-          "env": null,
           "help": "replacement email",
-          "hidden": false,
           "name": "new-email",
-          "negatable": null,
-          "repeatable": false,
-          "short": null,
           "type": "str"
         },
         {
-          "choices": null,
           "default": false,
-          "env": null,
           "help": "force-push after rewriting",
-          "hidden": false,
           "name": "push",
           "negatable": true,
-          "repeatable": false,
-          "short": null,
           "type": "bool"
         }
       ],
       "help": "rewrite author/committer across history",
-      "name": "rewrite-author",
-      "passthrough": false
+      "name": "rewrite-author"
     },
     "undo": {
-      "args": [],
-      "flags": [],
       "help": "reverse last commit/amend/reword via oplog",
-      "name": "undo",
-      "passthrough": false
+      "name": "undo"
     },
     "unlock": {
       "args": [
         {
           "help": "the ref name to unlock",
-          "name": "ref",
-          "required": true,
-          "variadic": false
+          "name": "ref"
         }
       ],
-      "flags": [],
       "help": "release a stale ref lock",
-      "name": "unlock",
-      "passthrough": false
+      "name": "unlock"
     },
     "version": {
-      "args": [],
-      "flags": [],
       "help": "print version and build info",
-      "name": "version",
-      "passthrough": false
+      "name": "version"
     }
   },
-  "config": false,
-  "deprecated": {},
-  "env_prefix": null,
+  "defaults": {
+    "app": {
+      "commands": {},
+      "config": false,
+      "deprecated": {},
+      "env_prefix": null,
+      "global_flags": [],
+      "groups": {}
+    },
+    "arg": {
+      "required": true,
+      "variadic": false
+    },
+    "command": {
+      "args": [],
+      "flags": [],
+      "passthrough": false
+    },
+    "flag": {
+      "choices": null,
+      "default": null,
+      "env": null,
+      "hidden": false,
+      "negatable": null,
+      "repeatable": false,
+      "short": null
+    },
+    "group": {
+      "commands": {},
+      "deprecated": {},
+      "groups": {}
+    }
+  },
   "global_flags": [
     {
-      "choices": null,
       "default": false,
-      "env": null,
       "help": "suppress non-essential output",
-      "hidden": false,
       "name": "quiet",
       "negatable": true,
-      "repeatable": false,
       "short": "q",
       "type": "bool"
     },
     {
-      "choices": null,
       "default": false,
-      "env": null,
       "help": "verbose output",
-      "hidden": false,
       "name": "verbose",
       "negatable": true,
-      "repeatable": false,
-      "short": null,
       "type": "bool"
     },
     {
-      "choices": null,
       "default": false,
-      "env": null,
       "help": "preview changes without writing",
-      "hidden": false,
       "name": "dry-run",
       "negatable": true,
-      "repeatable": false,
       "short": "n",
       "type": "bool"
     },
     {
-      "choices": null,
       "default": false,
-      "env": null,
       "help": "force operation",
-      "hidden": false,
       "name": "force",
       "negatable": true,
-      "repeatable": false,
       "short": "f",
       "type": "bool"
     },
     {
-      "choices": null,
       "default": "",
-      "env": null,
       "help": "config file path",
-      "hidden": false,
       "name": "config",
-      "negatable": null,
-      "repeatable": false,
-      "short": null,
       "type": "str"
     }
   ],
@@ -451,46 +319,31 @@
           "args": [
             {
               "help": "configuration key",
-              "name": "key",
-              "required": true,
-              "variadic": false
+              "name": "key"
             }
           ],
-          "flags": [],
           "help": "get a configuration value",
-          "name": "get",
-          "passthrough": false
+          "name": "get"
         },
         "set": {
           "args": [
             {
               "help": "configuration key",
-              "name": "key",
-              "required": true,
-              "variadic": false
+              "name": "key"
             },
             {
               "help": "configuration value",
-              "name": "value",
-              "required": true,
-              "variadic": false
+              "name": "value"
             }
           ],
-          "flags": [],
           "help": "set a configuration value",
-          "name": "set",
-          "passthrough": false
+          "name": "set"
         },
         "show": {
-          "args": [],
-          "flags": [],
           "help": "show all configuration",
-          "name": "show",
-          "passthrough": false
+          "name": "show"
         }
       },
-      "deprecated": {},
-      "groups": {},
       "help": "show or set configuration values",
       "name": "config"
     },
@@ -500,45 +353,34 @@
           "args": [
             {
               "help": "path to hook script",
-              "name": "path",
-              "required": true,
-              "variadic": false
+              "name": "path"
             }
           ],
-          "flags": [],
           "help": "install a hook from a file",
-          "name": "install",
-          "passthrough": false
+          "name": "install"
         },
         "list": {
-          "args": [],
-          "flags": [],
           "help": "list installed hooks",
-          "name": "list",
-          "passthrough": false
+          "name": "list"
         },
         "run": {
           "args": [
             {
               "help": "hook name to run",
               "name": "name",
-              "required": false,
-              "variadic": false
+              "required": false
             }
           ],
-          "flags": [],
           "help": "run hooks",
-          "name": "run",
-          "passthrough": false
+          "name": "run"
         }
       },
-      "deprecated": {},
-      "groups": {},
       "help": "manage pre-pre-push hooks",
       "name": "hook"
     }
   },
   "help": "concurrency-safe git for multi-agent use",
   "name": "safegit",
-  "version": "dev"
+  "project_id": "github.com/smm-h/safegit",
+  "version": "0.11.2-0.20260529180512-000ae43c5931+dirty"
 }
