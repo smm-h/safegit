@@ -1,8 +1,7 @@
 {
   "version": "0.11.1",
-  "language": "go",
   "source": [
-    "."
+    {"path": ".", "language": "go"}
   ],
   "docs": "docs/",
   "output": "docs/_build/",
