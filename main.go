@@ -228,7 +228,7 @@ func main() {
 		return runScrub(globalsToFlags(kwargs), kwargs)
 	},
 		strictcli.WithFlags(
-			strictcli.StringFlag("from", "starting commit SHA or ref"),
+			strictcli.StringFlag("from", "first commit to include in the rewrite"),
 			strictcli.StringFlag("reason", "audit trail explaining why the scrub is needed"),
 		),
 		strictcli.WithArgs(
