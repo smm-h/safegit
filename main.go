@@ -224,8 +224,9 @@ func main() {
 			strictcli.CoRequired{Flags: []string{"old-email", "new-email"}},
 		),
 	)
-	app.Command("scrub", "surgically replace or remove a file across history", func(kwargs map[string]interface{}) int {
-		return runScrub(globalsToFlags(kwargs), kwargs)
+	sg := app.Group("scrub", "surgically rewrite history to remove sensitive content")
+	sg.Command("file", "replace or remove a file across history", func(kwargs map[string]interface{}) int {
+		return runScrubFile(globalsToFlags(kwargs), kwargs)
 	},
 		strictcli.WithFlags(
 			strictcli.StringFlag("from", "first commit to include in the rewrite"),
@@ -234,6 +235,21 @@ func main() {
 		strictcli.WithArgs(
 			strictcli.NewArg("file", "repo-relative file path to scrub"),
 		),
+	)
+	sg.Command("match", "replace pattern matches across history", func(kwargs map[string]interface{}) int {
+		return runScrubMatch(globalsToFlags(kwargs), kwargs)
+	},
+		strictcli.WithFlags(
+			strictcli.StringFlag("pattern", "regex pattern to search for"),
+			strictcli.StringFlag("replace", "replacement string"),
+			strictcli.StringFlag("reason", "audit trail explaining why the scrub is needed"),
+		),
+		strictcli.WithMutex(strictcli.MutexGroup{
+			Flags: []strictcli.Flag{
+				strictcli.StringFlag("from", "first commit to include in the rewrite", strictcli.Default(nil)),
+				strictcli.BoolFlag("entire-history", "rewrite all commits"),
+			},
+		}),
 	)
 	app.Passthrough("cherry-pick", "cherry-pick commits (guarded)", pt)
 	app.Passthrough("revert", "revert commits (guarded)", pt)
