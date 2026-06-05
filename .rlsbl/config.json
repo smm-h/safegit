@@ -1,9 +1,22 @@
 {
   "targets": [
     "go",
-    "docs",
     "docker"
   ],
+  "pipelines": {
+    "go": {
+      "type": "go",
+      "local": false
+    },
+    "docker": {
+      "type": "docker",
+      "local": false
+    },
+    "docs-deploy": {
+      "type": "cloudflare-pages",
+      "local": true
+    }
+  },
   "private": false,
   "push_timeout": 120
 }
