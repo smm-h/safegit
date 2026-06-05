@@ -3,12 +3,15 @@
 package git
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -519,4 +522,107 @@ func MkTree(ctx context.Context, entries []TreeEntry) (string, error) {
 		return "", fmt.Errorf("mktree: %w", err)
 	}
 	return strings.TrimSpace(out), nil
+}
+
+// ObjectEntry holds one object read from a git cat-file --batch stream.
+type ObjectEntry struct {
+	SHA     string
+	Type    string // "blob", "commit", or "tag" (trees are skipped)
+	Size    int
+	Content []byte
+}
+
+// ObjectIterator streams objects from a long-running git cat-file process.
+type ObjectIterator struct {
+	cmd    *exec.Cmd
+	stdout *bufio.Reader
+	stderr bytes.Buffer
+}
+
+// CatFileBatchAll starts a git cat-file --batch-all-objects --batch subprocess
+// and returns an ObjectIterator for streaming the results. The caller must call
+// Close() when done.
+func CatFileBatchAll(ctx context.Context) (*ObjectIterator, error) {
+	cmd := exec.CommandContext(ctx, "git", "--no-optional-locks", "cat-file", "--batch-all-objects", "--batch")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("cat-file --batch-all-objects: stdout pipe: %w", err)
+	}
+	it := &ObjectIterator{
+		cmd:    cmd,
+		stdout: bufio.NewReaderSize(stdout, 256*1024),
+	}
+	cmd.Stderr = &it.stderr
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("cat-file --batch-all-objects: start: %w", err)
+	}
+	return it, nil
+}
+
+// Next reads the next non-tree object from the stream. Trees are silently
+// skipped. Returns io.EOF when the stream ends.
+func (it *ObjectIterator) Next() (*ObjectEntry, error) {
+	for {
+		// Read header line: "<sha> <type> <size>\n"
+		line, err := it.stdout.ReadString('\n')
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				// Wait for the process to finish.
+				if waitErr := it.cmd.Wait(); waitErr != nil {
+					return nil, fmt.Errorf("cat-file exited: %w\nstderr: %s", waitErr, strings.TrimSpace(it.stderr.String()))
+				}
+				return nil, io.EOF
+			}
+			return nil, fmt.Errorf("cat-file: read header: %w", err)
+		}
+		line = strings.TrimSuffix(line, "\n")
+
+		fields := strings.SplitN(line, " ", 3)
+		if len(fields) != 3 {
+			return nil, fmt.Errorf("cat-file: malformed header: %q", line)
+		}
+		sha := fields[0]
+		objType := fields[1]
+		size, err := strconv.Atoi(fields[2])
+		if err != nil {
+			return nil, fmt.Errorf("cat-file: bad size in header %q: %w", line, err)
+		}
+
+		if objType == "tree" {
+			// Skip tree objects: read and discard size bytes + trailing LF.
+			if _, err := io.CopyN(io.Discard, it.stdout, int64(size)+1); err != nil {
+				return nil, fmt.Errorf("cat-file: discard tree %s: %w", sha, err)
+			}
+			continue
+		}
+
+		// Read exactly size bytes of content.
+		content := make([]byte, size)
+		if _, err := io.ReadFull(it.stdout, content); err != nil {
+			return nil, fmt.Errorf("cat-file: read content %s: %w", sha, err)
+		}
+
+		// Read and discard the trailing LF.
+		if _, err := it.stdout.ReadByte(); err != nil {
+			return nil, fmt.Errorf("cat-file: read trailing LF for %s: %w", sha, err)
+		}
+
+		return &ObjectEntry{
+			SHA:     sha,
+			Type:    objType,
+			Size:    size,
+			Content: content,
+		}, nil
+	}
+}
+
+// Close kills the subprocess if it is still running and waits for it to exit.
+func (it *ObjectIterator) Close() error {
+	if it.cmd.Process != nil {
+		_ = it.cmd.Process.Kill()
+	}
+	// Wait collects the exit status; ignore the error since we killed it.
+	_ = it.cmd.Wait()
+	return nil
 }

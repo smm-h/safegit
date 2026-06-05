@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -904,5 +905,256 @@ func TestCatFileBlobNotFound(t *testing.T) {
 	_, err := CatFileBlob(ctx, "0000000000000000000000000000000000000000")
 	if err == nil {
 		t.Error("CatFileBlob with nonexistent SHA should return error")
+	}
+}
+
+// initRepoWithCommits creates a repo with multiple commits and files, suitable
+// for cat-file --batch-all-objects tests. Returns the repo dir and a map of
+// known blob SHAs to their content.
+func initRepoWithCommits(t *testing.T) (string, map[string]string) {
+	t.Helper()
+	dir := t.TempDir()
+
+	cmds := [][]string{
+		{"git", "init", "--initial-branch=main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	// Create 3 commits with different files.
+	files := map[string]string{
+		"a.txt": "alpha\n",
+		"b.txt": "bravo\n",
+		"c.txt": "charlie\n",
+	}
+	for name, content := range files {
+		os.WriteFile(filepath.Join(dir, name), []byte(content), 0644)
+		for _, args := range [][]string{
+			{"git", "add", name},
+			{"git", "commit", "-m", "add " + name},
+		} {
+			cmd := exec.Command(args[0], args[1:]...)
+			cmd.Dir = dir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%v failed: %v\n%s", args, err, out)
+			}
+		}
+	}
+
+	// Collect known blob SHAs.
+	knownBlobs := make(map[string]string)
+	for name, content := range files {
+		cmd := exec.Command("git", "rev-parse", "HEAD:"+name)
+		cmd.Dir = dir
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("rev-parse HEAD:%s: %v", name, err)
+		}
+		knownBlobs[strings.TrimSpace(string(out))] = content
+	}
+	return dir, knownBlobs
+}
+
+func TestCatFileBatchAllEnumerates(t *testing.T) {
+	dir, _ := initRepoWithCommits(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	it, err := CatFileBatchAll(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer it.Close()
+
+	counts := map[string]int{}
+	for {
+		entry, err := it.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			t.Fatal(err)
+		}
+		counts[entry.Type]++
+	}
+
+	// 3 commits, at least 3 blobs (a.txt, b.txt, c.txt)
+	if counts["commit"] < 3 {
+		t.Errorf("commit count = %d, want >= 3", counts["commit"])
+	}
+	if counts["blob"] < 3 {
+		t.Errorf("blob count = %d, want >= 3", counts["blob"])
+	}
+	// Trees should never appear (they are skipped).
+	if counts["tree"] != 0 {
+		t.Errorf("tree count = %d, want 0 (trees should be skipped)", counts["tree"])
+	}
+}
+
+func TestCatFileBatchAllSkipsTrees(t *testing.T) {
+	dir, _ := initRepoWithCommits(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	it, err := CatFileBatchAll(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer it.Close()
+
+	for {
+		entry, err := it.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			t.Fatal(err)
+		}
+		if entry.Type == "tree" {
+			t.Fatalf("got tree entry %s, expected trees to be skipped", entry.SHA)
+		}
+	}
+}
+
+func TestCatFileBatchAllContent(t *testing.T) {
+	dir, knownBlobs := initRepoWithCommits(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	it, err := CatFileBatchAll(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer it.Close()
+
+	found := make(map[string]bool)
+	for {
+		entry, err := it.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			t.Fatal(err)
+		}
+		if entry.Type != "blob" {
+			continue
+		}
+		if expected, ok := knownBlobs[entry.SHA]; ok {
+			if string(entry.Content) != expected {
+				t.Errorf("blob %s content = %q, want %q", entry.SHA, entry.Content, expected)
+			}
+			found[entry.SHA] = true
+		}
+	}
+
+	for sha := range knownBlobs {
+		if !found[sha] {
+			t.Errorf("known blob %s not found in iteration", sha)
+		}
+	}
+}
+
+func TestCatFileBatchAllIncludesUnreachable(t *testing.T) {
+	dir := t.TempDir()
+	cmds := [][]string{
+		{"git", "init", "--initial-branch=main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	// Create a commit, then amend it to make the original unreachable.
+	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("original\n"), 0644)
+	for _, args := range [][]string{
+		{"git", "add", "file.txt"},
+		{"git", "commit", "-m", "original"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	// Record the original commit SHA before amending.
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalSHA := strings.TrimSpace(string(out))
+
+	// Amend the commit (makes the original commit unreachable).
+	amendCmd := exec.Command("git", "commit", "--amend", "-m", "amended")
+	amendCmd.Dir = dir
+	if out, err := amendCmd.CombinedOutput(); err != nil {
+		t.Fatalf("amend failed: %v\n%s", err, out)
+	}
+
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	it, err := CatFileBatchAll(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer it.Close()
+
+	foundUnreachable := false
+	for {
+		entry, err := it.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			t.Fatal(err)
+		}
+		if entry.SHA == originalSHA {
+			foundUnreachable = true
+			break
+		}
+	}
+
+	if !foundUnreachable {
+		t.Errorf("unreachable commit %s not found in --batch-all-objects output", originalSHA)
+	}
+}
+
+func TestCatFileBatchAllClose(t *testing.T) {
+	dir, _ := initRepoWithCommits(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	it, err := CatFileBatchAll(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Read just one object, then close immediately.
+	entry, err := it.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry == nil {
+		t.Fatal("expected at least one object")
+	}
+
+	// Close should not panic or leak.
+	if err := it.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
 	}
 }
