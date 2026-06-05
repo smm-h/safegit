@@ -68,3 +68,43 @@ func replaceInTree(ctx context.Context, treeSHA string, filePath string, newBlob
 	}
 	return newTreeSHA, nil
 }
+
+// replaceInTreeByBlobMap walks a tree recursively and replaces any blob whose
+// SHA is a key in blobMap with the corresponding value. Subtrees are recursed
+// into. If no blobs match, the original treeSHA is returned unchanged.
+func replaceInTreeByBlobMap(ctx context.Context, treeSHA string, blobMap map[string]string) (string, error) {
+	entries, err := git.LsTree(ctx, treeSHA)
+	if err != nil {
+		return "", fmt.Errorf("ls-tree %s: %w", treeSHA, err)
+	}
+
+	changed := false
+	for i, e := range entries {
+		switch e.ObjectType {
+		case "blob":
+			if newSHA, ok := blobMap[e.SHA]; ok {
+				entries[i].SHA = newSHA
+				changed = true
+			}
+		case "tree":
+			newSubSHA, err := replaceInTreeByBlobMap(ctx, e.SHA, blobMap)
+			if err != nil {
+				return "", err
+			}
+			if newSubSHA != e.SHA {
+				entries[i].SHA = newSubSHA
+				changed = true
+			}
+		}
+	}
+
+	if !changed {
+		return treeSHA, nil
+	}
+
+	newTreeSHA, err := git.MkTree(ctx, entries)
+	if err != nil {
+		return "", fmt.Errorf("mktree: %w", err)
+	}
+	return newTreeSHA, nil
+}
