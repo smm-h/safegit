@@ -42,15 +42,15 @@ func replaceInTree(ctx context.Context, treeSHA string, filePath string, newBlob
 			// Path component exists but is not a tree -- file not found.
 			return treeSHA, nil
 		}
-		newSubtreeSHA, err := replaceInTree(ctx, subtreeEntry.BlobSHA, segments[1], newBlobSHA)
+		newSubtreeSHA, err := replaceInTree(ctx, subtreeEntry.SHA, segments[1], newBlobSHA)
 		if err != nil {
 			return "", err
 		}
 		// If the subtree didn't change (file not found deeper), propagate.
-		if newSubtreeSHA == subtreeEntry.BlobSHA {
+		if newSubtreeSHA == subtreeEntry.SHA {
 			return treeSHA, nil
 		}
-		entries[idx].BlobSHA = newSubtreeSHA
+		entries[idx].SHA = newSubtreeSHA
 	} else {
 		// Base case: leaf entry.
 		if newBlobSHA == "" {
@@ -58,7 +58,7 @@ func replaceInTree(ctx context.Context, treeSHA string, filePath string, newBlob
 			entries = append(entries[:idx], entries[idx+1:]...)
 		} else {
 			// Replace the blob SHA, preserving mode and type.
-			entries[idx].BlobSHA = newBlobSHA
+			entries[idx].SHA = newBlobSHA
 		}
 	}
 

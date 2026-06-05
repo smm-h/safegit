@@ -39,8 +39,8 @@ func detectMoves(
 	pathToBlob := make(map[string]string, len(entries))
 	blobToPaths := make(map[string][]string)
 	for _, e := range entries {
-		pathToBlob[e.Path] = e.BlobSHA
-		blobToPaths[e.BlobSHA] = append(blobToPaths[e.BlobSHA], e.Path)
+		pathToBlob[e.Path] = e.SHA
+		blobToPaths[e.SHA] = append(blobToPaths[e.SHA], e.Path)
 	}
 
 	// Build a set of explicitly-listed repo-relative paths.

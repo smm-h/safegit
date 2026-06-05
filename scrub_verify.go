@@ -170,11 +170,11 @@ func verifyScrub(ctx context.Context, shaMap map[string]string, filePath string,
 		// Build maps from path -> blob SHA for comparison.
 		oldMap := make(map[string]string, len(oldEntries))
 		for _, e := range oldEntries {
-			oldMap[e.Path] = e.BlobSHA
+			oldMap[e.Path] = e.SHA
 		}
 		newMap := make(map[string]string, len(newEntries))
 		for _, e := range newEntries {
-			newMap[e.Path] = e.BlobSHA
+			newMap[e.Path] = e.SHA
 		}
 
 		checks++

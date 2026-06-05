@@ -118,7 +118,7 @@ func findBlobInTree(t *testing.T, treeSHA, filePath string) string {
 	}
 	for _, e := range entries {
 		if e.Path == filePath {
-			return e.BlobSHA
+			return e.SHA
 		}
 	}
 	return ""
