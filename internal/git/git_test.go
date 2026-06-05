@@ -390,3 +390,357 @@ func TestCommitTreeWithAuthorMultipleParents(t *testing.T) {
 		t.Errorf("Parents %v does not contain shaB %s", info.Parents, shaB)
 	}
 }
+
+// initRepoWithSubdir creates a repo with a file and a subdirectory containing
+// another file. Returns the repo dir. Tree structure:
+//
+//	hello.txt   (blob, "hello\n")
+//	sub/        (tree)
+//	  world.txt (blob, "world\n")
+func initRepoWithSubdir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	cmds := [][]string{
+		{"git", "init", "--initial-branch=main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+	os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hello\n"), 0644)
+	os.MkdirAll(filepath.Join(dir, "sub"), 0755)
+	os.WriteFile(filepath.Join(dir, "sub", "world.txt"), []byte("world\n"), 0644)
+	for _, args := range [][]string{
+		{"git", "add", "hello.txt", "sub/world.txt"},
+		{"git", "commit", "-m", "initial with subdir"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+	return dir
+}
+
+func TestLsTreeAllPopulatesMode(t *testing.T) {
+	dir := initRepoWithSubdir(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	entries, err := LsTreeAll(ctx, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(entries) != 2 {
+		t.Fatalf("LsTreeAll returned %d entries, want 2", len(entries))
+	}
+
+	// LsTreeAll is recursive and blob-only, so we get hello.txt and sub/world.txt
+	for _, e := range entries {
+		if e.Mode == "" {
+			t.Errorf("entry %q has empty Mode", e.Path)
+		}
+		if e.ObjectType != "blob" {
+			t.Errorf("entry %q has ObjectType %q, want blob", e.Path, e.ObjectType)
+		}
+		if e.BlobSHA == "" {
+			t.Errorf("entry %q has empty BlobSHA", e.Path)
+		}
+		if len(e.BlobSHA) != 40 {
+			t.Errorf("entry %q BlobSHA = %q, want 40-char SHA", e.Path, e.BlobSHA)
+		}
+		// Regular files should be 100644
+		if e.Mode != "100644" {
+			t.Errorf("entry %q has Mode %q, want 100644", e.Path, e.Mode)
+		}
+	}
+}
+
+func TestLsTreeReturnsOneLevelWithSubtrees(t *testing.T) {
+	dir := initRepoWithSubdir(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	entries, err := LsTree(ctx, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// At the top level we should see: hello.txt (blob) and sub (tree)
+	if len(entries) != 2 {
+		t.Fatalf("LsTree returned %d entries, want 2", len(entries))
+	}
+
+	entryMap := make(map[string]TreeEntry)
+	for _, e := range entries {
+		entryMap[e.Path] = e
+	}
+
+	hello, ok := entryMap["hello.txt"]
+	if !ok {
+		t.Fatal("missing hello.txt entry")
+	}
+	if hello.ObjectType != "blob" {
+		t.Errorf("hello.txt ObjectType = %q, want blob", hello.ObjectType)
+	}
+	if hello.Mode != "100644" {
+		t.Errorf("hello.txt Mode = %q, want 100644", hello.Mode)
+	}
+	if len(hello.BlobSHA) != 40 {
+		t.Errorf("hello.txt BlobSHA = %q, want 40-char SHA", hello.BlobSHA)
+	}
+
+	sub, ok := entryMap["sub"]
+	if !ok {
+		t.Fatal("missing sub entry")
+	}
+	if sub.ObjectType != "tree" {
+		t.Errorf("sub ObjectType = %q, want tree", sub.ObjectType)
+	}
+	if sub.Mode != "040000" {
+		t.Errorf("sub Mode = %q, want 040000", sub.Mode)
+	}
+	if len(sub.BlobSHA) != 40 {
+		t.Errorf("sub BlobSHA = %q, want 40-char SHA", sub.BlobSHA)
+	}
+}
+
+func TestLsTreeSubtreeEntries(t *testing.T) {
+	dir := initRepoWithSubdir(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	// Get the subtree SHA from the top-level listing
+	entries, err := LsTree(ctx, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var subTreeSHA string
+	for _, e := range entries {
+		if e.Path == "sub" && e.ObjectType == "tree" {
+			subTreeSHA = e.BlobSHA
+		}
+	}
+	if subTreeSHA == "" {
+		t.Fatal("could not find sub tree SHA")
+	}
+
+	// LsTree the subtree directly
+	subEntries, err := LsTree(ctx, subTreeSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subEntries) != 1 {
+		t.Fatalf("LsTree(sub) returned %d entries, want 1", len(subEntries))
+	}
+	if subEntries[0].Path != "world.txt" {
+		t.Errorf("sub entry Path = %q, want world.txt", subEntries[0].Path)
+	}
+	if subEntries[0].ObjectType != "blob" {
+		t.Errorf("sub entry ObjectType = %q, want blob", subEntries[0].ObjectType)
+	}
+}
+
+func TestHashObjectWrite(t *testing.T) {
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	// Create a file
+	testFile := filepath.Join(dir, "hashme.txt")
+	os.WriteFile(testFile, []byte("hash me\n"), 0644)
+
+	// Hash without writing (existing function)
+	shaNoWrite, err := HashObject(ctx, testFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Hash with writing
+	shaWrite, err := HashObjectWrite(ctx, testFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// SHAs must match
+	if shaNoWrite != shaWrite {
+		t.Errorf("HashObject = %q, HashObjectWrite = %q, want equal", shaNoWrite, shaWrite)
+	}
+
+	// Verify the blob exists in the object store via cat-file
+	out, _, err := Run(ctx, "cat-file", "-p", shaWrite)
+	if err != nil {
+		t.Fatalf("cat-file -p %s failed: %v (blob not persisted)", shaWrite, err)
+	}
+	if out != "hash me\n" {
+		t.Errorf("cat-file -p returned %q, want %q", out, "hash me\n")
+	}
+}
+
+func TestMkTree(t *testing.T) {
+	dir := initRepoWithSubdir(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	// Get the current top-level tree entries
+	entries, err := LsTree(ctx, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Reconstruct the same tree with MkTree
+	treeSHA, err := MkTree(ctx, entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(treeSHA) != 40 {
+		t.Fatalf("MkTree returned %q, want 40-char SHA", treeSHA)
+	}
+
+	// The reconstructed tree should match the original HEAD tree
+	origTree, _, err := Run(ctx, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	origTree = strings.TrimSpace(origTree)
+
+	if treeSHA != origTree {
+		t.Errorf("MkTree produced %q, want HEAD tree %q", treeSHA, origTree)
+	}
+
+	// Verify by listing the new tree
+	newEntries, err := LsTree(ctx, treeSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(newEntries) != len(entries) {
+		t.Fatalf("new tree has %d entries, want %d", len(newEntries), len(entries))
+	}
+}
+
+func TestMkTreeRoundTrip(t *testing.T) {
+	dir := initRepoWithSubdir(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	// Read the top-level tree
+	entries, err := LsTree(ctx, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a new blob to replace hello.txt
+	newFile := filepath.Join(dir, "newhello.txt")
+	os.WriteFile(newFile, []byte("modified hello\n"), 0644)
+	newBlobSHA, err := HashObjectWrite(ctx, newFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Modify the entries: replace hello.txt's blob SHA
+	var modified []TreeEntry
+	for _, e := range entries {
+		if e.Path == "hello.txt" {
+			modified = append(modified, TreeEntry{
+				BlobSHA:    newBlobSHA,
+				Path:       e.Path,
+				Mode:       e.Mode,
+				ObjectType: e.ObjectType,
+			})
+		} else {
+			modified = append(modified, e)
+		}
+	}
+
+	// Create the new tree
+	newTreeSHA, err := MkTree(ctx, modified)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// It should differ from the original tree
+	origTree, _, _ := Run(ctx, "rev-parse", "HEAD^{tree}")
+	origTree = strings.TrimSpace(origTree)
+	if newTreeSHA == origTree {
+		t.Error("modified tree SHA equals original tree SHA, expected different")
+	}
+
+	// Read back the new tree and verify the modification took effect
+	readBack, err := LsTree(ctx, newTreeSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entryMap := make(map[string]TreeEntry)
+	for _, e := range readBack {
+		entryMap[e.Path] = e
+	}
+
+	hello, ok := entryMap["hello.txt"]
+	if !ok {
+		t.Fatal("hello.txt missing from rebuilt tree")
+	}
+	if hello.BlobSHA != newBlobSHA {
+		t.Errorf("hello.txt BlobSHA = %q, want %q", hello.BlobSHA, newBlobSHA)
+	}
+
+	// Verify the sub tree entry was preserved unchanged
+	sub, ok := entryMap["sub"]
+	if !ok {
+		t.Fatal("sub missing from rebuilt tree")
+	}
+	if sub.ObjectType != "tree" {
+		t.Errorf("sub ObjectType = %q, want tree", sub.ObjectType)
+	}
+
+	// Verify sub's contents are intact by listing it
+	subEntries, err := LsTree(ctx, sub.BlobSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subEntries) != 1 || subEntries[0].Path != "world.txt" {
+		t.Errorf("sub tree contents unexpected: %+v", subEntries)
+	}
+}
+
+func TestLsTreeEmptyTree(t *testing.T) {
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	// HEAD from InitBareRepo is an empty commit (--allow-empty), so the tree is empty
+	entries, err := LsTree(ctx, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("LsTree on empty tree returned %d entries, want 0", len(entries))
+	}
+}
+
+func TestMkTreeEmptyEntries(t *testing.T) {
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	// MkTree with no entries should produce the empty tree
+	treeSHA, err := MkTree(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The well-known SHA of the empty tree
+	emptyTree, _, _ := Run(ctx, "rev-parse", "HEAD^{tree}")
+	emptyTree = strings.TrimSpace(emptyTree)
+
+	if treeSHA != emptyTree {
+		t.Errorf("MkTree(nil) = %q, want empty tree %q", treeSHA, emptyTree)
+	}
+}

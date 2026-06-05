@@ -384,22 +384,19 @@ func CommitTreeWithAuthor(ctx context.Context, treeSHA string, parentSHAs []stri
 	return strings.TrimSpace(out), nil
 }
 
-// TreeEntry represents a blob entry from git ls-tree.
+// TreeEntry represents an entry from git ls-tree (blob, tree, or other object).
 type TreeEntry struct {
-	BlobSHA string // SHA of the blob object
-	Path    string // repo-relative path
+	BlobSHA    string // SHA of the object (blob or tree)
+	Path       string // repo-relative path (full path for recursive, basename for non-recursive)
+	Mode       string // file mode (e.g. "100644", "040000")
+	ObjectType string // object type (e.g. "blob", "tree")
 }
 
-// LsTreeAll returns all blob entries in the given treeish, recursively.
-// Empty trees return an empty slice, not an error.
-func LsTreeAll(ctx context.Context, treeish string) ([]TreeEntry, error) {
-	out, _, err := Run(ctx, "ls-tree", "-r", "-z", treeish)
-	if err != nil {
-		return nil, fmt.Errorf("ls-tree %s: %w", treeish, err)
-	}
-
+// parseLsTreeOutput parses NUL-delimited git ls-tree output into TreeEntry
+// slices. When blobOnly is true, non-blob entries are skipped.
+func parseLsTreeOutput(out string, blobOnly bool) []TreeEntry {
 	if strings.TrimSpace(out) == "" {
-		return nil, nil
+		return nil
 	}
 
 	var entries []TreeEntry
@@ -420,15 +417,38 @@ func LsTreeAll(ctx context.Context, treeish string) ([]TreeEntry, error) {
 			continue
 		}
 		objType := fields[1]
-		if objType != "blob" {
+		if blobOnly && objType != "blob" {
 			continue
 		}
 		entries = append(entries, TreeEntry{
-			BlobSHA: fields[2],
-			Path:    path,
+			BlobSHA:    fields[2],
+			Path:       path,
+			Mode:       fields[0],
+			ObjectType: objType,
 		})
 	}
-	return entries, nil
+	return entries
+}
+
+// LsTreeAll returns all blob entries in the given treeish, recursively.
+// Empty trees return an empty slice, not an error.
+func LsTreeAll(ctx context.Context, treeish string) ([]TreeEntry, error) {
+	out, _, err := Run(ctx, "ls-tree", "-r", "-z", treeish)
+	if err != nil {
+		return nil, fmt.Errorf("ls-tree %s: %w", treeish, err)
+	}
+	return parseLsTreeOutput(out, true), nil
+}
+
+// LsTree returns all entries (blobs and subtrees) at one level of the given
+// treeish, without recursing into subtrees. Each entry includes Mode and
+// ObjectType so callers can distinguish blobs from trees.
+func LsTree(ctx context.Context, treeish string) ([]TreeEntry, error) {
+	out, _, err := Run(ctx, "ls-tree", "-z", treeish)
+	if err != nil {
+		return nil, fmt.Errorf("ls-tree %s: %w", treeish, err)
+	}
+	return parseLsTreeOutput(out, false), nil
 }
 
 // HashObject returns the blob SHA for a file without writing to the object store.
@@ -436,6 +456,31 @@ func HashObject(ctx context.Context, path string) (string, error) {
 	out, _, err := Run(ctx, "hash-object", "--", path)
 	if err != nil {
 		return "", fmt.Errorf("hash-object %s: %w", path, err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// HashObjectWrite hashes a file and writes the blob to the object store,
+// returning the blob SHA.
+func HashObjectWrite(ctx context.Context, path string) (string, error) {
+	out, _, err := Run(ctx, "hash-object", "-w", "--", path)
+	if err != nil {
+		return "", fmt.Errorf("hash-object -w %s: %w", path, err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// MkTree creates a tree object from a slice of TreeEntry values and returns
+// the tree SHA. Each entry must have Mode, ObjectType, BlobSHA, and Path
+// populated. Input is piped to `git mktree` as "<mode> <type> <sha>\t<name>\n".
+func MkTree(ctx context.Context, entries []TreeEntry) (string, error) {
+	var buf bytes.Buffer
+	for _, e := range entries {
+		fmt.Fprintf(&buf, "%s %s %s\t%s\n", e.Mode, e.ObjectType, e.BlobSHA, e.Path)
+	}
+	out, _, err := RunWithEnvStdin(ctx, nil, buf.Bytes(), "mktree")
+	if err != nil {
+		return "", fmt.Errorf("mktree: %w", err)
 	}
 	return strings.TrimSpace(out), nil
 }
