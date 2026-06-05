@@ -228,6 +228,32 @@ func verifyScrub(ctx context.Context, shaMap map[string]string, filePath string,
 		}
 	}
 
+	// --- Check 7: Branch refs remapped ---
+	// Every branch should point to a post-rewrite SHA. If a branch's target
+	// appears as a key in shaMap that maps to a different value, the branch
+	// still points to a pre-rewrite commit.
+	branchOut, _, err := git.Run(ctx, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/")
+	if err != nil {
+		failures = append(failures, fmt.Sprintf("check 7 (branch refs): failed to list branches: %v", err))
+	} else {
+		branchLines := splitNonEmpty(branchOut)
+		for _, line := range branchLines {
+			parts := strings.Fields(line)
+			if len(parts) != 2 {
+				continue
+			}
+			refname := parts[0]
+			commitSHA := parts[1]
+
+			checks++
+			if mapped, ok := shaMap[commitSHA]; ok && mapped != commitSHA {
+				failures = append(failures, fmt.Sprintf(
+					"check 7 (branch stale pointer): branch %q points to old SHA %s, should point to remapped SHA %s",
+					refname, commitSHA[:12], mapped[:12]))
+			}
+		}
+	}
+
 	return failures, checks
 }
 
