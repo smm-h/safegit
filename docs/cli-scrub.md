@@ -15,7 +15,7 @@ surgically replace or remove a file across history
 
 | Name | Short | Type | Default | Env | Description |
 | --- | --- | --- | --- | --- | --- |
-| `--from` |  | str |  |  | starting commit SHA or ref |
+| `--from` |  | str |  |  | first commit to include in the rewrite |
 | `--reason` |  | str |  |  | audit trail explaining why the scrub is needed |
 
 ## Arguments

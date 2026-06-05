@@ -18,6 +18,7 @@ order: 90
 - [internal/lock](internal-lock.html)
 - [internal/oplog](internal-oplog.html)
 - [internal/repo](internal-repo.html)
+- [internal/scan](internal-scan.html)
 - [internal/stage](internal-stage.html)
 - [internal/testutil](internal-testutil.html)
 - [internal/trailer](internal-trailer.html)
