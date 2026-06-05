@@ -361,6 +361,23 @@ func scrubMatchExecute(
 		},
 	})
 
+	// Surgical post-rewrite cleanup: expire tainted reflog entries and prune old objects
+	if err := cleanupAfterRewrite(ctx, flags, cmd, shaMap, sgDir); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: post-rewrite cleanup: %v\n", err)
+	}
+
+	// Post-rewrite verification: re-scan all objects to confirm the secret is gone
+	fmt.Println("Verifying secret removal...")
+	exitCode := 0
+	if err := verifySecretRemoved(ctx, compiledPattern); err != nil {
+		fmt.Fprintf(os.Stderr, "CRITICAL: %v\n", err)
+		fmt.Fprintln(os.Stderr, "Secret may still be present in the local object store.")
+		fmt.Fprintln(os.Stderr, "Run 'git reflog expire --expire=now --all && git gc --prune=now' to force cleanup.")
+		exitCode = 1
+	} else {
+		fmt.Println("Verification passed: no matches found in object store.")
+	}
+
 	// Summary
 	fmt.Printf("\nScrub complete:\n")
 	fmt.Printf("  %d commits rewritten\n", rewrittenCount)
@@ -371,7 +388,7 @@ func scrubMatchExecute(
 	fmt.Printf("  New HEAD: %s\n", newHeadSHA[:12])
 	fmt.Printf("\nTo update the remote, run: git push --force-with-lease\n")
 
-	return 0
+	return exitCode
 }
 
 // rewriteTagAnnotations does a second pass over annotated tags after updateRefs,

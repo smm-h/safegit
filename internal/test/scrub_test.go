@@ -1064,6 +1064,62 @@ func TestScrubMultipleBranches(t *testing.T) {
 	}
 }
 
+// TestCleanupExpiresTaintedReflog verifies that after scrub, old (pre-rewrite)
+// commit SHAs no longer appear in the reflog.
+func TestCleanupExpiresTaintedReflog(t *testing.T) {
+	dir := newRepo(t)
+
+	// Create commits with a secret
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "secret v1\n", "add secret")
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "secret v2\n", "update secret")
+
+	shas := revListReverse(t, dir)
+	initialSHA := shas[0]
+
+	// Capture pre-rewrite SHAs (the secret-containing commits)
+	preScrubSHAs := make(map[string]bool)
+	for _, sha := range shas[1:] { // skip initial seed commit
+		preScrubSHAs[sha] = true
+	}
+
+	// Write replacement
+	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("REDACTED\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", initialSHA, "--reason", "test cleanup reflog", "secret.txt")
+	if code != 0 {
+		t.Fatalf("scrub failed (code %d): %s", code, stderr)
+	}
+
+	// Check that no pre-rewrite SHAs appear in any reflog
+	cmd := exec.Command("git", "reflog", "show", "--format=%H", "--all")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		// --all might fail if no reflogs, try HEAD only
+		cmd = exec.Command("git", "reflog", "show", "--format=%H", "HEAD")
+		cmd.Dir = dir
+		out, _ = cmd.Output()
+	}
+
+	// Also get HEAD reflog
+	headCmd := exec.Command("git", "reflog", "show", "--format=%H", "HEAD")
+	headCmd.Dir = dir
+	headOut, _ := headCmd.Output()
+
+	allReflogSHAs := strings.TrimSpace(string(out)) + "\n" + strings.TrimSpace(string(headOut))
+	for _, line := range strings.Split(allReflogSHAs, "\n") {
+		sha := strings.TrimSpace(line)
+		if sha == "" {
+			continue
+		}
+		if preScrubSHAs[sha] {
+			t.Errorf("pre-rewrite SHA %s still in reflog after cleanup", sha[:12])
+		}
+	}
+}
+
 // TestScrubLightweightTag verifies that scrub updates lightweight tags
 // to point at the rewritten commit.
 func TestScrubLightweightTag(t *testing.T) {

@@ -123,7 +123,13 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 	}
 	shas := append([]string{fromSHA}, splitNonEmpty(out)...)
 
+	// Track old blob SHAs that get replaced, for post-cleanup verification.
+	oldBlobSHAs := make(map[string]bool)
+
 	shaMap, rewrittenCount, err := walkAndRewrite(ctx, shas, func(ctx context.Context, sha string, info git.CommitInfo, remappedParents []string) (CommitTransform, error) {
+		// Look up the old blob SHA at the target path before replacing.
+		oldBlobSHA := lookupBlobAtPath(ctx, info.Tree, filePath)
+
 		newTreeSHA, err := replaceInTree(ctx, info.Tree, filePath, newBlobSHA)
 		if err != nil {
 			return CommitTransform{}, fmt.Errorf("replacing in tree for commit %s: %w", sha, err)
@@ -131,6 +137,10 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 		var xform CommitTransform
 		if newTreeSHA != info.Tree {
 			xform.TreeSHA = newTreeSHA
+			// Tree changed, so the old blob was replaced. Track it.
+			if oldBlobSHA != "" && oldBlobSHA != newBlobSHA {
+				oldBlobSHAs[oldBlobSHA] = true
+			}
 		}
 		return xform, nil
 	}, flags.verbose)
@@ -189,6 +199,11 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 			"rewritten": rewrittenCount,
 		},
 	})
+
+	// Surgical post-rewrite cleanup: expire tainted reflog entries and prune old objects
+	if err := cleanupAfterRewrite(ctx, flags, cmd, shaMap, sgDir); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: post-rewrite cleanup: %v\n", err)
+	}
 
 	// Summary
 	fmt.Printf("\nScrub complete:\n")

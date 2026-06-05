@@ -69,6 +69,38 @@ func replaceInTree(ctx context.Context, treeSHA string, filePath string, newBlob
 	return newTreeSHA, nil
 }
 
+// lookupBlobAtPath returns the blob SHA at the given file path within a tree,
+// or "" if the path does not exist. This is used to track which old blobs
+// get replaced during a scrub rewrite.
+func lookupBlobAtPath(ctx context.Context, treeSHA string, filePath string) string {
+	segments := strings.SplitN(filePath, "/", 2)
+	name := segments[0]
+
+	entries, err := git.LsTree(ctx, treeSHA)
+	if err != nil {
+		return ""
+	}
+
+	for _, e := range entries {
+		if e.Path != name {
+			continue
+		}
+		if len(segments) == 2 {
+			// Nested path: recurse into the subtree.
+			if e.ObjectType != "tree" {
+				return ""
+			}
+			return lookupBlobAtPath(ctx, e.SHA, segments[1])
+		}
+		// Leaf entry.
+		if e.ObjectType == "blob" {
+			return e.SHA
+		}
+		return ""
+	}
+	return ""
+}
+
 // replaceInTreeByBlobMap walks a tree recursively and replaces any blob whose
 // SHA is a key in blobMap with the corresponding value. Subtrees are recursed
 // into. If no blobs match, the original treeSHA is returned unchanged.
