@@ -403,7 +403,7 @@ func CommitTreeWithAuthor(ctx context.Context, treeSHA string, parentSHAs []stri
 
 // TreeEntry represents an entry from git ls-tree (blob, tree, or other object).
 type TreeEntry struct {
-	BlobSHA    string // SHA of the object (blob or tree)
+	SHA        string // SHA of the object (blob or tree)
 	Path       string // repo-relative path (full path for recursive, basename for non-recursive)
 	Mode       string // file mode (e.g. "100644", "040000")
 	ObjectType string // object type (e.g. "blob", "tree")
@@ -438,7 +438,7 @@ func parseLsTreeOutput(out string, blobOnly bool) []TreeEntry {
 			continue
 		}
 		entries = append(entries, TreeEntry{
-			BlobSHA:    fields[2],
+			SHA:        fields[2],
 			Path:       path,
 			Mode:       fields[0],
 			ObjectType: objType,
@@ -487,13 +487,32 @@ func HashObjectWrite(ctx context.Context, path string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// HashObjectWriteBytes writes in-memory bytes as a blob to the object store
+// via git hash-object -w --stdin, returning the blob SHA.
+func HashObjectWriteBytes(ctx context.Context, data []byte) (string, error) {
+	out, _, err := RunWithEnvStdin(ctx, nil, data, "hash-object", "-w", "--stdin")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// CatFileBlob reads blob content by SHA via git cat-file -p.
+func CatFileBlob(ctx context.Context, sha string) ([]byte, error) {
+	out, _, err := Run(ctx, "cat-file", "-p", sha)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(out), nil
+}
+
 // MkTree creates a tree object from a slice of TreeEntry values and returns
-// the tree SHA. Each entry must have Mode, ObjectType, BlobSHA, and Path
+// the tree SHA. Each entry must have Mode, ObjectType, SHA, and Path
 // populated. Input is piped to `git mktree` as "<mode> <type> <sha>\t<name>\n".
 func MkTree(ctx context.Context, entries []TreeEntry) (string, error) {
 	var buf bytes.Buffer
 	for _, e := range entries {
-		fmt.Fprintf(&buf, "%s %s %s\t%s\n", e.Mode, e.ObjectType, e.BlobSHA, e.Path)
+		fmt.Fprintf(&buf, "%s %s %s\t%s\n", e.Mode, e.ObjectType, e.SHA, e.Path)
 	}
 	out, _, err := RunWithEnvStdin(ctx, nil, buf.Bytes(), "mktree")
 	if err != nil {

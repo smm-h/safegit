@@ -527,11 +527,11 @@ func TestLsTreeAllPopulatesMode(t *testing.T) {
 		if e.ObjectType != "blob" {
 			t.Errorf("entry %q has ObjectType %q, want blob", e.Path, e.ObjectType)
 		}
-		if e.BlobSHA == "" {
-			t.Errorf("entry %q has empty BlobSHA", e.Path)
+		if e.SHA == "" {
+			t.Errorf("entry %q has empty SHA", e.Path)
 		}
-		if len(e.BlobSHA) != 40 {
-			t.Errorf("entry %q BlobSHA = %q, want 40-char SHA", e.Path, e.BlobSHA)
+		if len(e.SHA) != 40 {
+			t.Errorf("entry %q SHA = %q, want 40-char SHA", e.Path, e.SHA)
 		}
 		// Regular files should be 100644
 		if e.Mode != "100644" {
@@ -570,8 +570,8 @@ func TestLsTreeReturnsOneLevelWithSubtrees(t *testing.T) {
 	if hello.Mode != "100644" {
 		t.Errorf("hello.txt Mode = %q, want 100644", hello.Mode)
 	}
-	if len(hello.BlobSHA) != 40 {
-		t.Errorf("hello.txt BlobSHA = %q, want 40-char SHA", hello.BlobSHA)
+	if len(hello.SHA) != 40 {
+		t.Errorf("hello.txt SHA = %q, want 40-char SHA", hello.SHA)
 	}
 
 	sub, ok := entryMap["sub"]
@@ -584,8 +584,8 @@ func TestLsTreeReturnsOneLevelWithSubtrees(t *testing.T) {
 	if sub.Mode != "040000" {
 		t.Errorf("sub Mode = %q, want 040000", sub.Mode)
 	}
-	if len(sub.BlobSHA) != 40 {
-		t.Errorf("sub BlobSHA = %q, want 40-char SHA", sub.BlobSHA)
+	if len(sub.SHA) != 40 {
+		t.Errorf("sub SHA = %q, want 40-char SHA", sub.SHA)
 	}
 }
 
@@ -602,7 +602,7 @@ func TestLsTreeSubtreeEntries(t *testing.T) {
 	var subTreeSHA string
 	for _, e := range entries {
 		if e.Path == "sub" && e.ObjectType == "tree" {
-			subTreeSHA = e.BlobSHA
+			subTreeSHA = e.SHA
 		}
 	}
 	if subTreeSHA == "" {
@@ -726,7 +726,7 @@ func TestMkTreeRoundTrip(t *testing.T) {
 	for _, e := range entries {
 		if e.Path == "hello.txt" {
 			modified = append(modified, TreeEntry{
-				BlobSHA:    newBlobSHA,
+				SHA:        newBlobSHA,
 				Path:       e.Path,
 				Mode:       e.Mode,
 				ObjectType: e.ObjectType,
@@ -764,8 +764,8 @@ func TestMkTreeRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("hello.txt missing from rebuilt tree")
 	}
-	if hello.BlobSHA != newBlobSHA {
-		t.Errorf("hello.txt BlobSHA = %q, want %q", hello.BlobSHA, newBlobSHA)
+	if hello.SHA != newBlobSHA {
+		t.Errorf("hello.txt SHA = %q, want %q", hello.SHA, newBlobSHA)
 	}
 
 	// Verify the sub tree entry was preserved unchanged
@@ -778,7 +778,7 @@ func TestMkTreeRoundTrip(t *testing.T) {
 	}
 
 	// Verify sub's contents are intact by listing it
-	subEntries, err := LsTree(ctx, sub.BlobSHA)
+	subEntries, err := LsTree(ctx, sub.SHA)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -819,5 +819,90 @@ func TestMkTreeEmptyEntries(t *testing.T) {
 
 	if treeSHA != emptyTree {
 		t.Errorf("MkTree(nil) = %q, want empty tree %q", treeSHA, emptyTree)
+	}
+}
+
+func TestHashObjectWriteBytes(t *testing.T) {
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	data := []byte("hello from memory\n")
+	sha, err := HashObjectWriteBytes(ctx, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sha) != 40 {
+		t.Fatalf("HashObjectWriteBytes returned %q, want 40-char SHA", sha)
+	}
+
+	// Read back via CatFileBlob and verify round-trip
+	got, err := CatFileBlob(ctx, sha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(data) {
+		t.Errorf("CatFileBlob returned %q, want %q", got, data)
+	}
+}
+
+func TestHashObjectWriteBytesEmpty(t *testing.T) {
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	sha, err := HashObjectWriteBytes(ctx, []byte{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Compute expected empty blob SHA dynamically (works for both SHA-1 and SHA-256 repos)
+	expectedSHA, _, err := RunWithEnvStdin(ctx, nil, []byte{}, "hash-object", "--stdin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedSHA = strings.TrimSpace(expectedSHA)
+
+	if sha != expectedSHA {
+		t.Errorf("HashObjectWriteBytes(empty) = %q, want %q", sha, expectedSHA)
+	}
+}
+
+func TestCatFileBlob(t *testing.T) {
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	// Create a file, add it, commit it, then read its blob via CatFileBlob
+	content := []byte("cat-file test content\n")
+	os.WriteFile(filepath.Join(dir, "cattest.txt"), content, 0644)
+	exec.Command("git", "-C", dir, "add", "cattest.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "add cattest").Run()
+
+	// Get the blob SHA from the committed tree
+	out, _, err := Run(ctx, "rev-parse", "HEAD:cattest.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blobSHA := strings.TrimSpace(out)
+
+	got, err := CatFileBlob(ctx, blobSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("CatFileBlob = %q, want %q", got, content)
+	}
+}
+
+func TestCatFileBlobNotFound(t *testing.T) {
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	// Use a syntactically valid but nonexistent SHA
+	_, err := CatFileBlob(ctx, "0000000000000000000000000000000000000000")
+	if err == nil {
+		t.Error("CatFileBlob with nonexistent SHA should return error")
 	}
 }
