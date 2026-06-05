@@ -11,10 +11,6 @@
     "docker": {
       "type": "docker",
       "local": false
-    },
-    "docs-deploy": {
-      "type": "cloudflare-pages",
-      "local": true
     }
   },
   "private": false,

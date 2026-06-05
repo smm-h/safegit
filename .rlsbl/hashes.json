@@ -1,6 +1,6 @@
 {
   ".github/workflows/ci.yml": "9159718143e1cef4273bb58c3111540031ef93e40d7275d2c41cad5b0e54e296",
-  ".github/workflows/publish.yml": "e441b12c6895023a71547aa496f59ae2acde02dc8f42f52cb8b12c80d1aa6380",
+  ".github/workflows/publish.yml": "0d21cec870cac1709cfe7cb2429e35e0b2c00da94a15b0e9fb80b5b48f62772c",
   ".goreleaser.yml": "cbe0473dcc675e3eb507ec9f0ffcfe3cefacb6e754e553af4e3c9339d2480523",
   "CHANGELOG.md": "fca781960bc4a70fce00e622926810542c6c62b34357a1228fa2e8432108c013",
   "CLAUDE.md": "03740c2f920cc79711453ee400363716c5f510a4439bc681dc91b0786aad2be2",
@@ -11,5 +11,6 @@
   ".rlsbl/lint/python.toml": "9cfbcef2e010d5fad243437bf2fd8df54a1fae70ee0762f9d11da70fe207501c",
   ".rlsbl/lint/go.toml": "807d5cf760baad6d571a5bfd43cb163efe356f7462ba9f1918d72de45f62339f",
   ".rlsbl/lint/npm.toml": "baa36014e65923d8cc5c8b83c77fa651da79351627570476402da66840027645",
-  ".rlsbl/changes/unreleased.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  ".rlsbl/changes/unreleased.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  ".rlsbl/hooks/pre-release.sh": "5ed18052eb3f3656490e64bf605e5d44787fe38759fb779e105fb25610799b2a"
 }
