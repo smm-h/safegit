@@ -20,6 +20,7 @@ const maxLineBytes = 4096
 type Entry struct {
 	Timestamp time.Time              `json:"ts"`
 	PID       int                    `json:"pid"`
+	SessionID string                 `json:"sid,omitempty"`
 	Op        string                 `json:"op"`
 	Extra     map[string]interface{} `json:"extra,omitempty"`
 }
@@ -38,6 +39,9 @@ func Append(safegitDir string, entry Entry) error {
 	}
 	if entry.PID == 0 {
 		entry.PID = os.Getpid()
+	}
+	if entry.SessionID == "" {
+		entry.SessionID = os.Getenv("CLAUDE_CODE_SESSION_ID")
 	}
 
 	data, err := json.Marshal(entry)
@@ -179,6 +183,34 @@ func LastRefUpdate(safegitDir, ref string) (*Entry, error) {
 		}
 		if entryRef, ok := e.Extra["ref"].(string); ok && entryRef == ref {
 			// Ensure the entry has a resolvable SHA in one of the known keys
+			if hasTipSHA(e.Extra) {
+				return &e, nil
+			}
+		}
+	}
+
+	return nil, nil
+}
+
+// LastRefUpdateForSession finds the most recent oplog entry for a given ref
+// and session ID that records a new tip SHA. Same logic as LastRefUpdate but
+// with an additional session ID filter.
+// Returns nil if no matching entry is found.
+func LastRefUpdateForSession(safegitDir, ref, sessionID string) (*Entry, error) {
+	entries, err := Read(safegitDir)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		if e.SessionID != sessionID {
+			continue
+		}
+		if e.Extra == nil {
+			continue
+		}
+		if entryRef, ok := e.Extra["ref"].(string); ok && entryRef == ref {
 			if hasTipSHA(e.Extra) {
 				return &e, nil
 			}

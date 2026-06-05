@@ -181,6 +181,150 @@ func TestLastRefUpdate(t *testing.T) {
 	}
 }
 
+func TestAppendAutoFillsSessionID(t *testing.T) {
+	sgDir := setupSafegitDir(t)
+
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sess-abc-123")
+
+	entry := Entry{Op: "commit"}
+	if err := Append(sgDir, entry); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := Read(sgDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	if entries[0].SessionID != "sess-abc-123" {
+		t.Errorf("SessionID = %q, want sess-abc-123", entries[0].SessionID)
+	}
+}
+
+func TestAppendSessionIDEmptyWithoutEnv(t *testing.T) {
+	sgDir := setupSafegitDir(t)
+
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+
+	entry := Entry{Op: "commit"}
+	if err := Append(sgDir, entry); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := Read(sgDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	if entries[0].SessionID != "" {
+		t.Errorf("SessionID = %q, want empty string", entries[0].SessionID)
+	}
+}
+
+func TestSessionIDJSONRoundTrip(t *testing.T) {
+	sgDir := setupSafegitDir(t)
+
+	// Write a raw JSON line without "sid" field to simulate an old entry
+	logFile := filepath.Join(sgDir, "log")
+	oldJSON := `{"ts":"2026-04-26T12:00:00Z","pid":42,"op":"commit","extra":{"ref":"refs/heads/main","sha":"aaa"}}` + "\n"
+	if err := os.WriteFile(logFile, []byte(oldJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := Read(sgDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	if entries[0].SessionID != "" {
+		t.Errorf("SessionID = %q, want empty string for old entry without sid", entries[0].SessionID)
+	}
+	if entries[0].Op != "commit" {
+		t.Errorf("Op = %q, want commit", entries[0].Op)
+	}
+}
+
+func TestLastRefUpdateForSession(t *testing.T) {
+	sgDir := setupSafegitDir(t)
+
+	// Entries from two different sessions
+	entries := []Entry{
+		{Op: "commit", SessionID: "session-A", Extra: map[string]interface{}{"ref": "refs/heads/main", "sha": "aaa"}},
+		{Op: "commit", SessionID: "session-B", Extra: map[string]interface{}{"ref": "refs/heads/main", "sha": "bbb"}},
+		{Op: "amend", SessionID: "session-A", Extra: map[string]interface{}{"ref": "refs/heads/main", "sha": "ccc"}},
+		{Op: "commit", SessionID: "session-B", Extra: map[string]interface{}{"ref": "refs/heads/main", "sha": "ddd"}},
+	}
+	for _, e := range entries {
+		if err := Append(sgDir, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Session A's last ref update should be the amend with sha=ccc
+	got, err := LastRefUpdateForSession(sgDir, "refs/heads/main", "session-A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil entry for session-A")
+	}
+	if got.Op != "amend" {
+		t.Errorf("Op = %q, want amend", got.Op)
+	}
+	if sha, _ := got.Extra["sha"].(string); sha != "ccc" {
+		t.Errorf("sha = %q, want ccc", sha)
+	}
+	if got.SessionID != "session-A" {
+		t.Errorf("SessionID = %q, want session-A", got.SessionID)
+	}
+
+	// Session B's last ref update should be commit with sha=ddd
+	got, err = LastRefUpdateForSession(sgDir, "refs/heads/main", "session-B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil entry for session-B")
+	}
+	if sha, _ := got.Extra["sha"].(string); sha != "ddd" {
+		t.Errorf("sha = %q, want ddd", sha)
+	}
+}
+
+func TestLastRefUpdateForSessionNoMatch(t *testing.T) {
+	sgDir := setupSafegitDir(t)
+
+	// Only entries from session-A
+	entry := Entry{Op: "commit", SessionID: "session-A", Extra: map[string]interface{}{"ref": "refs/heads/main", "sha": "aaa"}}
+	if err := Append(sgDir, entry); err != nil {
+		t.Fatal(err)
+	}
+
+	// Query for session-B should return nil
+	got, err := LastRefUpdateForSession(sgDir, "refs/heads/main", "session-B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Errorf("expected nil for non-matching session, got %+v", got)
+	}
+
+	// Query for non-existent ref should also return nil
+	got, err = LastRefUpdateForSession(sgDir, "refs/heads/nonexistent", "session-A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Errorf("expected nil for non-existent ref, got %+v", got)
+	}
+}
+
 func TestConcurrentAppend(t *testing.T) {
 	sgDir := setupSafegitDir(t)
 
