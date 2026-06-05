@@ -55,40 +55,32 @@ func verifyScrub(ctx context.Context, shaMap map[string]string, filePath string,
 		}
 	}
 
-	// --- Check 2: Commit messages preserved ---
+	// --- Checks 2-5: parse each rewritten commit pair once ---
 	for _, oldSHA := range rewrittenOld {
 		newSHA := shaMap[oldSHA]
+
 		oldInfo, err := git.ParseCommit(ctx, oldSHA)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf(
-				"check 2 (messages): failed to parse old commit %s: %v", oldSHA[:12], err))
+				"checks 2-5: failed to parse old commit %s: %v", oldSHA[:12], err))
 			continue
 		}
 		newInfo, err := git.ParseCommit(ctx, newSHA)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf(
-				"check 2 (messages): failed to parse new commit %s: %v", newSHA[:12], err))
+				"checks 2-5: failed to parse new commit %s: %v", newSHA[:12], err))
 			continue
 		}
+
+		// --- Check 2: Commit messages preserved ---
 		checks++
 		if oldInfo.Message != newInfo.Message {
 			failures = append(failures, fmt.Sprintf(
 				"check 2 (messages): commit %s message changed: old=%q, new=%q",
 				oldSHA[:12], truncate(oldInfo.Message, 60), truncate(newInfo.Message, 60)))
 		}
-	}
 
-	// --- Check 3: Author/committer preserved ---
-	for _, oldSHA := range rewrittenOld {
-		newSHA := shaMap[oldSHA]
-		oldInfo, err := git.ParseCommit(ctx, oldSHA)
-		if err != nil {
-			continue // already reported in check 2
-		}
-		newInfo, err := git.ParseCommit(ctx, newSHA)
-		if err != nil {
-			continue
-		}
+		// --- Check 3: Author/committer preserved ---
 		checks++
 		if oldInfo.Author != newInfo.Author {
 			failures = append(failures, fmt.Sprintf(
@@ -101,53 +93,31 @@ func verifyScrub(ctx context.Context, shaMap map[string]string, filePath string,
 				"check 3 (author/committer): commit %s committer changed: old=%v, new=%v",
 				oldSHA[:12], oldInfo.Committer, newInfo.Committer))
 		}
-	}
 
-	// --- Check 4: Parent topology preserved ---
-	for _, oldSHA := range rewrittenOld {
-		newSHA := shaMap[oldSHA]
-		oldInfo, err := git.ParseCommit(ctx, oldSHA)
-		if err != nil {
-			continue
-		}
-		newInfo, err := git.ParseCommit(ctx, newSHA)
-		if err != nil {
-			continue
-		}
+		// --- Check 4: Parent topology preserved ---
 		checks++
 		if len(oldInfo.Parents) != len(newInfo.Parents) {
 			failures = append(failures, fmt.Sprintf(
 				"check 4 (parent topology): commit %s parent count changed: old=%d, new=%d",
 				oldSHA[:12], len(oldInfo.Parents), len(newInfo.Parents)))
-			continue
-		}
-		for i, oldParent := range oldInfo.Parents {
-			newParent := newInfo.Parents[i]
-			// The new parent should be the remapped version of the old parent.
-			expectedParent := oldParent
-			if mapped, ok := shaMap[oldParent]; ok {
-				expectedParent = mapped
+		} else {
+			for i, oldParent := range oldInfo.Parents {
+				newParent := newInfo.Parents[i]
+				// The new parent should be the remapped version of the old parent.
+				expectedParent := oldParent
+				if mapped, ok := shaMap[oldParent]; ok {
+					expectedParent = mapped
+				}
+				checks++
+				if newParent != expectedParent {
+					failures = append(failures, fmt.Sprintf(
+						"check 4 (parent topology): commit %s parent[%d] mismatch: expected %s, got %s",
+						oldSHA[:12], i, expectedParent[:12], newParent[:12]))
+				}
 			}
-			checks++
-			if newParent != expectedParent {
-				failures = append(failures, fmt.Sprintf(
-					"check 4 (parent topology): commit %s parent[%d] mismatch: expected %s, got %s",
-					oldSHA[:12], i, expectedParent[:12], newParent[:12]))
-			}
 		}
-	}
 
-	// --- Check 5: Only target file changed ---
-	for _, oldSHA := range rewrittenOld {
-		newSHA := shaMap[oldSHA]
-		oldInfo, err := git.ParseCommit(ctx, oldSHA)
-		if err != nil {
-			continue
-		}
-		newInfo, err := git.ParseCommit(ctx, newSHA)
-		if err != nil {
-			continue
-		}
+		// --- Check 5: Only target file changed ---
 		// If trees are identical, nothing to check (commit was inherited-only).
 		if oldInfo.Tree == newInfo.Tree {
 			checks++
