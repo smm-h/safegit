@@ -161,6 +161,18 @@ func runScrub(flags globalFlags, kwargs map[string]interface{}) int {
 		die(flags, cmd, 1, fmt.Sprintf("updating refs: %v", err))
 	}
 
+	// Post-rewrite verification
+	fmt.Println("Verifying...")
+	verifyFailures, verifyChecks := verifyScrub(ctx, shaMap, filePath, flags.verbose)
+	if len(verifyFailures) > 0 {
+		fmt.Fprintf(os.Stderr, "Verification warnings (%d failures):\n", len(verifyFailures))
+		for _, f := range verifyFailures {
+			fmt.Fprintf(os.Stderr, "  WARN: %s\n", f)
+		}
+	} else {
+		fmt.Printf("Verification passed: %d checks across %d rewritten commits\n", verifyChecks, rewrittenCount)
+	}
+
 	// Resolve new HEAD
 	newHeadSHA, err := git.RevParse(ctx, "HEAD")
 	if err != nil {
