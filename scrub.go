@@ -108,55 +108,19 @@ func runScrub(flags globalFlags, kwargs map[string]interface{}) int {
 	}
 	shas := append([]string{fromSHA}, splitNonEmpty(out)...)
 
-	shaMap := make(map[string]string, len(shas))
-	rewrittenCount := 0
-
-	for _, sha := range shas {
-		info, err := git.ParseCommit(ctx, sha)
-		if err != nil {
-			die(flags, cmd, 1, fmt.Sprintf("parsing commit %s: %v", sha, err))
-		}
-
-		// Remap parents through earlier rewrites
-		remappedParents := make([]string, len(info.Parents))
-		parentRemapped := false
-		for i, p := range info.Parents {
-			if mapped, ok := shaMap[p]; ok && mapped != p {
-				remappedParents[i] = mapped
-				parentRemapped = true
-			} else {
-				remappedParents[i] = p
-			}
-		}
-
-		// Replace or remove the file in this commit's tree
+	shaMap, rewrittenCount, err := walkAndRewrite(ctx, shas, func(ctx context.Context, sha string, info git.CommitInfo, remappedParents []string) (CommitTransform, error) {
 		newTreeSHA, err := replaceInTree(ctx, info.Tree, filePath, newBlobSHA)
 		if err != nil {
-			die(flags, cmd, 1, fmt.Sprintf("replacing in tree for commit %s: %v", sha, err))
+			return CommitTransform{}, fmt.Errorf("replacing in tree for commit %s: %w", sha, err)
 		}
-		treeChanged := newTreeSHA != info.Tree
-
-		// Commit needs rewriting if tree changed or any parent was remapped
-		if treeChanged || parentRemapped {
-			newSHA, err := git.CommitTreeWithAuthor(ctx, newTreeSHA, remappedParents, info.Message, info.Author, info.Committer)
-			if err != nil {
-				die(flags, cmd, 1, fmt.Sprintf("creating rewritten commit for %s: %v", sha, err))
-			}
-			shaMap[sha] = newSHA
-			rewrittenCount++
-			if flags.verbose {
-				if treeChanged {
-					fmt.Fprintf(os.Stderr, "  %s -> %s  (tree changed)\n", sha[:12], newSHA[:12])
-				} else {
-					fmt.Fprintf(os.Stderr, "  %s -> %s  (inherited)\n", sha[:12], newSHA[:12])
-				}
-			}
-		} else {
-			shaMap[sha] = sha
-			if flags.verbose {
-				fmt.Fprintf(os.Stderr, "  %s                   (unchanged)\n", sha[:12])
-			}
+		var xform CommitTransform
+		if newTreeSHA != info.Tree {
+			xform.TreeSHA = newTreeSHA
 		}
+		return xform, nil
+	}, flags.verbose)
+	if err != nil {
+		die(flags, cmd, 1, err.Error())
 	}
 
 	// Update refs: reuse updateRefs from rewrite_author.go with empty author

@@ -599,28 +599,9 @@ func rewriteCommits(ctx context.Context, oldName, newName, oldEmail, newEmail st
 	}
 
 	shas := splitNonEmpty(out)
-	shaMap := make(map[string]string, len(shas))
 	nameChanged := 0
 
-	for _, sha := range shas {
-		info, err := git.ParseCommit(ctx, sha)
-		if err != nil {
-			return nil, 0, fmt.Errorf("parsing commit %s: %w", sha, err)
-		}
-
-		// Remap parent SHAs through earlier rewrites.
-		remappedParents := make([]string, len(info.Parents))
-		parentRemapped := false
-		for i, p := range info.Parents {
-			if mapped, ok := shaMap[p]; ok && mapped != p {
-				remappedParents[i] = mapped
-				parentRemapped = true
-			} else {
-				remappedParents[i] = p
-			}
-		}
-
-		// Check if this commit matches the rewrite criteria.
+	shaMap, _, err := walkAndRewrite(ctx, shas, func(ctx context.Context, sha string, info git.CommitInfo, remappedParents []string) (CommitTransform, error) {
 		author := info.Author
 		committer := info.Committer
 		thisNameChanged := false
@@ -658,31 +639,15 @@ func rewriteCommits(ctx context.Context, oldName, newName, oldEmail, newEmail st
 			nameChanged++
 		}
 
-		// If nothing changed (no name match and no parent remapped),
-		// this commit keeps its original SHA.
-		if !thisNameChanged && !parentRemapped {
-			shaMap[sha] = sha
-			if verbose {
-				fmt.Fprintf(os.Stderr, "  %s                   (unchanged)\n", sha[:12])
-			}
-			continue
+		var xform CommitTransform
+		if thisNameChanged {
+			xform.Author = author
+			xform.Committer = committer
 		}
-
-		// Create a new commit object with the (potentially updated)
-		// author/committer and remapped parents. Tree, message, emails,
-		// and dates are preserved exactly.
-		newSHA, err := git.CommitTreeWithAuthor(ctx, info.Tree, remappedParents, info.Message, author, committer)
-		if err != nil {
-			return nil, 0, fmt.Errorf("creating rewritten commit for %s: %w", sha, err)
-		}
-		shaMap[sha] = newSHA
-		if verbose {
-			if thisNameChanged {
-				fmt.Fprintf(os.Stderr, "  %s -> %s  (name changed)\n", sha[:12], newSHA[:12])
-			} else {
-				fmt.Fprintf(os.Stderr, "  %s -> %s  (inherited)\n", sha[:12], newSHA[:12])
-			}
-		}
+		return xform, nil
+	}, verbose)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	return shaMap, nameChanged, nil
