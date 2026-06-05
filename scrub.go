@@ -205,6 +205,24 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 		fmt.Fprintf(os.Stderr, "warning: post-rewrite cleanup: %v\n", err)
 	}
 
+	// Post-cleanup verification: check that old blob SHAs were pruned
+	exitCode := 0
+	if len(oldBlobSHAs) > 0 {
+		fmt.Println("Verifying old blobs removed...")
+		oldBlobList := make([]string, 0, len(oldBlobSHAs))
+		for sha := range oldBlobSHAs {
+			oldBlobList = append(oldBlobList, sha)
+		}
+		if err := verifyOldBlobsRemoved(ctx, oldBlobList); err != nil {
+			fmt.Fprintf(os.Stderr, "CRITICAL: %v\n", err)
+			fmt.Fprintln(os.Stderr, "Old file content may still be present in the local object store.")
+			fmt.Fprintln(os.Stderr, "Run 'git reflog expire --expire=now --all && git gc --prune=now' to force cleanup.")
+			exitCode = 1
+		} else {
+			fmt.Println("Verification passed: all old blobs removed from object store.")
+		}
+	}
+
 	// Summary
 	fmt.Printf("\nScrub complete:\n")
 	fmt.Printf("  %d commits rewritten\n", rewrittenCount)
@@ -212,7 +230,7 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 	fmt.Printf("  New HEAD: %s\n", newHeadSHA[:12])
 	fmt.Printf("\nTo update the remote, run: git push --force-with-lease\n")
 
-	return 0
+	return exitCode
 }
 
 // runScrubMatch is in scrub_match.go

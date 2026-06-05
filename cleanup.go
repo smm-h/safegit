@@ -32,15 +32,28 @@ func cleanupAfterRewrite(ctx context.Context, flags globalFlags, cmd string, sha
 		fmt.Fprintf(os.Stderr, "warning: reflog cleanup: %v\n", err)
 	}
 
-	// Step 3: Prune unreachable objects.
+	// Step 2b: Expire all remaining reflog entries. Surgical deletion (step 1+2)
+	// removes entries whose "to" SHA matches an old commit, but reflog entries
+	// also store a "from" SHA. Git considers both SHAs reachable, so entries
+	// like "a6bca30 -> 49f563f" keep old commit a6bca30 alive even after the
+	// "to" entry was deleted. A full expire is needed to clean up these
+	// remaining references after a security-sensitive rewrite.
+	if _, _, err := git.Run(ctx, "reflog", "expire", "--expire=now", "--all"); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: reflog expire: %v\n", err)
+	}
+
+	// Step 3: Prune unreachable objects. git prune only removes loose objects;
+	// git repack -a -d --unpack-unreachable=now drops unreachable objects from
+	// pack files as well. Both are needed because objects may be loose (newly
+	// created) or packed (pre-existing).
 	if flags.verbose {
 		fmt.Fprintln(os.Stderr, "Pruning unreachable objects")
 	}
+	if _, _, err := git.Run(ctx, "repack", "-a", "-d", "--unpack-unreachable=now"); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: git repack: %v\n", err)
+	}
 	if _, _, err := git.Run(ctx, "prune", "--expire=now"); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: git prune: %v\n", err)
-	}
-	if _, _, err := git.Run(ctx, "repack", "-a", "-d"); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: git repack: %v\n", err)
 	}
 
 	// Step 4: Check stash/notes/replace refs for old SHAs.
