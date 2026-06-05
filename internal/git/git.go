@@ -5,6 +5,7 @@ package git
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -254,6 +255,22 @@ func IsIgnored(ctx context.Context, filePath string) (bool, error) {
 		return false, nil
 	}
 	return true, nil
+}
+
+// IsAncestorOf checks whether commitSHA is an ancestor of (or equal to)
+// descendantSHA. Uses git merge-base --is-ancestor which exits 0 if true,
+// 1 if false, and other codes on error.
+func IsAncestorOf(ctx context.Context, commitSHA, descendantSHA string) (bool, error) {
+	_, _, err := Run(ctx, "merge-base", "--is-ancestor", commitSHA, descendantSHA)
+	if err == nil {
+		return true, nil
+	}
+	// Exit code 1 means "not an ancestor" -- that's a valid false result.
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
 }
 
 // CommitMessage returns the full commit message of the given revision.

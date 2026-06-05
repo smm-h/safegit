@@ -391,6 +391,83 @@ func TestCommitTreeWithAuthorMultipleParents(t *testing.T) {
 	}
 }
 
+func TestIsAncestorOfTrue(t *testing.T) {
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	// InitBareRepo creates one commit. Add two more so we have 3 total.
+	first, err := RevParse(ctx, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	Run(ctx, "commit", "--allow-empty", "-m", "second")
+	Run(ctx, "commit", "--allow-empty", "-m", "third")
+	third, err := RevParse(ctx, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := IsAncestorOf(ctx, first, third)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got {
+		t.Errorf("IsAncestorOf(first, third) = false, want true")
+	}
+}
+
+func TestIsAncestorOfSameCommit(t *testing.T) {
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	sha, err := RevParse(ctx, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := IsAncestorOf(ctx, sha, sha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got {
+		t.Errorf("IsAncestorOf(sha, sha) = false, want true (commit is its own ancestor)")
+	}
+}
+
+func TestIsAncestorOfFalse(t *testing.T) {
+	dir := testutil.InitBareRepo(t)
+	testutil.Chdir(t, dir)
+	ctx := context.Background()
+
+	// Create a branch from the initial commit and commit on it.
+	Run(ctx, "checkout", "-b", "feature")
+	Run(ctx, "commit", "--allow-empty", "-m", "feature commit")
+	featureSHA, err := RevParse(ctx, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Switch back to main and commit there.
+	Run(ctx, "checkout", "main")
+	Run(ctx, "commit", "--allow-empty", "-m", "main commit")
+	mainSHA, err := RevParse(ctx, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// feature commit is NOT an ancestor of main HEAD (they diverged).
+	got, err := IsAncestorOf(ctx, featureSHA, mainSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got {
+		t.Errorf("IsAncestorOf(featureSHA, mainSHA) = true, want false")
+	}
+}
+
 // initRepoWithSubdir creates a repo with a file and a subdirectory containing
 // another file. Returns the repo dir. Tree structure:
 //
