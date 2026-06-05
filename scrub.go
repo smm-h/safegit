@@ -25,13 +25,24 @@ func runScrub(flags globalFlags, kwargs map[string]interface{}) int {
 		die(flags, cmd, 4, err.Error())
 	}
 
-	sgDir := repo.SafegitDir(gitDir)
 	ctx := context.Background()
+	requireCleanTree(ctx, flags, cmd)
+
+	sgDir := repo.SafegitDir(gitDir)
 
 	// Resolve --from to a full SHA
 	fromSHA, err := git.RevParse(ctx, from)
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("resolving --from %q: %v", from, err))
+	}
+
+	// Ancestry guard: --from must be an ancestor of (or equal to) HEAD
+	isAnc, err := git.IsAncestorOf(ctx, fromSHA, "HEAD")
+	if err != nil {
+		die(flags, cmd, 1, fmt.Sprintf("checking ancestry of --from: %v", err))
+	}
+	if !isAnc {
+		die(flags, cmd, 1, fmt.Sprintf("--from commit %s is not an ancestor of HEAD", from))
 	}
 
 	// Capture old HEAD before any changes
@@ -54,20 +65,16 @@ func runScrub(flags globalFlags, kwargs map[string]interface{}) int {
 		mode = "remove"
 	}
 
-	// Count commits to be rewritten
+	// Count commits to be rewritten (inclusive of --from)
 	countOut, _, err := git.Run(ctx, "rev-list", "--count", fromSHA+"..HEAD")
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("counting commits: %v", err))
 	}
-	commitCount, err := strconv.Atoi(strings.TrimSpace(countOut))
+	exclusiveCount, err := strconv.Atoi(strings.TrimSpace(countOut))
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("parsing commit count: %v", err))
 	}
-
-	if commitCount == 0 {
-		fmt.Println("No commits to rewrite (--from is at HEAD or ahead of it).")
-		return 0
-	}
+	commitCount := exclusiveCount + 1 // inclusive of fromSHA
 
 	// Summary
 	fmt.Printf("Scrub summary:\n")
@@ -94,12 +101,12 @@ func runScrub(flags globalFlags, kwargs map[string]interface{}) int {
 		return 0
 	}
 
-	// Commit walker: topo-order, parents before children
+	// Commit walker: topo-order, parents before children (inclusive of fromSHA)
 	out, _, err := git.Run(ctx, "rev-list", "--topo-order", "--reverse", fromSHA+"..HEAD")
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("listing commits: %v", err))
 	}
-	shas := splitNonEmpty(out)
+	shas := append([]string{fromSHA}, splitNonEmpty(out)...)
 
 	shaMap := make(map[string]string, len(shas))
 	rewrittenCount := 0
@@ -159,6 +166,11 @@ func runScrub(flags globalFlags, kwargs map[string]interface{}) int {
 	fmt.Println("Updating refs...")
 	if err := updateRefs(ctx, shaMap, "", "", "", "", flags.verbose); err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("updating refs: %v", err))
+	}
+
+	// Sync main index so git status/diff reflect the rewritten HEAD
+	if err := git.SyncMainIndex(ctx, "HEAD"); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
 	}
 
 	// Post-rewrite verification
