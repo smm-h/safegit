@@ -224,6 +224,17 @@ func main() {
 			strictcli.CoRequired{Flags: []string{"old-email", "new-email"}},
 		),
 	)
+	app.Command("scrub", "surgically replace or remove a file across history", func(kwargs map[string]interface{}) int {
+		return runScrub(globalsToFlags(kwargs), kwargs)
+	},
+		strictcli.WithFlags(
+			strictcli.StringFlag("from", "starting commit SHA or ref"),
+			strictcli.StringFlag("reason", "audit trail explaining why the scrub is needed"),
+		),
+		strictcli.WithArgs(
+			strictcli.NewArg("file", "repo-relative file path to scrub"),
+		),
+	)
 	app.Passthrough("cherry-pick", "cherry-pick commits (guarded)", pt)
 	app.Passthrough("revert", "revert commits (guarded)", pt)
 	app.Command("undo", "reverse last commit/amend/reword via oplog", func(kwargs map[string]interface{}) int {
@@ -233,6 +244,15 @@ func main() {
 	},
 		strictcli.WithFlags(
 			strictcli.BoolFlag("bypass-session", "undo across all sessions, ignoring session ID"),
+		),
+	)
+	app.Command("redo", "restore what undo removed (one-shot)", func(kwargs map[string]interface{}) int {
+		bypassSession := kwargs["bypass_session"].(bool)
+		runRedo(globalsToFlags(kwargs), bypassSession)
+		return 0
+	},
+		strictcli.WithFlags(
+			strictcli.BoolFlag("bypass-session", "redo across all sessions, ignoring session ID"),
 		),
 	)
 	app.Command("unlock", "release a stale ref lock", func(kwargs map[string]interface{}) int {
