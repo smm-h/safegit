@@ -200,32 +200,4 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 	return 0
 }
 
-func runScrubMatch(flags globalFlags, kwargs map[string]interface{}) int {
-	const cmd = "scrub match"
-
-	// Validation
-	gitDir := mustGitDir(flags)
-	if err := repo.EnsureInitialized(gitDir); err != nil {
-		die(flags, cmd, 4, err.Error())
-	}
-
-	ctx := context.Background()
-
-	sgDir := repo.SafegitDir(gitDir)
-
-	// Acquire rewrite lock to prevent concurrent scrub operations
-	cfg, err := loadConfig(flags, gitDir)
-	if err != nil {
-		die(flags, cmd, 1, fmt.Sprintf("loading config: %v", err))
-	}
-	timeout := time.Duration(cfg.Lock.AcquireTimeoutSeconds) * time.Second
-	sharedDir := repo.SharedSafegitDir(ctx, gitDir)
-	lk, err := lock.Acquire(sharedDir, sgDir, "safegit/rewrite", "scrub-match", timeout)
-	if err != nil {
-		die(flags, cmd, 1, "another rewrite operation is in progress")
-	}
-	defer lk.Release()
-
-	fmt.Fprintln(os.Stderr, "scrub match is not yet implemented")
-	return 1
-}
+// runScrubMatch is in scrub_match.go
