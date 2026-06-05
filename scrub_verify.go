@@ -244,6 +244,17 @@ func verifyScrub(ctx context.Context, shaMap map[string]string, filePath string,
 				failures = append(failures, fmt.Sprintf(
 					"check 6 (tag names): tag %q points to unreachable object %s", tagName, targetSHA[:12]))
 			}
+
+			// Stale-pointer detection: shaMap keys are OLD (pre-rewrite) SHAs,
+			// values are NEW (post-rewrite) SHAs. After updateRefs, every tag
+			// should point to a NEW SHA. If a tag's target is a key that maps
+			// to a different value, the tag still points to the old commit.
+			checks++
+			if mapped, ok := shaMap[targetSHA]; ok && mapped != targetSHA {
+				failures = append(failures, fmt.Sprintf(
+					"check 6 (tag stale pointer): tag %q points to old SHA %s, should point to remapped SHA %s",
+					tagName, targetSHA[:12], mapped[:12]))
+			}
 		}
 	}
 
