@@ -47,14 +47,7 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 	sgDir := repo.SafegitDir(gitDir)
 	ctx := context.Background()
 
-	// Check for uncommitted changes
-	statusOut, _, err := git.Run(ctx, "status", "--porcelain")
-	if err != nil {
-		die(flags, cmd, 1, fmt.Sprintf("checking working tree: %v", err))
-	}
-	if strings.TrimSpace(statusOut) != "" && !flags.force {
-		die(flags, cmd, 1, "working tree is dirty; commit changes or use --force to skip this check")
-	}
+	requireCleanTree(ctx, flags, cmd)
 
 	// Dry-run mode
 	if flags.dryRun {
@@ -155,7 +148,7 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 	failures := compareSnapshots(before, after, oldName, newName, oldEmail)
 
 	// Also verify working tree is clean after rewrite
-	statusOut, _, err = git.Run(ctx, "status", "--porcelain")
+	statusOut, _, err := git.Run(ctx, "status", "--porcelain")
 	if err != nil {
 		failures = append(failures, fmt.Sprintf("checking working tree after rewrite: %v", err))
 	} else if strings.TrimSpace(statusOut) != "" {

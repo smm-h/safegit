@@ -334,6 +334,18 @@ func mustGitDir(flags globalFlags) string {
 	return abs
 }
 
+// requireCleanTree dies if the working tree has uncommitted changes,
+// unless --force is set.
+func requireCleanTree(ctx context.Context, flags globalFlags, cmd string) {
+	statusOut, _, err := git.Run(ctx, "status", "--porcelain")
+	if err != nil {
+		die(flags, cmd, 1, fmt.Sprintf("checking working tree: %v", err))
+	}
+	if strings.TrimSpace(statusOut) != "" && !flags.force {
+		die(flags, cmd, 1, "working tree is dirty; commit changes or use --force to skip this check")
+	}
+}
+
 // commandHelp prints per-command help and exits.
 func commandHelp(cmd, usage string) {
 	fmt.Fprintf(os.Stderr, "Usage: safegit %s\n\n%s\n", cmd, usage)
