@@ -2,6 +2,7 @@ package stage
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,7 +23,12 @@ func initStageTestRepo(t *testing.T) (string, string) {
 
 	// Overwrite seed.txt with multi-line content for hunk testing, then amend
 	// the initial commit so the baseline has the richer content.
-	seedContent := "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n"
+	// 25 lines gives enough room for changes far apart to produce separate hunks.
+	var seedLines []string
+	for i := 1; i <= 25; i++ {
+		seedLines = append(seedLines, fmt.Sprintf("line %d", i))
+	}
+	seedContent := strings.Join(seedLines, "\n") + "\n"
 	seedPath := filepath.Join(dir, "seed.txt")
 	if err := os.WriteFile(seedPath, []byte(seedContent), 0644); err != nil {
 		t.Fatal(err)
@@ -45,10 +51,22 @@ func TestExtractHunks(t *testing.T) {
 	dir, sgDir := initStageTestRepo(t)
 	testutil.Chdir(t, dir)
 
-	// Modify the file to create multiple hunks:
-	// Change line 2 (near top) and line 9 (near bottom) -- with enough
-	// unchanged context between them, git produces separate hunks.
-	content := "line 1\nMODIFIED 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nMODIFIED 9\nline 10\n"
+	// Modify the file to create 2 separate hunks:
+	// Change line 2 (near top) and line 22 (near bottom). With 19 unchanged
+	// lines between them (lines 3-21), well above git's 2*3=6 context overlap
+	// threshold, git produces 2 distinct hunks.
+	var modLines []string
+	for i := 1; i <= 25; i++ {
+		switch i {
+		case 2:
+			modLines = append(modLines, "MODIFIED 2")
+		case 22:
+			modLines = append(modLines, "MODIFIED 22")
+		default:
+			modLines = append(modLines, fmt.Sprintf("line %d", i))
+		}
+	}
+	content := strings.Join(modLines, "\n") + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -68,10 +86,11 @@ func TestExtractHunks(t *testing.T) {
 		t.Error("expected non-empty header")
 	}
 
-	// With default diff context (3 lines), lines 2 and 9 should produce 2 hunks
-	// since there are 5 unchanged lines between them (more than 2*3=6 context overlap threshold)
-	if len(hunks) < 1 {
-		t.Fatalf("expected at least 1 hunk, got %d", len(hunks))
+	// With default diff context (3 lines), lines 2 and 22 produce 2 hunks:
+	// 19 unchanged lines between them far exceeds the 2*3=6 context overlap
+	// threshold, so git cannot merge them.
+	if len(hunks) != 2 {
+		t.Fatalf("expected exactly 2 hunks, got %d", len(hunks))
 	}
 
 	// Verify first hunk contains the modification
