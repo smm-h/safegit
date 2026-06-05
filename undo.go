@@ -22,7 +22,7 @@ var undoableOps = map[string]string{
 	"reword": "oldSha",
 }
 
-func runUndo(flags globalFlags) {
+func runUndo(flags globalFlags, bypassSession bool) {
 	const cmd = "undo"
 
 	gitDir := mustGitDir(flags)
@@ -45,8 +45,16 @@ func runUndo(flags globalFlags) {
 		die(flags, cmd, 1, "HEAD is detached; undo requires a branch")
 	}
 
-	// Find the last ref-updating oplog entry for this branch
-	entry, err := oplog.LastRefUpdate(sgDir, ref)
+	// Find the last ref-updating oplog entry for this branch, scoped by session
+	sessionID := os.Getenv("CLAUDE_CODE_SESSION_ID")
+	var entry *oplog.Entry
+	if bypassSession {
+		entry, err = oplog.LastRefUpdate(sgDir, ref)
+	} else if sessionID != "" {
+		entry, err = oplog.LastRefUpdateForSession(sgDir, ref, sessionID)
+	} else {
+		die(flags, cmd, 1, "no session ID found (CLAUDE_CODE_SESSION_ID not set); pass --bypass-session to undo across all sessions")
+	}
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("reading oplog: %v", err))
 	}

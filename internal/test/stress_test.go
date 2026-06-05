@@ -786,6 +786,7 @@ func TestStressOpLog(t *testing.T) {
 // a second undo with nothing undoable fails.
 func TestUndo(t *testing.T) {
 	dir := newRepo(t)
+	env := []string{"CLAUDE_CODE_SESSION_ID=test-undo-session"}
 
 	// Record HEAD before the commit
 	preCmd := exec.Command("git", "rev-parse", "HEAD")
@@ -800,7 +801,7 @@ func TestUndo(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "undo.txt"), []byte("undo me\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	_, stderr, code := runSafegit(t, dir, "commit", "-m", "commit to undo", "--", "undo.txt")
+	_, stderr, code := runSafegitEnv(t, dir, env, "commit", "-m", "commit to undo", "--", "undo.txt")
 	if code != 0 {
 		t.Fatalf("commit failed (code %d): %s", code, stderr)
 	}
@@ -819,7 +820,7 @@ func TestUndo(t *testing.T) {
 	}
 
 	// Run safegit undo
-	_, stderr, code = runSafegit(t, dir, "undo")
+	_, stderr, code = runSafegitEnv(t, dir, env, "undo")
 	if code != 0 {
 		t.Fatalf("undo failed (code %d): %s", code, stderr)
 	}
@@ -848,7 +849,7 @@ func TestUndo(t *testing.T) {
 	}
 
 	// Run undo again -- should fail (the last oplog entry is now an undo, not undoable)
-	_, _, code = runSafegit(t, dir, "undo")
+	_, _, code = runSafegitEnv(t, dir, env, "undo")
 	if code == 0 {
 		t.Error("second undo should have failed, but exited 0")
 	}
@@ -904,12 +905,13 @@ func TestDetachedHEAD_CommitRefused(t *testing.T) {
 // pre-amend commit: original file present, amend-added file absent.
 func TestUndoAmend(t *testing.T) {
 	dir := newRepo(t)
+	env := []string{"CLAUDE_CODE_SESSION_ID=test-undo-amend-session"}
 
 	// Create file.txt and commit it
 	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("original\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	_, stderr, code := runSafegit(t, dir, "commit", "-m", "original commit", "--", "file.txt")
+	_, stderr, code := runSafegitEnv(t, dir, env, "commit", "-m", "original commit", "--", "file.txt")
 	if code != 0 {
 		t.Fatalf("initial commit failed (code %d): %s", code, stderr)
 	}
@@ -927,7 +929,7 @@ func TestUndoAmend(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "extra.txt"), []byte("extra\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	stdout, stderr, code := runSafegit(t, dir, "commit", "--amend", "--", "extra.txt")
+	stdout, stderr, code := runSafegitEnv(t, dir, env, "commit", "--amend", "--", "extra.txt")
 	if code != 0 {
 		t.Fatalf("amend failed (code %d): %s", code, stderr)
 	}
@@ -953,7 +955,7 @@ func TestUndoAmend(t *testing.T) {
 	}
 
 	// Run safegit undo
-	_, stderr, code = runSafegit(t, dir, "undo")
+	_, stderr, code = runSafegitEnv(t, dir, env, "undo")
 	if code != 0 {
 		t.Fatalf("undo failed (code %d): %s", code, stderr)
 	}

@@ -227,9 +227,14 @@ func main() {
 	app.Passthrough("cherry-pick", "cherry-pick commits (guarded)", pt)
 	app.Passthrough("revert", "revert commits (guarded)", pt)
 	app.Command("undo", "reverse last commit/amend/reword via oplog", func(kwargs map[string]interface{}) int {
-		runUndo(globalsToFlags(kwargs))
+		bypassSession := kwargs["bypass_session"].(bool)
+		runUndo(globalsToFlags(kwargs), bypassSession)
 		return 0
-	})
+	},
+		strictcli.WithFlags(
+			strictcli.BoolFlag("bypass-session", "undo across all sessions, ignoring session ID"),
+		),
+	)
 	app.Command("unlock", "release a stale ref lock", func(kwargs map[string]interface{}) int {
 		ref := kwargs["ref"].(string)
 		return runUnlock(globalsToFlags(kwargs), ref)
