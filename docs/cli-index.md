@@ -12,7 +12,7 @@ order: 91
 
 concurrency-safe git for multi-agent use
 
-Version: 0.11.2-0.20260529180512-000ae43c5931+dirty
+Version: dev
 
 ## Commands
 
@@ -25,9 +25,11 @@ Version: 0.11.2-0.20260529180512-000ae43c5931+dirty
 - [pull](cli-pull.html) -- fetch and merge (default --ff-only)
 - [push](cli-push.html) -- push with pre-hooks and retry
 - [rebase](cli-rebase.html) -- rebase onto upstream (guarded)
+- [redo](cli-redo.html) -- restore what undo removed (one-shot)
 - [reset](cli-reset.html) -- reset HEAD (guarded for --hard)
 - [revert](cli-revert.html) -- revert commits (guarded)
 - [rewrite-author](cli-rewrite-author.html) -- rewrite author/committer across history
+- [scrub](cli-scrub.html) -- surgically replace or remove a file across history
 - [undo](cli-undo.html) -- reverse last commit/amend/reword via oplog
 - [unlock](cli-unlock.html) -- release a stale ref lock
 - [version](cli-version.html) -- print version and build info

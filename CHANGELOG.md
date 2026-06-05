@@ -2,20 +2,31 @@
 
 # Changelog
 
-## 0.12.0
+## 0.13.0
 
-Session-scoped undo, redo command, and scrub command for surgical history rewriting.
+Breaking: --from is now inclusive. Scrub safety improvements.
 
 <details>
 <summary>Context</summary>
 
-Three new features aimed at multi-session safety and sensitive content cleanup:
+Three scrub improvements:
 
-- safegit undo is now session-scoped by default (requires CLAUDE_CODE_SESSION_ID), preventing accidental cross-session rollbacks. --bypass-session restores old behavior.
-- safegit redo explicitly restores what undo removed, with one-shot design to prevent oscillation.
-- safegit scrub <file> --from <commit> --reason <text> surgically replaces or removes a file's blob across history, with post-rewrite verification, annotated tag rewriting, and confirmation prompt.
+- --from is now inclusive: the commit you point to IS rewritten, not just everything after it. An ancestry guard rejects non-ancestral --from commits.
+- Dirty-tree guard prevents scrub from clobbering staged changes (use --force to override). SyncMainIndex after rewriting keeps git status clean.
+- Post-rewrite verification now detects tags that still point to pre-rewrite commits.
 
 </details>
+
+### Breaking
+
+- **Breaking: --from is now inclusive.** `safegit scrub --from X` now includes commit X in the rewrite. Previously it started after X (exclusive). An ancestry guard now rejects --from commits not ancestral to HEAD.
+
+### Fixes
+
+- **Scrub safety: dirty-tree guard and index sync.** Scrub now checks for a clean working tree before starting (use --force to override) and syncs the main index after rewriting, preventing phantom `git status` output.
+- **Scrub verification: stale tag detection.** Post-rewrite verification now catches tags that still point to pre-rewrite commits, detecting `updateRefs` failures.
+
+## 0.12.0
 
 ### Features
 

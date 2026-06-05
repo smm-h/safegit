@@ -243,7 +243,7 @@
       ],
       "flags": [
         {
-          "help": "starting commit SHA or ref",
+          "help": "first commit to include in the rewrite",
           "name": "from",
           "type": "str"
         },
