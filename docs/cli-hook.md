@@ -18,7 +18,7 @@ install a hook from a file
 ### Arguments
 
 | Name | Required | Description |
-|------|----------|-------------|
+| --- | --- | --- |
 | `path` | yes | path to hook script |
 
 ## hook list
@@ -32,5 +32,5 @@ run hooks
 ### Arguments
 
 | Name | Required | Description |
-|------|----------|-------------|
+| --- | --- | --- |
 | `name` | no | hook name to run |

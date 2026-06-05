@@ -9,4 +9,4 @@ nav_order: 2
 
 # internal/commit
 
-:-: ref path="internal/commit"
+:-: ref path="internal/commit" lang="go"

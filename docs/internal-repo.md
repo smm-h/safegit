@@ -9,4 +9,4 @@ nav_order: 9
 
 # internal/repo
 
-:-: ref path="internal/repo"
+:-: ref path="internal/repo" lang="go"

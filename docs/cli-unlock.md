@@ -14,5 +14,5 @@ release a stale ref lock
 ## Arguments
 
 | Name | Required | Description |
-|------|----------|-------------|
+| --- | --- | --- |
 | `ref` | yes | the ref name to unlock |

@@ -12,7 +12,7 @@ order: 91
 
 concurrency-safe git for multi-agent use
 
-Version: dev
+Version: 0.11.2-0.20260529180512-000ae43c5931+dirty
 
 ## Commands
 

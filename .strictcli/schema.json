@@ -178,6 +178,19 @@
       "name": "rebase",
       "passthrough": true
     },
+    "redo": {
+      "flags": [
+        {
+          "default": false,
+          "help": "redo across all sessions, ignoring session ID",
+          "name": "bypass-session",
+          "negatable": true,
+          "type": "bool"
+        }
+      ],
+      "help": "restore what undo removed (one-shot)",
+      "name": "redo"
+    },
     "reset": {
       "help": "reset HEAD (guarded for --hard)",
       "name": "reset",
@@ -221,7 +234,38 @@
       "help": "rewrite author/committer across history",
       "name": "rewrite-author"
     },
+    "scrub": {
+      "args": [
+        {
+          "help": "repo-relative file path to scrub",
+          "name": "file"
+        }
+      ],
+      "flags": [
+        {
+          "help": "starting commit SHA or ref",
+          "name": "from",
+          "type": "str"
+        },
+        {
+          "help": "audit trail explaining why the scrub is needed",
+          "name": "reason",
+          "type": "str"
+        }
+      ],
+      "help": "surgically replace or remove a file across history",
+      "name": "scrub"
+    },
     "undo": {
+      "flags": [
+        {
+          "default": false,
+          "help": "undo across all sessions, ignoring session ID",
+          "name": "bypass-session",
+          "negatable": true,
+          "type": "bool"
+        }
+      ],
       "help": "reverse last commit/amend/reword via oplog",
       "name": "undo"
     },
@@ -382,5 +426,5 @@
   "help": "concurrency-safe git for multi-agent use",
   "name": "safegit",
   "project_id": "github.com/smm-h/safegit",
-  "version": "0.11.2-0.20260529180512-000ae43c5931+dirty"
+  "version": "dev"
 }

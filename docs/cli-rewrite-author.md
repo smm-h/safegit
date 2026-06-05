@@ -14,7 +14,7 @@ rewrite author/committer across history
 ## Flags
 
 | Name | Short | Type | Default | Env | Description |
-|------|-------|------|---------|-----|-------------|
+| --- | --- | --- | --- | --- | --- |
 | `--old-name` |  | str |  |  | current author/committer name to match |
 | `--new-name` |  | str |  |  | replacement name |
 | `--old-email` |  | str |  |  | current author/committer email to match |

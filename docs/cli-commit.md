@@ -14,7 +14,7 @@ stage and commit files atomically
 ## Flags
 
 | Name | Short | Type | Default | Env | Description |
-|------|-------|------|---------|-----|-------------|
+| --- | --- | --- | --- | --- | --- |
 | `--m` | `-m` | str |  |  | commit message (repeatable) |
 | `--F` | `-F` | str |  |  | read commit message from file |
 | `--branch` |  | str |  |  | commit to a different branch |
@@ -25,5 +25,5 @@ stage and commit files atomically
 ## Arguments
 
 | Name | Required | Description |
-|------|----------|-------------|
+| --- | --- | --- |
 | `files` | no | files to commit (supports hunk specs: file.go:1,3) |

@@ -14,13 +14,13 @@ push with pre-hooks and retry
 ## Flags
 
 | Name | Short | Type | Default | Env | Description |
-|------|-------|------|---------|-----|-------------|
+| --- | --- | --- | --- | --- | --- |
 | `--no-pre-pre-push` |  | bool |  |  | skip pre-pre-push hooks |
 | `--force-push` |  | bool |  |  | force push to remote |
 
 ## Arguments
 
 | Name | Required | Description |
-|------|----------|-------------|
+| --- | --- | --- |
 | `remote` | no | remote name |
 | `refspecs` | no | refs to push |

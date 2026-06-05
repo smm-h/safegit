@@ -9,4 +9,4 @@ nav_order: 12
 
 # internal/trailer
 
-:-: ref path="internal/trailer"
+:-: ref path="internal/trailer" lang="go"

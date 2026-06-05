@@ -9,4 +9,4 @@ nav_order: 11
 
 # internal/testutil
 
-:-: ref path="internal/testutil"
+:-: ref path="internal/testutil" lang="go"

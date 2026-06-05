@@ -9,4 +9,4 @@ nav_order: 8
 
 # internal/oplog
 
-:-: ref path="internal/oplog"
+:-: ref path="internal/oplog" lang="go"

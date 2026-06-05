@@ -14,7 +14,7 @@ fetch and merge (default --ff-only)
 ## Flags
 
 | Name | Short | Type | Default | Env | Description |
-|------|-------|------|---------|-----|-------------|
+| --- | --- | --- | --- | --- | --- |
 | `--ff-only` |  | bool |  |  | fast-forward only (fail if not possible) |
 | `--ff` |  | bool |  |  | fast-forward if possible, merge commit otherwise |
 | `--no-ff` |  | bool |  |  | always create a merge commit |
@@ -22,6 +22,6 @@ fetch and merge (default --ff-only)
 ## Arguments
 
 | Name | Required | Description |
-|------|----------|-------------|
+| --- | --- | --- |
 | `remote` | no | remote name |
 | `branch` | no | branch to pull |

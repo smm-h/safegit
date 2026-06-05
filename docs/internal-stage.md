@@ -9,4 +9,4 @@ nav_order: 10
 
 # internal/stage
 
-:-: ref path="internal/stage"
+:-: ref path="internal/stage" lang="go"

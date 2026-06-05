@@ -14,7 +14,7 @@ health checks and repair
 ## Flags
 
 | Name | Short | Type | Default | Env | Description |
-|------|-------|------|---------|-----|-------------|
+| --- | --- | --- | --- | --- | --- |
 | `--diagnose` |  | bool |  |  | run health checks without fixing |
 | `--fix` |  | bool |  |  | run health checks and fix issues |
 | `--uninstall` |  | bool |  |  | remove safegit from this repository |

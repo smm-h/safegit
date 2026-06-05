@@ -18,7 +18,7 @@ get a configuration value
 ### Arguments
 
 | Name | Required | Description |
-|------|----------|-------------|
+| --- | --- | --- |
 | `key` | yes | configuration key |
 
 ## config set
@@ -28,7 +28,7 @@ set a configuration value
 ### Arguments
 
 | Name | Required | Description |
-|------|----------|-------------|
+| --- | --- | --- |
 | `key` | yes | configuration key |
 | `value` | yes | configuration value |
 

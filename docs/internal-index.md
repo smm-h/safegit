@@ -9,4 +9,4 @@ nav_order: 6
 
 # internal/index
 
-:-: ref path="internal/index"
+:-: ref path="internal/index" lang="go"

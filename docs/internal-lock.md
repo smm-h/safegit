@@ -9,4 +9,4 @@ nav_order: 7
 
 # internal/lock
 
-:-: ref path="internal/lock"
+:-: ref path="internal/lock" lang="go"

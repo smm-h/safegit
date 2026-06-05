@@ -9,4 +9,4 @@ nav_order: 1
 
 # safegit
 
-:-: ref path="."
+:-: ref path="." lang="go"

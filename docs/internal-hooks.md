@@ -9,4 +9,4 @@ nav_order: 5
 
 # internal/hooks
 
-:-: ref path="internal/hooks"
+:-: ref path="internal/hooks" lang="go"

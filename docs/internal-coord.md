@@ -9,4 +9,4 @@ nav_order: 3
 
 # internal/coord
 
-:-: ref path="internal/coord"
+:-: ref path="internal/coord" lang="go"
