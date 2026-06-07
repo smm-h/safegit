@@ -11,6 +11,7 @@ import (
 	"github.com/smm-h/safegit/internal/hooks"
 	"github.com/smm-h/safegit/internal/oplog"
 	"github.com/smm-h/safegit/internal/repo"
+	"github.com/smm-h/safegit/internal/submodule"
 )
 
 // Exit codes specific to push
@@ -92,9 +93,25 @@ func runPush(flags globalFlags, noPrePrePush bool, forcePush bool, remote string
 			fmt.Sprintf("SAFEGIT_HOOK_TIMEOUT_S=%d", timeoutSec),
 		}
 
-		hookResults, err = hooks.Run(ctx, gitDir, hookStdin, timeoutSec, hookEnv)
+		// Discover hooks: if inside a submodule, cascade from parent first
+		var hookPaths []string
+		parentGitDir, _, isSubmodule := submodule.DetectParent(ctx)
+		if isSubmodule {
+			if flags.verbose {
+				fmt.Fprintf(os.Stderr, "  submodule detected, cascading hooks from parent %s\n", parentGitDir)
+			}
+			hookPaths, err = hooks.DiscoverMulti([]string{parentGitDir, gitDir})
+		} else {
+			hookPaths, err = hooks.Discover(gitDir)
+		}
 		if err != nil {
-			die(flags, "push",1, fmt.Sprintf("running hooks: %v", err))
+			die(flags, "push", 1, fmt.Sprintf("discovering hooks: %v", err))
+			return 1
+		}
+
+		hookResults, err = hooks.RunAll(ctx, hookPaths, hookStdin, timeoutSec, hookEnv)
+		if err != nil {
+			die(flags, "push", 1, fmt.Sprintf("running hooks: %v", err))
 			return 1
 		}
 

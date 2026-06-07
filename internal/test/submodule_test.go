@@ -1,6 +1,7 @@
 package test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1077,9 +1078,10 @@ func TestPushHookCascadeRejectsOnParentHookFailure(t *testing.T) {
 	}
 
 	// Push from the submodule using safegit -- should fail
+	// Exit code 20 = hook failure (exitPushHookFailed in push.go)
 	_, stderr, code = runSafegit(t, subDir, "push", "origin", "main")
-	if code != exitPushHookFailed {
-		t.Errorf("expected exit code %d (hook failure), got %d; stderr: %s", exitPushHookFailed, code, stderr)
+	if code != 20 {
+		t.Errorf("expected exit code 20 (hook failure), got %d; stderr: %s", code, stderr)
 	}
 
 	// Verify no push occurred: remote HEAD unchanged

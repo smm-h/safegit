@@ -98,6 +98,21 @@ func Discover(gitDir string) ([]string, error) {
 	return hooks, nil
 }
 
+// DiscoverMulti discovers hooks across multiple git directories, concatenating
+// results in order. The first gitDir's hooks come first. This supports hook
+// cascading from parent repos into submodule pushes.
+func DiscoverMulti(gitDirs []string) ([]string, error) {
+	var all []string
+	for _, gd := range gitDirs {
+		found, err := Discover(gd)
+		if err != nil {
+			return nil, fmt.Errorf("discovering hooks in %s: %w", gd, err)
+		}
+		all = append(all, found...)
+	}
+	return all, nil
+}
+
 // Run executes all discovered hooks sequentially with the given stdin.
 // On non-zero exit, remaining hooks are skipped. On timeout: SIGTERM, 5s grace, SIGKILL.
 func Run(ctx context.Context, gitDir string, stdin []byte, timeoutSec int, env []string) ([]HookResult, error) {
@@ -105,12 +120,18 @@ func Run(ctx context.Context, gitDir string, stdin []byte, timeoutSec int, env [
 	if err != nil {
 		return nil, err
 	}
-	if len(hooks) == 0 {
+	return RunAll(ctx, hooks, stdin, timeoutSec, env)
+}
+
+// RunAll executes the given hook paths sequentially with the given stdin.
+// On non-zero exit, remaining hooks are skipped. On timeout: SIGTERM, 5s grace, SIGKILL.
+func RunAll(ctx context.Context, hookPaths []string, stdin []byte, timeoutSec int, env []string) ([]HookResult, error) {
+	if len(hookPaths) == 0 {
 		return nil, nil
 	}
 
 	var results []HookResult
-	for _, hookPath := range hooks {
+	for _, hookPath := range hookPaths {
 		result := runOne(ctx, hookPath, stdin, timeoutSec, env)
 		results = append(results, result)
 		if result.ExitCode != 0 {
