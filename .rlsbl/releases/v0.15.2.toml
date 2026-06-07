@@ -1,0 +1,8 @@
+# Version bump type: patch, minor, or major
+bump = "patch"
+# Short description of this release (required)
+description = "Fix macOS CI: use portable GIT_CONFIG env vars instead of --global for file transport allow."
+# Optional context explaining why these changes were made
+context = ""
+include = ["go", "docker"]
+exclude = []
