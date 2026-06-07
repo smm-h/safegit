@@ -310,6 +310,17 @@ func scopeForSubmodule(scope, subRelPath string) string {
 	return ""
 }
 
+// submoduleScrubResult holds the computed rewrite state for a single submodule
+// before any refs are updated. All computation is deferred so that ref updates
+// can be applied atomically after all submodules + parent succeed.
+type submoduleScrubResult struct {
+	sub              submodule.SubmoduleInfo
+	shaMap           map[string]string
+	rewrittenCount   int
+	blobMap          map[string]string
+	messagesModified int
+}
+
 // scrubMatchExecute performs the actual rewrite: builds blob replacement map,
 // walks and rewrites commits, updates refs, rewrites tag annotations, syncs
 // the index, and logs to the oplog. When scope is non-nil, only blobs that
@@ -334,9 +345,41 @@ func scrubMatchExecute(
 		die(flags, cmd, 1, fmt.Sprintf("scanning objects: %v", err))
 	}
 
+	// Enumerate submodules (4.4)
+	subs, subErr := submodule.Enumerate(ctx, gitDir)
+	if subErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: enumerating submodules: %v\n", subErr)
+		subs = nil
+	}
+	// Ensure safegit dir exists for each initialized submodule.
+	for _, sub := range subs {
+		if sub.Initialized {
+			if err := repo.EnsureInitialized(sub.GitDir); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: initializing safegit for submodule %s: %v\n", sub.RelativePath, err)
+			}
+		}
+	}
+
 	if len(results.Matches) == 0 {
-		fmt.Println("No matches found. Nothing to rewrite.")
-		return 0
+		// Check submodules too before declaring no matches.
+		anySubMatches := false
+		for _, sub := range subs {
+			if !sub.Initialized {
+				continue
+			}
+			subResults, err := scan.ScanObjectsWithDir(ctx, compiledPattern, sub.GitDir, sub.WorkTreePath, sub.RelativePath)
+			if err != nil {
+				continue
+			}
+			if len(subResults.Matches) > 0 {
+				anySubMatches = true
+				break
+			}
+		}
+		if !anySubMatches {
+			fmt.Println("No matches found. Nothing to rewrite.")
+			return 0
+		}
 	}
 
 	// When --scope is set, build a blob SHA -> paths index so we can filter
@@ -367,15 +410,90 @@ func scrubMatchExecute(
 		}
 	}
 
+	// Scan submodules for matches (4.5)
+	type subScanInfo struct {
+		sub           submodule.SubmoduleInfo
+		uniqueBlobs   map[string]bool
+		blobCount     int
+		commitCount   int
+		tagCount      int
+	}
+	var subScans []subScanInfo
+	for _, sub := range subs {
+		if !sub.Initialized {
+			continue
+		}
+		// Determine if this submodule is in scope.
+		if scope != nil {
+			subScope := scopeForSubmodule(*scope, sub.RelativePath)
+			if subScope == "" {
+				continue
+			}
+		}
+		subResults, err := scan.ScanObjectsWithDir(ctx, compiledPattern, sub.GitDir, sub.WorkTreePath, sub.RelativePath)
+		if err != nil {
+			die(flags, cmd, 1, fmt.Sprintf("scanning submodule %s: %v", sub.RelativePath, err))
+		}
+		if len(subResults.Matches) == 0 {
+			continue
+		}
+
+		// Build scoped blob set for submodule if scope applies.
+		var subScopedBlobs map[string]bool
+		if scope != nil {
+			subScope := scopeForSubmodule(*scope, sub.RelativePath)
+			if subScope != "" {
+				subScopedBlobs, err = buildScopedBlobSetWithDir(ctx, subScope, sub.GitDir, sub.WorkTreePath)
+				if err != nil {
+					die(flags, cmd, 1, fmt.Sprintf("building scoped blob set for submodule %s: %v", sub.RelativePath, err))
+				}
+			}
+		}
+
+		info := subScanInfo{sub: sub, uniqueBlobs: make(map[string]bool)}
+		for _, m := range subResults.Matches {
+			switch m.ObjectType {
+			case "blob":
+				if subScopedBlobs != nil && !subScopedBlobs[m.SHA] {
+					continue
+				}
+				info.blobCount++
+				info.uniqueBlobs[m.SHA] = true
+			case "commit":
+				info.commitCount++
+			case "tag":
+				info.tagCount++
+			}
+		}
+		if info.blobCount > 0 || info.commitCount > 0 || info.tagCount > 0 {
+			subScans = append(subScans, info)
+		}
+	}
+
 	// If scope filtered out all blob matches and there are no message/tag matches,
 	// treat as no matches.
-	if blobMatchCount == 0 && commitMatchCount == 0 && tagMatchCount == 0 {
+	totalSubBlobCount := 0
+	totalSubCommitCount := 0
+	totalSubTagCount := 0
+	for _, si := range subScans {
+		totalSubBlobCount += si.blobCount
+		totalSubCommitCount += si.commitCount
+		totalSubTagCount += si.tagCount
+	}
+	if blobMatchCount == 0 && commitMatchCount == 0 && tagMatchCount == 0 &&
+		totalSubBlobCount == 0 && totalSubCommitCount == 0 && totalSubTagCount == 0 {
 		fmt.Println("No matches found within scope. Nothing to rewrite.")
 		return 0
 	}
 
+	totalBlobs := blobMatchCount + totalSubBlobCount
+	totalCommits := commitMatchCount + totalSubCommitCount
+	totalTags := tagMatchCount + totalSubTagCount
 	fmt.Printf("Found %d matches (%d in blobs, %d in commit messages, %d in tag annotations)\n",
-		blobMatchCount+commitMatchCount+tagMatchCount, blobMatchCount, commitMatchCount, tagMatchCount)
+		totalBlobs+totalCommits+totalTags, totalBlobs, totalCommits, totalTags)
+	if len(subScans) > 0 {
+		fmt.Printf("  Submodules with matches: %d\n", len(subScans))
+	}
 
 	// Confirmation prompt
 	if !flags.force {
@@ -394,7 +512,135 @@ func scrubMatchExecute(
 		die(flags, cmd, 1, fmt.Sprintf("resolving HEAD: %v", err))
 	}
 
-	// Build blob replacement map
+	// Save parent cwd for os.Chdir back.
+	parentDir, err := os.Getwd()
+	if err != nil {
+		die(flags, cmd, 1, fmt.Sprintf("getting cwd: %v", err))
+	}
+
+	// Phase 1: Compute all rewrites (submodules first, then parent).
+	// No refs are updated in this phase. If anything fails, we abort cleanly.
+
+	// 4.5-4.6: Process each submodule.
+	var subScrubResults []submoduleScrubResult
+	for _, si := range subScans {
+		fmt.Printf("Scrubbing submodule [%s]...\n", si.sub.RelativePath)
+
+		// Chdir into submodule working tree so git commands target it.
+		if err := os.Chdir(si.sub.WorkTreePath); err != nil {
+			die(flags, cmd, 1, fmt.Sprintf("chdir to submodule %s: %v", si.sub.RelativePath, err))
+		}
+
+		// Build blob replacement map for this submodule.
+		subBlobMap := make(map[string]string, len(si.uniqueBlobs))
+		for blobSHA := range si.uniqueBlobs {
+			content, err := git.CatFileBlob(ctx, blobSHA)
+			if err != nil {
+				// Chdir back before dying.
+				os.Chdir(parentDir)
+				die(flags, cmd, 1, fmt.Sprintf("submodule %s: reading blob %s: %v", si.sub.RelativePath, blobSHA, err))
+			}
+			if isBinaryContent(content) {
+				continue
+			}
+			modified := compiledPattern.ReplaceAll(content, []byte(replace))
+			if bytes.Equal(content, modified) {
+				continue
+			}
+			newSHA, err := git.HashObjectWriteBytes(ctx, modified)
+			if err != nil {
+				os.Chdir(parentDir)
+				die(flags, cmd, 1, fmt.Sprintf("submodule %s: writing replaced blob: %v", si.sub.RelativePath, err))
+			}
+			subBlobMap[blobSHA] = newSHA
+			if flags.verbose {
+				fmt.Fprintf(os.Stderr, "  [%s] blob %s -> %s\n", si.sub.RelativePath, shortSHA(blobSHA), shortSHA(newSHA))
+			}
+		}
+
+		// Determine commit range for the submodule.
+		var subSHAs []string
+		if entireHistory {
+			out, _, err := git.Run(ctx, "rev-list", "--topo-order", "--reverse", "HEAD")
+			if err != nil {
+				os.Chdir(parentDir)
+				die(flags, cmd, 1, fmt.Sprintf("submodule %s: listing commits: %v", si.sub.RelativePath, err))
+			}
+			subSHAs = splitNonEmpty(out)
+		} else {
+			// For submodules with --from, use entire history since we don't know
+			// the corresponding commit boundary in the submodule.
+			out, _, err := git.Run(ctx, "rev-list", "--topo-order", "--reverse", "HEAD")
+			if err != nil {
+				os.Chdir(parentDir)
+				die(flags, cmd, 1, fmt.Sprintf("submodule %s: listing commits: %v", si.sub.RelativePath, err))
+			}
+			subSHAs = splitNonEmpty(out)
+		}
+
+		subMessagesModified := 0
+		subShaMap, subRewrittenCount, err := walkAndRewrite(ctx, subSHAs, func(ctx context.Context, sha string, info git.CommitInfo, remappedParents []string) (CommitTransform, error) {
+			var xform CommitTransform
+
+			newTreeSHA, err := replaceInTreeByBlobMap(ctx, info.Tree, subBlobMap, nil)
+			if err != nil {
+				return CommitTransform{}, fmt.Errorf("replacing blobs in tree for commit %s: %w", sha, err)
+			}
+			if newTreeSHA != info.Tree {
+				xform.TreeSHA = newTreeSHA
+			}
+
+			if compiledPattern.Match([]byte(info.Message)) {
+				newMessage := compiledPattern.ReplaceAllString(info.Message, replace)
+				if newMessage != info.Message {
+					xform.Message = newMessage
+					subMessagesModified++
+				}
+			}
+
+			return xform, nil
+		}, flags.verbose)
+		if err != nil {
+			os.Chdir(parentDir)
+			die(flags, cmd, 1, fmt.Sprintf("submodule %s: walk and rewrite: %v", si.sub.RelativePath, err))
+		}
+
+		subScrubResults = append(subScrubResults, submoduleScrubResult{
+			sub:              si.sub,
+			shaMap:           subShaMap,
+			rewrittenCount:   subRewrittenCount,
+			blobMap:          subBlobMap,
+			messagesModified: subMessagesModified,
+		})
+
+		fmt.Printf("  [%s] %d commits rewritten, %d blobs replaced\n",
+			si.sub.RelativePath, subRewrittenCount, len(subBlobMap))
+	}
+
+	// Chdir back to parent for parent-repo processing.
+	if err := os.Chdir(parentDir); err != nil {
+		die(flags, cmd, 1, fmt.Sprintf("chdir back to parent: %v", err))
+	}
+
+	// Build the combined gitlink map from all submodule SHA mappings.
+	// This maps old submodule commit SHAs to new ones, so the parent's tree
+	// rewriter updates gitlink entries.
+	var gitlinkMap map[string]string
+	if len(subScrubResults) > 0 {
+		gitlinkMap = make(map[string]string)
+		for _, sr := range subScrubResults {
+			for old, new_ := range sr.shaMap {
+				if old != new_ {
+					gitlinkMap[old] = new_
+				}
+			}
+		}
+		if len(gitlinkMap) == 0 {
+			gitlinkMap = nil
+		}
+	}
+
+	// Parent repo: build blob replacement map.
 	fmt.Println("Building blob replacement map...")
 	blobMap := make(map[string]string, len(uniqueBlobSHAs))
 	for blobSHA := range uniqueBlobSHAs {
@@ -402,14 +648,11 @@ func scrubMatchExecute(
 		if err != nil {
 			die(flags, cmd, 1, fmt.Sprintf("reading blob %s: %v", blobSHA, err))
 		}
-		// Skip binary blobs (should already be skipped by scanner, but double-check)
 		if isBinaryContent(content) {
 			continue
 		}
 		modified := compiledPattern.ReplaceAll(content, []byte(replace))
 		if bytes.Equal(content, modified) {
-			// Pattern matched during scan (possibly on specific lines) but
-			// ReplaceAll found nothing -- skip.
 			continue
 		}
 		newSHA, err := git.HashObjectWriteBytes(ctx, modified)
@@ -422,7 +665,7 @@ func scrubMatchExecute(
 		}
 	}
 
-	// Determine commit range
+	// Determine parent commit range.
 	var shas []string
 	if entireHistory {
 		out, _, err := git.Run(ctx, "rev-list", "--topo-order", "--reverse", "HEAD")
@@ -431,7 +674,6 @@ func scrubMatchExecute(
 		}
 		shas = splitNonEmpty(out)
 	} else {
-		// --from: inclusive of fromSHA
 		out, _, err := git.Run(ctx, "rev-list", "--topo-order", "--reverse", fromSHA+"..HEAD")
 		if err != nil {
 			die(flags, cmd, 1, fmt.Sprintf("listing commits: %v", err))
@@ -442,15 +684,15 @@ func scrubMatchExecute(
 	commitCount := len(shas)
 	fmt.Printf("Rewriting %d commits...\n", commitCount)
 
-	// Track how many commit messages were modified
+	// Track how many commit messages were modified.
 	messagesModified := 0
 	replaceBytes := []byte(replace)
 
+	// Walk and rewrite parent, passing gitlinkMap for submodule SHA remapping.
 	shaMap, rewrittenCount, err := walkAndRewrite(ctx, shas, func(ctx context.Context, sha string, info git.CommitInfo, remappedParents []string) (CommitTransform, error) {
 		var xform CommitTransform
 
-		// Replace blobs in tree
-		newTreeSHA, err := replaceInTreeByBlobMap(ctx, info.Tree, blobMap, nil)
+		newTreeSHA, err := replaceInTreeByBlobMap(ctx, info.Tree, blobMap, gitlinkMap)
 		if err != nil {
 			return CommitTransform{}, fmt.Errorf("replacing blobs in tree for commit %s: %w", sha, err)
 		}
@@ -458,7 +700,6 @@ func scrubMatchExecute(
 			xform.TreeSHA = newTreeSHA
 		}
 
-		// Replace pattern in commit message
 		if compiledPattern.Match([]byte(info.Message)) {
 			newMessage := compiledPattern.ReplaceAllString(info.Message, replace)
 			if newMessage != info.Message {
@@ -473,7 +714,57 @@ func scrubMatchExecute(
 		die(flags, cmd, 1, err.Error())
 	}
 
-	// Update refs
+	// Phase 2 (4.7): Apply all ref updates atomically.
+	// Submodules first, then parent.
+
+	for _, sr := range subScrubResults {
+		fmt.Printf("Updating refs for submodule [%s]...\n", sr.sub.RelativePath)
+		if err := os.Chdir(sr.sub.WorkTreePath); err != nil {
+			die(flags, cmd, 1, fmt.Sprintf("chdir to submodule %s for ref update: %v", sr.sub.RelativePath, err))
+		}
+
+		if err := updateRefs(ctx, sr.shaMap, "", "", "", "", flags.verbose); err != nil {
+			os.Chdir(parentDir)
+			die(flags, cmd, 1, fmt.Sprintf("submodule %s: updating refs: %v", sr.sub.RelativePath, err))
+		}
+
+		subTagsRewritten := rewriteTagAnnotations(ctx, flags, cmd, compiledPattern, replaceBytes, sr.shaMap)
+		if subTagsRewritten > 0 && flags.verbose {
+			fmt.Fprintf(os.Stderr, "  [%s] %d tag annotations rewritten\n", sr.sub.RelativePath, subTagsRewritten)
+		}
+
+		if err := cleanupAfterRewrite(ctx, flags, cmd, sr.shaMap, sr.sub.SafegitDir); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: submodule %s post-rewrite cleanup: %v\n", sr.sub.RelativePath, err)
+		}
+
+		// Oplog entry for submodule.
+		subRef, _ := git.HeadRef(ctx)
+		if subRef == "" {
+			subRef = "HEAD (detached)"
+		}
+		subNewHead, _ := git.RevParse(ctx, "HEAD")
+		_ = oplog.Append(sr.sub.SafegitDir, oplog.Entry{
+			Op: "scrub-match",
+			Extra: map[string]interface{}{
+				"ref":              subRef,
+				"pattern":          compiledPattern.String(),
+				"replace":          replace,
+				"reason":           reason,
+				"sha":              subNewHead,
+				"rewritten":        sr.rewrittenCount,
+				"blobsReplaced":    len(sr.blobMap),
+				"messagesModified": sr.messagesModified,
+				"parentScrub":      true,
+			},
+		})
+	}
+
+	// Chdir back to parent for parent ref updates.
+	if err := os.Chdir(parentDir); err != nil {
+		die(flags, cmd, 1, fmt.Sprintf("chdir back to parent for ref update: %v", err))
+	}
+
+	// Update parent refs.
 	fmt.Println("Updating refs...")
 	if err := updateRefs(ctx, shaMap, "", "", "", "", flags.verbose); err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("updating refs: %v", err))
@@ -499,7 +790,7 @@ func scrubMatchExecute(
 		ref = "HEAD (detached)"
 	}
 
-	// Oplog entry
+	// Oplog entry for parent
 	_ = oplog.Append(sgDir, oplog.Entry{
 		Op: "scrub-match",
 		Extra: map[string]interface{}{
@@ -513,27 +804,76 @@ func scrubMatchExecute(
 			"blobsReplaced":    len(blobMap),
 			"messagesModified": messagesModified,
 			"tagsRewritten":    tagsRewritten,
+			"submodules":       len(subScrubResults),
 		},
 	})
 
-	// Surgical post-rewrite cleanup: expire tainted reflog entries and prune old objects
+	// Surgical post-rewrite cleanup for parent
 	if err := cleanupAfterRewrite(ctx, flags, cmd, shaMap, sgDir); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: post-rewrite cleanup: %v\n", err)
 	}
 
-	// Post-rewrite verification: re-scan objects to confirm the secret is gone.
-	// When --scope is set, only verify blobs within scope (out-of-scope blobs
-	// are expected to still contain the pattern).
+	// Phase 3 (4.8): Verification -- re-scan all object stores.
 	fmt.Println("Verifying secret removal...")
 	exitCode := 0
 	verifyErr := verifySecretRemovedScoped(ctx, compiledPattern, scope)
 	if verifyErr != nil {
 		fmt.Fprintf(os.Stderr, "CRITICAL: %v\n", verifyErr)
-		fmt.Fprintln(os.Stderr, "Secret may still be present in the local object store.")
-		fmt.Fprintln(os.Stderr, "Run 'git reflog expire --expire=now --all && git gc --prune=now' to force cleanup.")
+		fmt.Fprintln(os.Stderr, "Secret may still be present in the parent object store.")
 		exitCode = 1
+	}
+
+	// Verify submodule object stores.
+	for _, sr := range subScrubResults {
+		subScope := scope
+		if scope != nil {
+			ss := scopeForSubmodule(*scope, sr.sub.RelativePath)
+			if ss != "" {
+				subScope = &ss
+			} else {
+				subScope = nil
+			}
+		}
+		subResults, err := scan.ScanObjectsWithDir(ctx, compiledPattern, sr.sub.GitDir, sr.sub.WorkTreePath, sr.sub.RelativePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "CRITICAL: re-scan submodule %s failed: %v\n", sr.sub.RelativePath, err)
+			exitCode = 1
+			continue
+		}
+		if len(subResults.Matches) > 0 {
+			// If scoped, filter matches.
+			remaining := subResults.Matches
+			if subScope != nil {
+				if err := scan.AddAttributionWithDir(ctx, subResults, sr.sub.GitDir, sr.sub.WorkTreePath); err == nil {
+					var filtered []scan.Match
+					for _, m := range remaining {
+						if m.ObjectType == "blob" && !matchScope(*subScope, m.Path) {
+							continue
+						}
+						filtered = append(filtered, m)
+					}
+					remaining = filtered
+				}
+			}
+			if len(remaining) > 0 {
+				fmt.Fprintf(os.Stderr, "CRITICAL: secret still present in submodule %s (%d matches)\n",
+					sr.sub.RelativePath, len(remaining))
+				exitCode = 1
+			}
+		}
+	}
+
+	// Verify gitlinks in parent's rewritten history resolve to valid commits.
+	if len(subScrubResults) > 0 {
+		if err := verifyGitlinksAfterScrub(ctx, shaMap, subScrubResults); err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: gitlink verification: %v\n", err)
+		}
+	}
+
+	if exitCode == 0 {
+		fmt.Println("Verification passed: no matches found in object stores.")
 	} else {
-		fmt.Println("Verification passed: no matches found in object store.")
+		fmt.Fprintln(os.Stderr, "Run 'git reflog expire --expire=now --all && git gc --prune=now' to force cleanup.")
 	}
 
 	// Summary
@@ -542,11 +882,105 @@ func scrubMatchExecute(
 	fmt.Printf("  %d blobs replaced\n", len(blobMap))
 	fmt.Printf("  %d commit messages modified\n", messagesModified)
 	fmt.Printf("  %d tag annotations rewritten\n", tagsRewritten)
+	if len(subScrubResults) > 0 {
+		totalSubRewritten := 0
+		totalSubBlobs := 0
+		for _, sr := range subScrubResults {
+			totalSubRewritten += sr.rewrittenCount
+			totalSubBlobs += len(sr.blobMap)
+		}
+		fmt.Printf("  %d submodule commits rewritten\n", totalSubRewritten)
+		fmt.Printf("  %d submodule blobs replaced\n", totalSubBlobs)
+	}
 	fmt.Printf("  Old HEAD: %s\n", oldHeadSHA[:12])
 	fmt.Printf("  New HEAD: %s\n", newHeadSHA[:12])
 	fmt.Printf("\nTo update the remote, run: git push --force-with-lease\n")
 
 	return exitCode
+}
+
+// verifyGitlinksAfterScrub checks that every gitlink in the parent's rewritten
+// history resolves to a valid commit in the corresponding submodule.
+func verifyGitlinksAfterScrub(ctx context.Context, parentShaMap map[string]string, subResults []submoduleScrubResult) error {
+	// Build a set of all valid new submodule commit SHAs.
+	validSubCommits := make(map[string]bool)
+	for _, sr := range subResults {
+		for _, newSHA := range sr.shaMap {
+			validSubCommits[newSHA] = true
+		}
+	}
+
+	// Check HEAD's tree for gitlinks.
+	headSHA, err := git.RevParse(ctx, "HEAD")
+	if err != nil {
+		return fmt.Errorf("resolving HEAD: %w", err)
+	}
+	headInfo, err := git.ParseCommit(ctx, headSHA)
+	if err != nil {
+		return fmt.Errorf("parsing HEAD commit: %w", err)
+	}
+	entries, err := git.LsTree(ctx, headInfo.Tree)
+	if err != nil {
+		return fmt.Errorf("ls-tree HEAD: %w", err)
+	}
+
+	var failures []string
+	for _, e := range entries {
+		if e.ObjectType == "commit" {
+			// This is a gitlink. Check that it resolves.
+			if !validSubCommits[e.SHA] {
+				// It might be an unmodified submodule commit (not in the rewrite set).
+				// Check that the SHA exists in one of the submodule git dirs.
+				found := false
+				for _, sr := range subResults {
+					if sr.sub.RelativePath == e.Path {
+						// Check if this SHA is valid in the submodule.
+						_, _, catErr := git.RunWithGitDir(ctx, sr.sub.GitDir, sr.sub.WorkTreePath, "cat-file", "-t", e.SHA)
+						if catErr == nil {
+							found = true
+						}
+						break
+					}
+				}
+				if !found {
+					failures = append(failures, fmt.Sprintf("gitlink %s at %s does not resolve to a valid commit", shortSHA(e.SHA), e.Path))
+				}
+			}
+		}
+	}
+
+	if len(failures) > 0 {
+		return fmt.Errorf("%d gitlink(s) invalid:\n  %s", len(failures), strings.Join(failures, "\n  "))
+	}
+	return nil
+}
+
+// buildScopedBlobSetWithDir enumerates all blob-to-path mappings across all
+// refs in a specific git directory and returns the set of blob SHAs that appear
+// at paths matching the scope glob.
+func buildScopedBlobSetWithDir(ctx context.Context, scope, gitDir, workTree string) (map[string]bool, error) {
+	stdout, _, err := git.RunWithGitDir(ctx, gitDir, workTree, "rev-list", "--all", "--objects")
+	if err != nil {
+		return nil, fmt.Errorf("rev-list --all --objects: %w", err)
+	}
+
+	result := make(map[string]bool)
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		spaceIdx := strings.IndexByte(line, ' ')
+		if spaceIdx < 0 {
+			continue
+		}
+		sha := line[:spaceIdx]
+		filePath := line[spaceIdx+1:]
+		if matchScope(scope, filePath) {
+			result[sha] = true
+		}
+	}
+	return result, nil
 }
 
 // rewriteTagAnnotations does a second pass over annotated tags after updateRefs,
