@@ -7,7 +7,10 @@ import (
 	"sort"
 	"strings"
 
+	"time"
+
 	"github.com/smm-h/safegit/internal/git"
+	"github.com/smm-h/safegit/internal/lock"
 	"github.com/smm-h/safegit/internal/oplog"
 	"github.com/smm-h/safegit/internal/repo"
 )
@@ -48,6 +51,19 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 	ctx := context.Background()
 
 	requireCleanTree(ctx, flags, cmd)
+
+	// Acquire rewrite lock to prevent concurrent history rewriting
+	cfg, err := loadConfig(flags, gitDir)
+	if err != nil {
+		die(flags, cmd, 1, fmt.Sprintf("loading config: %v", err))
+	}
+	timeout := time.Duration(cfg.Lock.AcquireTimeoutSeconds) * time.Second
+	sharedDir := repo.SharedSafegitDir(ctx, gitDir)
+	lk, err := lock.Acquire(sharedDir, sgDir, "safegit/rewrite", "rewrite-author", timeout)
+	if err != nil {
+		die(flags, cmd, 1, "another rewrite operation is in progress")
+	}
+	defer lk.Release()
 
 	// Dry-run mode
 	if flags.dryRun {
