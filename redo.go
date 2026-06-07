@@ -94,6 +94,11 @@ func runRedo(flags globalFlags, bypassSession bool) {
 		fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
 	}
 
+	if err := maybeAutoBumpParent(ctx, flags, gitDir, targetSHA, "redo", ""); err != nil {
+		fmt.Fprintf(os.Stderr, "error: auto-bump parent: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Log the redo to the oplog
 	_ = oplog.Append(sgDir, oplog.Entry{
 		Op: "redo",
