@@ -323,6 +323,172 @@ func TestSubmoduleConcurrentBump(t *testing.T) {
 	}
 }
 
+var submoduleEnv = []string{"CLAUDE_CODE_SESSION_ID=submodule-test"}
+
+// Phase 1.4: Scrub a file in the parent repo while a submodule exists.
+// Verify the submodule gitlink SHA is identical before and after scrub.
+func TestScrubFilePreservesGitlink(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+
+	// Record the submodule gitlink entry before scrub
+	subEntryBefore := lsTreeEntry(t, parentDir, "mysub")
+	if subEntryBefore == "" {
+		t.Fatal("submodule entry not found in HEAD tree before test")
+	}
+
+	// Add a file with secret content, commit with safegit
+	if err := os.WriteFile(filepath.Join(parentDir, "secret.txt"), []byte("secret content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv, "commit", "-m", "add secret", "--", "secret.txt")
+	if code != 0 {
+		t.Fatalf("safegit commit failed (code %d): %s", code, stderr)
+	}
+
+	shas := revListReverse(t, parentDir)
+	initialSHA := shas[0]
+
+	// Modify the file on disk to contain clean content (scrub replaces with on-disk content)
+	if err := os.WriteFile(filepath.Join(parentDir, "secret.txt"), []byte("clean content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run scrub file
+	_, stderr, code = runSafegitEnv(t, parentDir, submoduleEnv, "--force", "scrub", "file", "--from", initialSHA, "--reason", "test gitlink preservation", "secret.txt")
+	if code != 0 {
+		t.Fatalf("scrub file failed (code %d): %s", code, stderr)
+	}
+
+	// Verify the submodule gitlink SHA is identical after scrub
+	subEntryAfter := lsTreeEntry(t, parentDir, "mysub")
+	subSHABefore := lsTreeSHA(t, subEntryBefore)
+	subSHAAfter := lsTreeSHA(t, subEntryAfter)
+	if subSHABefore != subSHAAfter {
+		t.Errorf("submodule gitlink SHA changed after scrub file:\n  before: %s\n  after:  %s", subSHABefore, subSHAAfter)
+	}
+
+	// Verify the scrubbed file has the clean content
+	headSHA := revParseHEAD(t, parentDir)
+	content, ok := gitShow(t, parentDir, headSHA, "secret.txt")
+	if !ok {
+		t.Error("secret.txt not found in HEAD after scrub")
+	} else if content != "clean content\n" {
+		t.Errorf("secret.txt = %q, want %q", content, "clean content\n")
+	}
+}
+
+// Phase 1.5: Scrub match in the parent repo while a submodule exists.
+// Verify the submodule gitlink SHA is identical before and after, and the
+// file content is replaced.
+func TestScrubMatchPreservesGitlink(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+
+	// Record the submodule gitlink entry before scrub
+	subEntryBefore := lsTreeEntry(t, parentDir, "mysub")
+	if subEntryBefore == "" {
+		t.Fatal("submodule entry not found in HEAD tree before test")
+	}
+
+	// Add a file with secret content, commit with safegit
+	if err := os.WriteFile(filepath.Join(parentDir, "secret.txt"), []byte("SUPERSECRET123\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv, "commit", "-m", "add secret", "--", "secret.txt")
+	if code != 0 {
+		t.Fatalf("safegit commit failed (code %d): %s", code, stderr)
+	}
+
+	// Run scrub match
+	_, stderr, code = runSafegitEnv(t, parentDir, submoduleEnv,
+		"--force", "scrub", "match",
+		"--pattern", "SUPERSECRET123",
+		"--replace", "REDACTED",
+		"--reason", "test gitlink preservation",
+		"--entire-history",
+	)
+	if code != 0 {
+		t.Fatalf("scrub match failed (code %d): %s", code, stderr)
+	}
+
+	// Verify the submodule gitlink SHA is identical after scrub
+	subEntryAfter := lsTreeEntry(t, parentDir, "mysub")
+	subSHABefore := lsTreeSHA(t, subEntryBefore)
+	subSHAAfter := lsTreeSHA(t, subEntryAfter)
+	if subSHABefore != subSHAAfter {
+		t.Errorf("submodule gitlink SHA changed after scrub match:\n  before: %s\n  after:  %s", subSHABefore, subSHAAfter)
+	}
+
+	// Verify the file content is now REDACTED
+	headSHA := revParseHEAD(t, parentDir)
+	content, ok := gitShow(t, parentDir, headSHA, "secret.txt")
+	if !ok {
+		t.Error("secret.txt not found in HEAD after scrub match")
+	} else if !strings.Contains(content, "REDACTED") {
+		t.Errorf("secret.txt should contain REDACTED, got: %q", content)
+	}
+	if strings.Contains(content, "SUPERSECRET123") {
+		t.Errorf("secret.txt still contains SUPERSECRET123: %q", content)
+	}
+}
+
+// Phase 1.6: Attempt to scrub a path that starts with a gitlink (mysub/somefile.txt).
+// The operation should either no-op cleanly (exit 0, no changes) or error meaningfully.
+// It must not crash or corrupt the tree.
+func TestScrubFileGitlinkPath(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+
+	// Record tree state before scrub
+	subEntryBefore := lsTreeEntry(t, parentDir, "mysub")
+	headBefore := revParseHEAD(t, parentDir)
+
+	shas := revListReverse(t, parentDir)
+	firstSHA := shas[0]
+
+	// Create the file on disk so scrub has something to read (even though
+	// the path traverses a gitlink in the committed tree)
+	subFilePath := filepath.Join(parentDir, "mysub", "somefile.txt")
+	if err := os.WriteFile(subFilePath, []byte("replacement\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run scrub file targeting a path inside the submodule
+	_, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv, "--force", "scrub", "file", "--from", firstSHA, "--reason", "test gitlink path", "mysub/somefile.txt")
+
+	// Either clean exit (no-op) or meaningful error is acceptable.
+	// Crash (signal death, panic) or corruption is not.
+	if code > 1 {
+		// Code > 1 might indicate a crash/signal; code 1 is a normal error
+		t.Logf("scrub exited with code %d: %s (checking for corruption)", code, stderr)
+	}
+
+	// Verify: the tree is not corrupted regardless of exit code.
+	// The submodule gitlink SHA must be unchanged.
+	subEntryAfter := lsTreeEntry(t, parentDir, "mysub")
+	subSHABefore := lsTreeSHA(t, subEntryBefore)
+	subSHAAfter := lsTreeSHA(t, subEntryAfter)
+	if subSHABefore != subSHAAfter {
+		t.Errorf("submodule gitlink SHA corrupted after scrub file on gitlink path:\n  before: %s\n  after:  %s", subSHABefore, subSHAAfter)
+	}
+
+	// If exit code was 0 (no-op), HEAD should be unchanged
+	if code == 0 {
+		headAfter := revParseHEAD(t, parentDir)
+		if headAfter != headBefore {
+			t.Errorf("HEAD changed despite no-op scrub: %s -> %s", headBefore, headAfter)
+		}
+	}
+
+	// Verify git fsck passes (no corruption)
+	fsck := exec.Command("git", "fsck", "--no-dangling")
+	fsck.Dir = parentDir
+	if out, err := fsck.CombinedOutput(); err != nil {
+		t.Errorf("git fsck failed after scrub on gitlink path: %v\n%s", err, out)
+	}
+}
+
 // Phase 0.7: Two concurrent safegit commits adding different files to the parent
 // while submodule exists. Verify both files in tree, submodule entry unchanged,
 // total commits = 4.

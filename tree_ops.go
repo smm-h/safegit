@@ -103,8 +103,10 @@ func lookupBlobAtPath(ctx context.Context, treeSHA string, filePath string) stri
 
 // replaceInTreeByBlobMap walks a tree recursively and replaces any blob whose
 // SHA is a key in blobMap with the corresponding value. Subtrees are recursed
-// into. If no blobs match, the original treeSHA is returned unchanged.
-func replaceInTreeByBlobMap(ctx context.Context, treeSHA string, blobMap map[string]string) (string, error) {
+// into. Gitlink entries (submodules, ObjectType "commit") are passed through
+// unchanged unless gitlinkMap is non-nil and contains a mapping for the SHA.
+// If no entries match, the original treeSHA is returned unchanged.
+func replaceInTreeByBlobMap(ctx context.Context, treeSHA string, blobMap map[string]string, gitlinkMap map[string]string) (string, error) {
 	entries, err := git.LsTree(ctx, treeSHA)
 	if err != nil {
 		return "", fmt.Errorf("ls-tree %s: %w", treeSHA, err)
@@ -119,13 +121,22 @@ func replaceInTreeByBlobMap(ctx context.Context, treeSHA string, blobMap map[str
 				changed = true
 			}
 		case "tree":
-			newSubSHA, err := replaceInTreeByBlobMap(ctx, e.SHA, blobMap)
+			newSubSHA, err := replaceInTreeByBlobMap(ctx, e.SHA, blobMap, gitlinkMap)
 			if err != nil {
 				return "", err
 			}
 			if newSubSHA != e.SHA {
 				entries[i].SHA = newSubSHA
 				changed = true
+			}
+		case "commit":
+			// Gitlink (submodule reference). Pass through unchanged unless
+			// gitlinkMap has an explicit remapping for this SHA.
+			if gitlinkMap != nil {
+				if newSHA, ok := gitlinkMap[e.SHA]; ok {
+					entries[i].SHA = newSHA
+					changed = true
+				}
 			}
 		}
 	}

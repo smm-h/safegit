@@ -332,7 +332,7 @@ func scrubMatchExecute(
 		var xform CommitTransform
 
 		// Replace blobs in tree
-		newTreeSHA, err := replaceInTreeByBlobMap(ctx, info.Tree, blobMap)
+		newTreeSHA, err := replaceInTreeByBlobMap(ctx, info.Tree, blobMap, nil)
 		if err != nil {
 			return CommitTransform{}, fmt.Errorf("replacing blobs in tree for commit %s: %w", sha, err)
 		}
