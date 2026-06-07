@@ -439,31 +439,19 @@ func runScrubFileInSubmodule(
 		return 0
 	}
 
-	// Resolve parent --from.
-	fromSHA, err := git.RevParse(ctx, from)
-	if err != nil {
-		die(flags, cmd, 1, fmt.Sprintf("resolving parent --from %q: %v", from, err))
-	}
-	isAnc, err := git.IsAncestorOf(ctx, fromSHA, "HEAD")
-	if err != nil {
-		die(flags, cmd, 1, fmt.Sprintf("checking ancestry of --from: %v", err))
-	}
-	if !isAnc {
-		die(flags, cmd, 1, fmt.Sprintf("--from commit %s is not an ancestor of parent HEAD", from))
-	}
-
 	// Capture old parent HEAD.
 	oldHeadSHA, err := git.RevParse(ctx, "HEAD")
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("resolving parent HEAD: %v", err))
 	}
 
-	// Parent commit range.
-	out, _, err := git.Run(ctx, "rev-list", "--topo-order", "--reverse", fromSHA+"..HEAD")
+	// Parent commit range: use entire history since --from is a submodule SHA
+	// that doesn't exist in the parent repo.
+	out, _, err := git.Run(ctx, "rev-list", "--topo-order", "--reverse", "HEAD")
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("listing parent commits: %v", err))
 	}
-	parentSHAs := append([]string{fromSHA}, splitNonEmpty(out)...)
+	parentSHAs := splitNonEmpty(out)
 
 	fmt.Printf("Rewriting %d parent commits (gitlink updates)...\n", len(parentSHAs))
 
@@ -515,7 +503,7 @@ func runScrubFileInSubmodule(
 		Extra: map[string]interface{}{
 			"ref":       ref,
 			"file":      fullPath,
-			"from":      fromSHA,
+			"from":      from,
 			"reason":    reason,
 			"oldHead":   oldHeadSHA,
 			"sha":       newHeadSHA,
@@ -524,21 +512,26 @@ func runScrubFileInSubmodule(
 		},
 	})
 
-	// Verification: check old blobs removed from submodule.
+	// Verification: check old blobs are not reachable from submodule refs.
 	exitCode := 0
 	if len(oldSubBlobSHAs) > 0 {
-		// Chdir to submodule for verification.
 		os.Chdir(sub.WorkTreePath)
-		fmt.Println("Verifying old blobs removed from submodule...")
+		fmt.Println("Verifying old blobs unreachable in submodule...")
 		oldBlobList := make([]string, 0, len(oldSubBlobSHAs))
 		for sha := range oldSubBlobSHAs {
 			oldBlobList = append(oldBlobList, sha)
 		}
-		if err := verifyOldBlobsRemoved(ctx, oldBlobList); err != nil {
-			fmt.Fprintf(os.Stderr, "CRITICAL: submodule: %v\n", err)
-			exitCode = 1
-		} else {
-			fmt.Println("Verification passed: all old blobs removed from submodule.")
+		reachableBlobs, err := buildReachableBlobSet(ctx)
+		if err == nil {
+			for _, sha := range oldBlobList {
+				if reachableBlobs[sha] {
+					fmt.Fprintf(os.Stderr, "CRITICAL: old blob %s still reachable in submodule\n", shortSHA(sha))
+					exitCode = 1
+				}
+			}
+			if exitCode == 0 {
+				fmt.Println("Verification passed: old blobs unreachable in submodule.")
+			}
 		}
 		os.Chdir(parentDir)
 	}

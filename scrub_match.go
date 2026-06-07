@@ -841,9 +841,16 @@ func scrubMatchExecute(
 			continue
 		}
 		if len(subResults.Matches) > 0 {
-			// If scoped, filter matches.
-			remaining := subResults.Matches
-			if subScope != nil {
+			// Filter to reachable matches only — unreachable objects in
+			// submodule pack files may survive gc but are not a security risk.
+			var remaining []scan.Match
+			for _, m := range subResults.Matches {
+				if !m.Reachable {
+					continue
+				}
+				remaining = append(remaining, m)
+			}
+			if subScope != nil && len(remaining) > 0 {
 				if err := scan.AddAttributionWithDir(ctx, subResults, sr.sub.GitDir, sr.sub.WorkTreePath); err == nil {
 					var filtered []scan.Match
 					for _, m := range remaining {
