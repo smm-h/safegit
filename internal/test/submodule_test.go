@@ -556,7 +556,9 @@ func TestSubmoduleConcurrentParent(t *testing.T) {
 
 // prepSubmoduleForCommit puts the submodule checkout on the "main" branch
 // (submodule add leaves it detached) and configures user identity so safegit
-// commit can operate inside it. Returns the submodule directory path.
+// commit can operate inside it. Also disables autoBumpParent in the parent
+// so existing tests are not affected by the auto-bump feature.
+// Returns the submodule directory path.
 func prepSubmoduleForCommit(t *testing.T, parentDir string) string {
 	t.Helper()
 	subDir := filepath.Join(parentDir, "mysub")
@@ -571,6 +573,14 @@ func prepSubmoduleForCommit(t *testing.T, parentDir string) string {
 			t.Fatalf("%v in submodule: %v\n%s", args, err, out)
 		}
 	}
+
+	// Disable autoBumpParent in the parent so submodule commits don't
+	// trigger parent bumps (tests that want auto-bump enable it explicitly).
+	_, stderr, code := runSafegit(t, parentDir, "config", "set", "commit.autoBumpParent", "false")
+	if code != 0 {
+		t.Fatalf("failed to configure parent autoBumpParent=false: %s", stderr)
+	}
+
 	return subDir
 }
 
