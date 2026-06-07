@@ -8,12 +8,16 @@ package submodule
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 )
+
+// ErrNestedSubmodules is returned when a submodule itself contains submodules.
+var ErrNestedSubmodules = errors.New("nested submodules detected")
 
 type SubmoduleInfo struct {
 	Name          string
@@ -59,6 +63,24 @@ func Enumerate(ctx context.Context, parentGitDir string) ([]SubmoduleInfo, error
 		}
 	}
 	return result, nil
+}
+
+// CheckNested verifies that no initialized submodule itself contains nested
+// submodules (indicated by a .gitmodules file in the submodule's working tree).
+func CheckNested(ctx context.Context, parentGitDir string) error {
+	subs, err := Enumerate(ctx, parentGitDir)
+	if err != nil {
+		return err
+	}
+	for _, sub := range subs {
+		if !sub.Initialized || sub.WorkTreePath == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(sub.WorkTreePath, ".gitmodules")); err == nil {
+			return fmt.Errorf("%w: submodule %q contains nested submodules", ErrNestedSubmodules, sub.RelativePath)
+		}
+	}
+	return nil
 }
 
 func enumerateInitialized(ctx context.Context, repoRoot, parentGitDir string) ([]SubmoduleInfo, error) {

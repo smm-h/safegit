@@ -2,9 +2,11 @@ package submodule
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -226,5 +228,48 @@ func TestDetectParent_NotASubmodule(t *testing.T) {
 	_, _, ok := DetectParent(ctx)
 	if ok {
 		t.Error("DetectParent returned ok=true outside a submodule")
+	}
+}
+
+func TestCheckNested_NoNesting(t *testing.T) {
+	_, parentGitDir, _ := createParentWithSubmodule(t)
+	ctx := context.Background()
+
+	err := CheckNested(ctx, parentGitDir)
+	if err != nil {
+		t.Fatalf("CheckNested returned error for non-nested submodule: %v", err)
+	}
+}
+
+func TestCheckNested_WithNesting(t *testing.T) {
+	_, parentGitDir, subDir := createParentWithSubmodule(t)
+	ctx := context.Background()
+
+	// Create a .gitmodules file inside the submodule to simulate nesting.
+	if err := os.WriteFile(filepath.Join(subDir, ".gitmodules"), []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := CheckNested(ctx, parentGitDir)
+	if err == nil {
+		t.Fatal("CheckNested returned nil, expected ErrNestedSubmodules")
+	}
+	if !errors.Is(err, ErrNestedSubmodules) {
+		t.Fatalf("error does not wrap ErrNestedSubmodules: %v", err)
+	}
+	if !strings.Contains(err.Error(), "sub") {
+		t.Errorf("error message should mention the submodule name: %v", err)
+	}
+}
+
+func TestCheckNested_NoSubmodules(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+	seedCommit(t, dir, "file.txt", "content\n", "initial")
+
+	ctx := context.Background()
+	err := CheckNested(ctx, filepath.Join(dir, ".git"))
+	if err != nil {
+		t.Fatalf("CheckNested returned error for repo with no submodules: %v", err)
 	}
 }
