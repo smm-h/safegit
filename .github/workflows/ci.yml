@@ -20,5 +20,6 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go-version }}
+      - run: git config --global protocol.file.allow always
       - run: go vet ./...
       - run: go test ./... -race -short -timeout=10m
