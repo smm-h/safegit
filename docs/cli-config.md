@@ -13,7 +13,7 @@ show or set configuration values
 
 ## config get
 
-get a configuration value
+get the current value of a single configuration key from the .git/safegit/config.json file, printing the raw value to stdout so it can be captured by scripts or used in automation pipelines
 
 ### Arguments
 
@@ -23,7 +23,7 @@ get a configuration value
 
 ## config set
 
-set a configuration value
+set a configuration key to a new value in the .git/safegit/config.json file, creating the file if it does not exist yet, and persisting the change for all future safegit invocations in this repository
 
 ### Arguments
 
@@ -34,4 +34,4 @@ set a configuration value
 
 ## config show
 
-show all configuration
+show all configuration values currently in effect for this repository, including built-in defaults and any user overrides from the .git/safegit/config.json file, printed as key-value pairs to stdout for inspection and debugging purposes

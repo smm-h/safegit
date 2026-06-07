@@ -161,16 +161,16 @@ func main() {
 		),
 	)
 	cg := app.Group("config", "show or set configuration values")
-	cg.Command("show", "show all configuration", func(kwargs map[string]interface{}) int {
+	cg.Command("show", "show all configuration values currently in effect for this repository, including built-in defaults and any user overrides from the .git/safegit/config.json file, printed as key-value pairs to stdout for inspection and debugging purposes", func(kwargs map[string]interface{}) int {
 		return runConfigShow(globalsToFlags(kwargs))
 	})
-	cg.Command("get", "get a configuration value", func(kwargs map[string]interface{}) int {
+	cg.Command("get", "get the current value of a single configuration key from the .git/safegit/config.json file, printing the raw value to stdout so it can be captured by scripts or used in automation pipelines", func(kwargs map[string]interface{}) int {
 		key := kwargs["key"].(string)
 		return runConfigGet(globalsToFlags(kwargs), key)
 	},
 		strictcli.WithArgs(strictcli.NewArg("key", "configuration key")),
 	)
-	cg.Command("set", "set a configuration value", func(kwargs map[string]interface{}) int {
+	cg.Command("set", "set a configuration key to a new value in the .git/safegit/config.json file, creating the file if it does not exist yet, and persisting the change for all future safegit invocations in this repository", func(kwargs map[string]interface{}) int {
 		key := kwargs["key"].(string)
 		value := kwargs["value"].(string)
 		return runConfigSet(globalsToFlags(kwargs), key, value)
@@ -179,10 +179,10 @@ func main() {
 	)
 
 	hg := app.Group("hook", "manage pre-pre-push hooks")
-	hg.Command("list", "list installed hooks", func(kwargs map[string]interface{}) int {
+	hg.Command("list", "list all pre-pre-push hooks currently installed in the .git/safegit/hooks directory, showing each hook name, file path, and whether it is executable, so you can audit which checks run before every push", func(kwargs map[string]interface{}) int {
 		return hookList(globalsToFlags(kwargs))
 	})
-	hg.Command("run", "run hooks", func(kwargs map[string]interface{}) int {
+	hg.Command("run", "run all installed pre-pre-push hooks (or a single named hook) immediately without performing an actual push, so you can verify that all configured hooks pass before committing to a real push operation", func(kwargs map[string]interface{}) int {
 		var name string
 		if v := kwargs["name"]; v != nil {
 			name = v.(string)
@@ -191,7 +191,7 @@ func main() {
 	},
 		strictcli.WithArgs(strictcli.NewArg("name", "hook name to run", strictcli.ArgRequired(false))),
 	)
-	hg.Command("install", "install a hook from a file", func(kwargs map[string]interface{}) int {
+	hg.Command("install", "install a pre-pre-push hook by copying a script file into the .git/safegit/hooks directory, making it executable, and registering it so that safegit push will run it before any network I/O occurs", func(kwargs map[string]interface{}) int {
 		path := kwargs["path"].(string)
 		return hookInstall(globalsToFlags(kwargs), path)
 	},
@@ -224,8 +224,8 @@ func main() {
 			strictcli.CoRequired{Flags: []string{"old-email", "new-email"}},
 		),
 	)
-	sg := app.Group("scrub", "surgically rewrite history to remove sensitive content")
-	sg.Command("file", "replace or remove a file across history", func(kwargs map[string]interface{}) int {
+	sg := app.Group("scrub", "surgically rewrite git history to remove or replace sensitive content such as secrets, credentials, and private data from all commits, trees, and blobs in the repository")
+	sg.Command("file", "replace or remove a specific file across all commits in the repository history, rewriting each affected commit tree to either substitute the file contents with a sanitized version or delete the file entirely from every historical snapshot", func(kwargs map[string]interface{}) int {
 		return runScrubFile(globalsToFlags(kwargs), kwargs)
 	},
 		strictcli.WithFlags(
@@ -236,7 +236,7 @@ func main() {
 			strictcli.NewArg("file", "repo-relative file path to scrub"),
 		),
 	)
-	sg.Command("match", "replace pattern matches across history", func(kwargs map[string]interface{}) int {
+	sg.Command("match", "replace all occurrences of a regex pattern across every blob in the repository history, rewriting commit trees to substitute matched text with a replacement string so that sensitive values like secrets and credentials are permanently removed from all historical snapshots", func(kwargs map[string]interface{}) int {
 		return runScrubMatch(globalsToFlags(kwargs), kwargs)
 	},
 		strictcli.WithFlags(

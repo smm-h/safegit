@@ -1,4 +1,4 @@
-// Package commit implements the two-phase commit pipeline.
+// Package commit implements the two-phase commit pipeline: a parallel-safe staging phase and a serialized ref-update phase with CAS retries.
 // Phase A (parallel-safe): tmp index, validate, stage, write-tree, commit-tree.
 // Phase B (serialized): ref lock, CAS check with retry, update-ref, oplog.
 package commit

@@ -1,6 +1,6 @@
 ---
 title: internal/repo
-description: "Package repo manages the .git/safegit/ data directory."
+description: "Package repo manages the .git/safegit/ data directory including initialization, configuration loading, validation, and path helpers for all state files."
 generated: true
 nav_group: "API Reference"
 nav_order: 9

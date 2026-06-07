@@ -1,6 +1,6 @@
 ---
 title: internal/testutil
-description: "Package testutil provides shared test helpers for creating temporary git"
+description: "Package testutil provides shared test helpers for creating temporary git repos, used across internal/*_test.go packages to avoid duplicating boilerplate."
 generated: true
 nav_group: "API Reference"
 nav_order: 12

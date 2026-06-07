@@ -1,6 +1,6 @@
 ---
 title: internal/hooks
-description: "Package hooks discovers and executes pre-pre-push hooks."
+description: "Package hooks discovers and executes pre-pre-push hooks that run before any network I/O, solving the SSH timeout problem when checks are long-running."
 generated: true
 nav_group: "API Reference"
 nav_order: 5

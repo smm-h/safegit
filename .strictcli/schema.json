@@ -234,28 +234,6 @@
       "help": "rewrite author/committer across history",
       "name": "rewrite-author"
     },
-    "scrub": {
-      "args": [
-        {
-          "help": "repo-relative file path to scrub",
-          "name": "file"
-        }
-      ],
-      "flags": [
-        {
-          "help": "first commit to include in the rewrite",
-          "name": "from",
-          "type": "str"
-        },
-        {
-          "help": "audit trail explaining why the scrub is needed",
-          "name": "reason",
-          "type": "str"
-        }
-      ],
-      "help": "surgically replace or remove a file across history",
-      "name": "scrub"
-    },
     "undo": {
       "flags": [
         {
@@ -366,7 +344,7 @@
               "name": "key"
             }
           ],
-          "help": "get a configuration value",
+          "help": "get the current value of a single configuration key from the .git/safegit/config.json file, printing the raw value to stdout so it can be captured by scripts or used in automation pipelines",
           "name": "get"
         },
         "set": {
@@ -380,11 +358,11 @@
               "name": "value"
             }
           ],
-          "help": "set a configuration value",
+          "help": "set a configuration key to a new value in the .git/safegit/config.json file, creating the file if it does not exist yet, and persisting the change for all future safegit invocations in this repository",
           "name": "set"
         },
         "show": {
-          "help": "show all configuration",
+          "help": "show all configuration values currently in effect for this repository, including built-in defaults and any user overrides from the .git/safegit/config.json file, printed as key-value pairs to stdout for inspection and debugging purposes",
           "name": "show"
         }
       },
@@ -400,11 +378,11 @@
               "name": "path"
             }
           ],
-          "help": "install a hook from a file",
+          "help": "install a pre-pre-push hook by copying a script file into the .git/safegit/hooks directory, making it executable, and registering it so that safegit push will run it before any network I/O occurs",
           "name": "install"
         },
         "list": {
-          "help": "list installed hooks",
+          "help": "list all pre-pre-push hooks currently installed in the .git/safegit/hooks directory, showing each hook name, file path, and whether it is executable, so you can audit which checks run before every push",
           "name": "list"
         },
         "run": {
@@ -415,16 +393,82 @@
               "required": false
             }
           ],
-          "help": "run hooks",
+          "help": "run all installed pre-pre-push hooks (or a single named hook) immediately without performing an actual push, so you can verify that all configured hooks pass before committing to a real push operation",
           "name": "run"
         }
       },
       "help": "manage pre-pre-push hooks",
       "name": "hook"
+    },
+    "scrub": {
+      "commands": {
+        "file": {
+          "args": [
+            {
+              "help": "repo-relative file path to scrub",
+              "name": "file"
+            }
+          ],
+          "flags": [
+            {
+              "help": "first commit to include in the rewrite",
+              "name": "from",
+              "type": "str"
+            },
+            {
+              "help": "audit trail explaining why the scrub is needed",
+              "name": "reason",
+              "type": "str"
+            }
+          ],
+          "help": "replace or remove a specific file across all commits in the repository history, rewriting each affected commit tree to either substitute the file contents with a sanitized version or delete the file entirely from every historical snapshot",
+          "name": "file"
+        },
+        "match": {
+          "flags": [
+            {
+              "help": "regex pattern to search for",
+              "name": "pattern",
+              "type": "str"
+            },
+            {
+              "help": "replacement string",
+              "name": "replace",
+              "type": "str"
+            },
+            {
+              "help": "audit trail explaining why the scrub is needed",
+              "name": "reason",
+              "type": "str"
+            },
+            {
+              "help": "glob pattern limiting which file paths are searched (e.g. '*.env', 'config/**')",
+              "name": "scope",
+              "type": "str"
+            },
+            {
+              "help": "first commit to include in the rewrite",
+              "name": "from",
+              "type": "str"
+            },
+            {
+              "default": false,
+              "help": "rewrite all commits",
+              "name": "entire-history",
+              "negatable": true,
+              "type": "bool"
+            }
+          ],
+          "help": "replace all occurrences of a regex pattern across every blob in the repository history, rewriting commit trees to substitute matched text with a replacement string so that sensitive values like secrets and credentials are permanently removed from all historical snapshots",
+          "name": "match"
+        }
+      },
+      "help": "surgically rewrite git history to remove or replace sensitive content such as secrets, credentials, and private data from all commits, trees, and blobs in the repository",
+      "name": "scrub"
     }
   },
   "help": "concurrency-safe git for multi-agent use",
   "name": "safegit",
   "project_id": "github.com/smm-h/safegit",
-  "version": "dev"
+  "version": "0.14.1+dirty"
 }

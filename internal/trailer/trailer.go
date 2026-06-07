@@ -1,4 +1,4 @@
-// Package trailer injects git trailers into commit messages for AI agent traceability.
+// Package trailer injects git trailers (key-value metadata lines) into commit messages for AI agent traceability and session attribution.
 package trailer
 
 import (

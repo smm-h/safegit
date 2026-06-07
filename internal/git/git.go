@@ -1,5 +1,5 @@
-// Package git wraps os/exec calls to the git binary.
-// All functions shell out to git plumbing commands and return structured results.
+// Package git wraps os/exec calls to the git binary and is the sole interface through which safegit interacts with git plumbing commands.
+// All functions shell out to git and return structured results; no other package may invoke git directly.
 package git
 
 import (

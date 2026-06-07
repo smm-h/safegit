@@ -1,6 +1,6 @@
 ---
 title: internal/index
-description: "Package index manages per-invocation temporary git indexes."
+description: "Package index manages per-invocation temporary git indexes so each safegit invocation stages into its own index seeded from HEAD, avoiding contention."
 generated: true
 nav_group: "API Reference"
 nav_order: 6

@@ -1,6 +1,4 @@
-// Package hooks discovers and executes pre-pre-push hooks.
-// Hooks run BEFORE any network I/O, solving the SSH timeout problem
-// when pre-push checks are long-running.
+// Package hooks discovers and executes pre-pre-push hooks that run before any network I/O, solving the SSH timeout problem when checks are long-running.
 package hooks
 
 import (

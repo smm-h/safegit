@@ -1,6 +1,4 @@
-// Package testutil provides shared test helpers for creating temporary git
-// repos. Used across internal/*_test.go packages to avoid duplicating
-// boilerplate setup code.
+// Package testutil provides shared test helpers for creating temporary git repos, used across internal/*_test.go packages to avoid duplicating boilerplate.
 //
 // This package intentionally does NOT import internal/repo (or any other
 // internal/* package) to avoid import cycles -- internal/git is at the

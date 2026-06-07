@@ -1,6 +1,6 @@
 ---
 title: safegit scrub
-description: "surgically replace or remove a file across history"
+description: "Reference for the safegit scrub command group — subcommands, flags, arguments, and usage details for the scrub group in the safegit CLI."
 generated: true
 nav_group: "CLI Reference"
 nav_order: 16
@@ -9,17 +9,36 @@ nav_order: 16
 
 # safegit scrub
 
-surgically replace or remove a file across history
+surgically rewrite git history to remove or replace sensitive content such as secrets, credentials, and private data from all commits, trees, and blobs in the repository
 
-## Flags
+## scrub file
+
+replace or remove a specific file across all commits in the repository history, rewriting each affected commit tree to either substitute the file contents with a sanitized version or delete the file entirely from every historical snapshot
+
+### Flags
 
 | Name | Short | Type | Default | Env | Description |
 | --- | --- | --- | --- | --- | --- |
 | `--from` |  | str |  |  | first commit to include in the rewrite |
 | `--reason` |  | str |  |  | audit trail explaining why the scrub is needed |
 
-## Arguments
+### Arguments
 
 | Name | Required | Description |
 | --- | --- | --- |
 | `file` | yes | repo-relative file path to scrub |
+
+## scrub match
+
+replace all occurrences of a regex pattern across every blob in the repository history, rewriting commit trees to substitute matched text with a replacement string so that sensitive values like secrets and credentials are permanently removed from all historical snapshots
+
+### Flags
+
+| Name | Short | Type | Default | Env | Description |
+| --- | --- | --- | --- | --- | --- |
+| `--pattern` |  | str |  |  | regex pattern to search for |
+| `--replace` |  | str |  |  | replacement string |
+| `--reason` |  | str |  |  | audit trail explaining why the scrub is needed |
+| `--scope` |  | str |  |  | glob pattern limiting which file paths are searched (e.g. '*.env', 'config/**') |
+| `--from` |  | str |  |  | first commit to include in the rewrite |
+| `--entire-history` |  | bool |  |  | rewrite all commits |

@@ -1,6 +1,6 @@
 ---
 title: internal/lock
-description: "Package lock provides ref-lock primitives for concurrent ref updates."
+description: "Package lock provides ref-lock primitives for concurrent ref updates using O_CREAT|O_EXCL for atomic lock file creation and exponential backoff polling."
 generated: true
 nav_group: "API Reference"
 nav_order: 7

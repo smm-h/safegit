@@ -1,6 +1,6 @@
 ---
 title: internal/trailer
-description: "Package trailer injects git trailers into commit messages for AI agent traceability."
+description: "Package trailer injects git trailers (key-value metadata lines) into commit messages for AI agent traceability and session attribution."
 generated: true
 nav_group: "API Reference"
 nav_order: 13

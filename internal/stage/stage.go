@@ -1,5 +1,4 @@
-// Package stage implements hunk-level staging against temporary indexes.
-// It parses unified diffs, extracts hunks, and applies selective patches.
+// Package stage implements hunk-level staging against temporary indexes by parsing unified diffs and applying selective patches for partial-file commits.
 package stage
 
 import (

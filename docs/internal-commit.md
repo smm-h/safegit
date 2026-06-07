@@ -1,6 +1,6 @@
 ---
 title: internal/commit
-description: "Package commit implements the two-phase commit pipeline."
+description: "Package commit implements the two-phase commit pipeline: a parallel-safe staging phase and a serialized ref-update phase with CAS retries."
 generated: true
 nav_group: "API Reference"
 nav_order: 2

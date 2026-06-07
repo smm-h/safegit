@@ -1,6 +1,6 @@
 ---
 title: internal/stage
-description: "Package stage implements hunk-level staging against temporary indexes."
+description: "Package stage implements hunk-level staging against temporary indexes by parsing unified diffs and applying selective patches for partial-file commits."
 generated: true
 nav_group: "API Reference"
 nav_order: 11

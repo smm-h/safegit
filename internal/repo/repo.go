@@ -1,5 +1,4 @@
-// Package repo manages the .git/safegit/ data directory.
-// It handles initialization, validation, and provides path helpers.
+// Package repo manages the .git/safegit/ data directory including initialization, configuration loading, validation, and path helpers for all state files.
 package repo
 
 import (

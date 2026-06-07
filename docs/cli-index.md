@@ -12,7 +12,7 @@ order: 91
 
 concurrency-safe git for multi-agent use
 
-Version: dev
+Version: 0.14.1+dirty
 
 ## Commands
 
@@ -29,7 +29,6 @@ Version: dev
 - [reset](cli-reset.html) -- reset HEAD (guarded for --hard)
 - [revert](cli-revert.html) -- revert commits (guarded)
 - [rewrite-author](cli-rewrite-author.html) -- rewrite author/committer across history
-- [scrub](cli-scrub.html) -- surgically replace or remove a file across history
 - [undo](cli-undo.html) -- reverse last commit/amend/reword via oplog
 - [unlock](cli-unlock.html) -- release a stale ref lock
 - [version](cli-version.html) -- print version and build info
@@ -38,3 +37,4 @@ Version: dev
 
 - [config](cli-config.html) -- show or set configuration values
 - [hook](cli-hook.html) -- manage pre-pre-push hooks
+- [scrub](cli-scrub.html) -- surgically rewrite git history to remove or replace sensitive content such as secrets, credentials, and private data from all commits, trees, and blobs in the repository

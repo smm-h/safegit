@@ -1,6 +1,6 @@
 ---
 title: internal/coord
-description: "Package coord implements the coordination layer for concurrent agents."
+description: "Package coord implements the coordination layer that prevents concurrent agents from corrupting the working tree by guarding tree-mutating operations."
 generated: true
 nav_group: "API Reference"
 nav_order: 3

@@ -1,6 +1,6 @@
 ---
 title: safegit
-description: "go:build darwin"
+description: "Package main is the entry point for the safegit CLI, a concurrency-safe git wrapper that isolates commits via per-invocation temporary indexes."
 generated: true
 nav_group: "API Reference"
 nav_order: 1

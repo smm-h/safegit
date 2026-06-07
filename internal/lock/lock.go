@@ -1,6 +1,5 @@
-// Package lock provides ref-lock primitives for concurrent ref updates.
-// Uses O_CREAT|O_EXCL for atomic lock file creation and exponential
-// backoff polling (no inotify/kqueue in v1).
+// Package lock provides ref-lock primitives for concurrent ref updates using O_CREAT|O_EXCL for atomic lock file creation and exponential backoff polling.
+// PID liveness checks detect and clean up stale locks left by crashed processes.
 package lock
 
 import (

@@ -1,6 +1,6 @@
 ---
 title: internal/scan
-description: "Package scan iterates all git objects (reachable and unreachable) and"
+description: "Package scan iterates all git objects (reachable and unreachable) and matches patterns against their textual content for history scrubbing."
 generated: true
 nav_group: "API Reference"
 nav_order: 10

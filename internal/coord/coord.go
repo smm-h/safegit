@@ -1,6 +1,5 @@
-// Package coord implements the coordination layer for concurrent agents.
-// It checks whether the working tree is clean before allowing tree-mutating
-// operations (checkout, merge, rebase, reset, pull) to proceed.
+// Package coord implements the coordination layer that prevents concurrent agents from corrupting the working tree by guarding tree-mutating operations.
+// It checks whether the working tree is clean before allowing checkout, merge, rebase, reset, and pull to proceed.
 package coord
 
 import (

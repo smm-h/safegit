@@ -1,7 +1,5 @@
-// Package scan iterates all git objects (reachable and unreachable) and
-// matches patterns against their textual content. Blobs, commit messages,
-// and tag annotations are searched. Binary blobs (NUL in first 8KB) are
-// skipped. Tree objects are excluded by the cat-file iterator.
+// Package scan iterates all git objects (reachable and unreachable) and matches patterns against their textual content for history scrubbing.
+// Blobs, commit messages, and tag annotations are searched. Binary blobs (NUL in first 8KB) are skipped.
 package scan
 
 import (

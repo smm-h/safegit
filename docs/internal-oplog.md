@@ -1,6 +1,6 @@
 ---
 title: internal/oplog
-description: "Package oplog implements the JSONL operation log."
+description: "Package oplog implements the append-only JSONL operation log that records every mutating operation for undo support and audit trail purposes."
 generated: true
 nav_group: "API Reference"
 nav_order: 8

@@ -1,6 +1,5 @@
-// Package index manages per-invocation temporary git indexes.
-// Each safegit invocation gets its own index seeded from HEAD,
-// avoiding contention on the shared .git/index.
+// Package index manages per-invocation temporary git indexes so each safegit invocation stages into its own index seeded from HEAD, avoiding contention.
+// No safegit operation writes to the shared .git/index; all staging goes through temporary indexes created here.
 package index
 
 import (

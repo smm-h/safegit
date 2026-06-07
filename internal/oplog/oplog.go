@@ -1,6 +1,5 @@
-// Package oplog implements the JSONL operation log.
-// Each mutating operation appends one JSON line to .git/safegit/log.
-// Uses O_APPEND for atomic writes (lines must be < 4096 bytes for atomicity).
+// Package oplog implements the append-only JSONL operation log that records every mutating operation for undo support and audit trail purposes.
+// Each entry appends one JSON line to .git/safegit/log via O_APPEND (lines must be < 4096 bytes for POSIX atomicity).
 package oplog
 
 import (
