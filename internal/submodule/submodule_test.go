@@ -57,7 +57,13 @@ func gitRun(t *testing.T, dir string, args ...string) string {
 // submodule and returns (parentDir, parentGitDir, submoduleDir).
 func createParentWithSubmodule(t *testing.T) (string, string, string) {
 	t.Helper()
-	base := t.TempDir()
+	rawBase := t.TempDir()
+	// Resolve symlinks so expected paths match what git returns on systems
+	// where temp dirs are symlinked (e.g. macOS /tmp -> /private/...).
+	base, err := filepath.EvalSymlinks(rawBase)
+	if err != nil {
+		t.Fatalf("resolving temp dir symlinks: %v", err)
+	}
 
 	// Create the "remote" repo that the submodule points to.
 	remote := filepath.Join(base, "remote")

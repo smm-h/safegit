@@ -38,6 +38,7 @@ type SubmoduleInfo struct {
 //
 // Returns an empty slice (not error) if no submodules exist.
 func Enumerate(ctx context.Context, parentGitDir string) ([]SubmoduleInfo, error) {
+	parentGitDir = cleanPath(parentGitDir)
 	repoRoot := filepath.Dir(parentGitDir)
 
 	initialized, err := enumerateInitialized(ctx, repoRoot, parentGitDir)
@@ -98,7 +99,7 @@ func enumerateInitialized(ctx context.Context, repoRoot, parentGitDir string) ([
 
 	var result []SubmoduleInfo
 	for _, relPath := range paths {
-		absWork := filepath.Join(repoRoot, relPath)
+		absWork := cleanPath(filepath.Join(repoRoot, relPath))
 
 		gitDir, err := resolveSubmoduleGitDir(ctx, absWork)
 		if err != nil {
@@ -214,6 +215,7 @@ func DetectParent(ctx context.Context) (parentGitDir string, submodulePath strin
 	if !filepath.IsAbs(parentGitDir) {
 		parentGitDir = filepath.Join(parentWorkTree, parentGitDir)
 	}
+	parentGitDir = cleanPath(parentGitDir)
 
 	// Determine this submodule's relative path within the parent.
 	cwd, err := os.Getwd()
@@ -240,7 +242,8 @@ func resolveSubmoduleGitDir(ctx context.Context, workTree string) (string, error
 	if !filepath.IsAbs(gd) {
 		gd = filepath.Join(workTree, gd)
 	}
-	return filepath.Clean(gd), nil
+	gd = filepath.Clean(gd)
+	return cleanPath(gd), nil
 }
 
 func resolveHead(ctx context.Context, workTree string) (string, error) {
@@ -266,6 +269,16 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 		return "", fmt.Errorf("git %s: %w\nstderr: %s", strings.Join(args, " "), err, strings.TrimSpace(errBuf.String()))
 	}
 	return outBuf.String(), nil
+}
+
+// cleanPath resolves symlinks in p, returning the resolved path or the
+// original unchanged if resolution fails. This ensures consistent paths on
+// systems where temp directories are symlinked (e.g. macOS /tmp -> /private/...).
+func cleanPath(p string) string {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	return p
 }
 
 func splitLines(s string) []string {
