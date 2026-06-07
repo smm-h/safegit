@@ -2,16 +2,15 @@
 
 # Changelog
 
+## 0.15.1
+
+Fix submodule test infrastructure for CI environments with restricted file transport.
+
+### Fixes
+
+- **Fix:** submodule integration tests now pass on CI environments that restrict `protocol.file.allow`.
+
 ## 0.15.0
-
-Full submodule support: commit/undo/redo inside submodules, auto-bump parent pointer, scrub auto-recurse, push hook cascade, doctor cleanup.
-
-<details>
-<summary>Context</summary>
-
-safegit previously refused to operate in repos with submodules. This release removes that limitation and adds deep submodule integration across all commands.
-
-</details>
 
 ### Features
 
