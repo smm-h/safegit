@@ -15,14 +15,15 @@ import (
 
 // Match records a single pattern hit inside a git object.
 type Match struct {
-	SHA        string // object SHA
-	ObjectType string // "blob", "commit", "tag"
-	Line       int    // 1-based line number of match
-	Path       string // file path (for blobs; empty for commits/tags) -- reserved for future attribution
-	CommitSHA  string // which commit contains this blob -- reserved for future attribution
-	Reachable  bool   // whether this object is reachable from current refs
-	Context    string // surrounding text with match replaced by <MATCH>
-	IsBinary   bool   // true if this was a binary blob (skipped)
+	SHA            string // object SHA
+	ObjectType     string // "blob", "commit", "tag"
+	Line           int    // 1-based line number of match
+	Path           string // file path (for blobs; empty for commits/tags) -- reserved for future attribution
+	CommitSHA      string // which commit contains this blob -- reserved for future attribution
+	Reachable      bool   // whether this object is reachable from current refs
+	Context        string // surrounding text with match replaced by <MATCH>
+	IsBinary       bool   // true if this was a binary blob (skipped)
+	SubmodulePath  string // relative path of the submodule this match belongs to; empty for parent repo
 }
 
 // ScanResults holds the aggregate output of a scan across all git objects.
@@ -99,6 +100,75 @@ func ScanObjects(ctx context.Context, pattern *regexp.Regexp) (*ScanResults, err
 	return results, nil
 }
 
+// ScanObjectsWithDir iterates every object in a specific git directory's object
+// store and searches for pattern matches. submodulePath is set on each returned
+// Match to identify which repo the match comes from (empty for parent repo).
+func ScanObjectsWithDir(ctx context.Context, pattern *regexp.Regexp, gitDir, workTree, submodulePath string) (*ScanResults, error) {
+	// Build the reachable set using the target git dir.
+	reachable, err := buildReachableSetWithDir(ctx, gitDir, workTree)
+	if err != nil {
+		return nil, fmt.Errorf("build reachable set: %w", err)
+	}
+
+	iter, err := git.CatFileBatchAllWithDir(ctx, gitDir)
+	if err != nil {
+		return nil, fmt.Errorf("cat-file batch-all: %w", err)
+	}
+	defer iter.Close()
+
+	results := &ScanResults{}
+
+	for {
+		entry, err := iter.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("iterate objects: %w", err)
+		}
+
+		results.Scanned++
+		isReachable := reachable[entry.SHA]
+
+		switch entry.Type {
+		case "blob":
+			if isBinary(entry.Content) {
+				results.Skipped++
+				continue
+			}
+			matches := findMatches(entry.SHA, "blob", entry.Content, pattern, isReachable)
+			for i := range matches {
+				matches[i].SubmodulePath = submodulePath
+			}
+			results.Matches = append(results.Matches, matches...)
+
+		case "commit":
+			body := extractBody(entry.Content)
+			if len(body) == 0 {
+				continue
+			}
+			matches := findMatches(entry.SHA, "commit", body, pattern, isReachable)
+			for i := range matches {
+				matches[i].SubmodulePath = submodulePath
+			}
+			results.Matches = append(results.Matches, matches...)
+
+		case "tag":
+			body := extractBody(entry.Content)
+			if len(body) == 0 {
+				continue
+			}
+			matches := findMatches(entry.SHA, "tag", body, pattern, isReachable)
+			for i := range matches {
+				matches[i].SubmodulePath = submodulePath
+			}
+			results.Matches = append(results.Matches, matches...)
+		}
+	}
+
+	return results, nil
+}
+
 // buildReachableSet runs git rev-list --all --objects and collects every
 // SHA into a set.
 func buildReachableSet(ctx context.Context) (map[string]bool, error) {
@@ -114,6 +184,29 @@ func buildReachableSet(ctx context.Context) (map[string]bool, error) {
 			continue
 		}
 		// Lines are "<sha>" or "<sha> <path>" (for blobs).
+		sha := line
+		if idx := strings.IndexByte(line, ' '); idx > 0 {
+			sha = line[:idx]
+		}
+		set[sha] = true
+	}
+	return set, nil
+}
+
+// buildReachableSetWithDir runs git rev-list --all --objects against a specific
+// git directory and work tree, collecting every SHA into a set.
+func buildReachableSetWithDir(ctx context.Context, gitDir, workTree string) (map[string]bool, error) {
+	stdout, _, err := git.RunWithGitDir(ctx, gitDir, workTree, "rev-list", "--all", "--objects")
+	if err != nil {
+		return nil, err
+	}
+
+	set := make(map[string]bool)
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
 		sha := line
 		if idx := strings.IndexByte(line, ' '); idx > 0 {
 			sha = line[:idx]
