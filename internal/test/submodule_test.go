@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -1622,6 +1623,500 @@ func TestScrubMatchDryRunWithSubmodules(t *testing.T) {
 	gitlinkAfter := lsTreeEntry(t, parentDir, "mysub")
 	if gitlinkAfter != gitlinkBefore {
 		t.Errorf("gitlink changed during dry run:\n  before: %s\n  after:  %s", gitlinkBefore, gitlinkAfter)
+	}
+}
+
+// --- Phase 5: Auto-bump integration tests ---
+
+// enableAutoBump sets commit.autoBumpParent=true in the parent repo.
+func enableAutoBump(t *testing.T, parentDir string) {
+	t.Helper()
+	_, stderr, code := runSafegit(t, parentDir, "config", "set", "commit.autoBumpParent", "true")
+	if code != 0 {
+		t.Fatalf("failed to enable autoBumpParent: %s", stderr)
+	}
+}
+
+// newRepoWithTwoSubmodules creates a parent repo with two submodules "sub1"
+// and "sub2", both on the "main" branch (not detached). Returns parent dir,
+// sub1 dir, and sub2 dir.
+func newRepoWithTwoSubmodules(t *testing.T) (parentDir, sub1Dir, sub2Dir string) {
+	t.Helper()
+	base := t.TempDir()
+
+	// Helper to create a submodule origin
+	createSubOrigin := func(name string) string {
+		originDir := filepath.Join(base, name+"-origin")
+		if err := os.MkdirAll(originDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{
+			{"git", "init", "--initial-branch=main"},
+			{"git", "config", "user.email", "test@test.com"},
+			{"git", "config", "user.name", "Test"},
+		} {
+			cmd := exec.Command(args[0], args[1:]...)
+			cmd.Dir = originDir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%v failed: %v\n%s", args, err, out)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(originDir, "file.txt"), []byte(name+" content\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{
+			{"git", "add", "file.txt"},
+			{"git", "commit", "-m", name + " initial"},
+		} {
+			cmd := exec.Command(args[0], args[1:]...)
+			cmd.Dir = originDir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%v failed: %v\n%s", args, err, out)
+			}
+		}
+		return originDir
+	}
+
+	sub1Origin := createSubOrigin("sub1")
+	sub2Origin := createSubOrigin("sub2")
+
+	// Create the parent repo
+	parentDir = filepath.Join(base, "parent")
+	if err := os.MkdirAll(parentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"git", "init", "--initial-branch=main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = parentDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(parentDir, "seed.txt"), []byte("seed\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"git", "add", "seed.txt"},
+		{"git", "commit", "-m", "initial"},
+		{"git", "config", "protocol.file.allow", "always"},
+		{"git", "submodule", "add", "-q", sub1Origin, "sub1"},
+		{"git", "submodule", "add", "-q", sub2Origin, "sub2"},
+		{"git", "commit", "-q", "-m", "add submodules"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = parentDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	// Put both submodule checkouts on the main branch
+	sub1Dir = filepath.Join(parentDir, "sub1")
+	sub2Dir = filepath.Join(parentDir, "sub2")
+	for _, subDir := range []string{sub1Dir, sub2Dir} {
+		for _, args := range [][]string{
+			{"git", "checkout", "main"},
+			{"git", "config", "user.email", "test@test.com"},
+			{"git", "config", "user.name", "Test"},
+		} {
+			cmd := exec.Command(args[0], args[1:]...)
+			cmd.Dir = subDir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%v in submodule %s: %v\n%s", args, subDir, err, out)
+			}
+		}
+	}
+
+	return parentDir, sub1Dir, sub2Dir
+}
+
+// Test 5.1: Committing in a submodule with auto-bump enabled bumps the parent.
+func TestAutoBumpOnCommit(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+	subDir := prepSubmoduleForCommit(t, parentDir)
+	// Override: enable auto-bump (prepSubmoduleForCommit disables it)
+	enableAutoBump(t, parentDir)
+
+	parentCountBefore := gitLog(t, parentDir, "HEAD")
+
+	// Create file in submodule and commit
+	if err := os.WriteFile(filepath.Join(subDir, "file.txt"), []byte("new content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegit(t, subDir, "commit", "-m", "sub change", "--", "file.txt")
+	if code != 0 {
+		t.Fatalf("safegit commit failed (code %d): %s", code, stderr)
+	}
+
+	// Verify: parent HEAD count increased by 1
+	parentCountAfter := gitLog(t, parentDir, "HEAD")
+	if parentCountAfter != parentCountBefore+1 {
+		t.Errorf("parent commit count: want %d, got %d", parentCountBefore+1, parentCountAfter)
+	}
+
+	// Verify: parent's gitlink points to the submodule's new SHA
+	subHEAD := revParseHEAD(t, subDir)
+	parentGitlink := lsTreeSHA(t, lsTreeEntry(t, parentDir, "mysub"))
+	if parentGitlink != subHEAD {
+		t.Errorf("parent gitlink = %s, want submodule HEAD = %s", parentGitlink, subHEAD)
+	}
+
+	// Verify: parent commit message contains the bump info
+	msg := commitMessage(t, parentDir, "HEAD")
+	if !strings.Contains(msg, "bump mysub: sub change") {
+		t.Errorf("parent commit message %q should contain 'bump mysub: sub change'", msg)
+	}
+}
+
+// Test 5.2: When autoBumpParent config is absent, commit in submodule fails.
+func TestAutoBumpConfigAbsentErrors(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+	subDir := filepath.Join(parentDir, "mysub")
+	// Put submodule on main branch and configure identity
+	for _, args := range [][]string{
+		{"git", "checkout", "main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = subDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v in submodule: %v\n%s", args, err, out)
+		}
+	}
+	// Do NOT set autoBumpParent config in parent
+
+	subCountBefore := gitLog(t, subDir, "HEAD")
+
+	// Create file in submodule and commit
+	if err := os.WriteFile(filepath.Join(subDir, "file.txt"), []byte("test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegit(t, subDir, "commit", "-m", "test", "--", "file.txt")
+
+	// Verify: exit code is non-zero
+	if code == 0 {
+		t.Fatal("expected non-zero exit code when autoBumpParent not configured")
+	}
+
+	// Verify: stderr mentions the config issue
+	if !strings.Contains(stderr, "commit.autoBumpParent not configured") {
+		t.Errorf("stderr should mention 'commit.autoBumpParent not configured', got: %s", stderr)
+	}
+
+	// Verify: the submodule commit DID land (the commit itself succeeded)
+	subCountAfter := gitLog(t, subDir, "HEAD")
+	if subCountAfter != subCountBefore+1 {
+		t.Errorf("submodule commit count: want %d, got %d (commit should have landed)", subCountBefore+1, subCountAfter)
+	}
+}
+
+// Test 5.3: When autoBumpParent is explicitly false, commit succeeds but parent is not bumped.
+func TestAutoBumpConfigFalseSkips(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+	subDir := prepSubmoduleForCommit(t, parentDir) // sets autoBumpParent=false
+
+	parentCountBefore := gitLog(t, parentDir, "HEAD")
+
+	// Create file in submodule and commit
+	if err := os.WriteFile(filepath.Join(subDir, "file.txt"), []byte("content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegit(t, subDir, "commit", "-m", "test", "--", "file.txt")
+	if code != 0 {
+		t.Fatalf("safegit commit failed (code %d): %s", code, stderr)
+	}
+
+	// Verify: parent HEAD count unchanged
+	parentCountAfter := gitLog(t, parentDir, "HEAD")
+	if parentCountAfter != parentCountBefore {
+		t.Errorf("parent commit count changed: was %d, now %d (should be unchanged)", parentCountBefore, parentCountAfter)
+	}
+}
+
+// Test 5.4: Nested submodules trigger an error when auto-bump is enabled.
+func TestAutoBumpNestedErrors(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+	subDir := filepath.Join(parentDir, "mysub")
+	// Put submodule on main branch and configure identity
+	for _, args := range [][]string{
+		{"git", "checkout", "main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = subDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v in submodule: %v\n%s", args, err, out)
+		}
+	}
+
+	// Create a .gitmodules file inside the submodule (simulating nested submodules)
+	if err := os.WriteFile(filepath.Join(subDir, ".gitmodules"), []byte("[submodule \"nested\"]\n\tpath = nested\n\turl = /fake\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Enable auto-bump in parent
+	enableAutoBump(t, parentDir)
+
+	subCountBefore := gitLog(t, subDir, "HEAD")
+
+	// Commit in submodule
+	if err := os.WriteFile(filepath.Join(subDir, "file.txt"), []byte("nested test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegit(t, subDir, "commit", "-m", "test nested", "--", "file.txt")
+
+	// Verify: exit code non-zero
+	if code == 0 {
+		t.Fatal("expected non-zero exit code when nested submodules detected")
+	}
+
+	// Verify: stderr mentions nested submodules
+	if !strings.Contains(stderr, "nested submodules") {
+		t.Errorf("stderr should mention 'nested submodules', got: %s", stderr)
+	}
+
+	// Verify: the submodule commit itself still landed
+	subCountAfter := gitLog(t, subDir, "HEAD")
+	if subCountAfter != subCountBefore+1 {
+		t.Errorf("submodule commit count: want %d, got %d (commit should have landed)", subCountBefore+1, subCountAfter)
+	}
+}
+
+// Test 5.5: Undo in submodule triggers parent bump back to original SHA.
+func TestAutoBumpUndo(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+	subDir := prepSubmoduleForCommit(t, parentDir)
+	enableAutoBump(t, parentDir)
+	env := []string{"CLAUDE_CODE_SESSION_ID=autobump-undo-test"}
+
+	// Record initial state
+	parentCountInitial := gitLog(t, parentDir, "HEAD")
+	gitlinkInitial := lsTreeSHA(t, lsTreeEntry(t, parentDir, "mysub"))
+
+	// Commit in submodule (triggers bump, parent count +1)
+	if err := os.WriteFile(filepath.Join(subDir, "file.txt"), []byte("will undo\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegitEnv(t, subDir, env, "commit", "-m", "commit to undo", "--", "file.txt")
+	if code != 0 {
+		t.Fatalf("safegit commit failed (code %d): %s", code, stderr)
+	}
+
+	parentCountAfterCommit := gitLog(t, parentDir, "HEAD")
+	if parentCountAfterCommit != parentCountInitial+1 {
+		t.Fatalf("parent count after commit: want %d, got %d", parentCountInitial+1, parentCountAfterCommit)
+	}
+
+	// Undo from subDir
+	_, stderr, code = runSafegitEnv(t, subDir, env, "undo")
+	if code != 0 {
+		t.Fatalf("safegit undo failed (code %d): %s", code, stderr)
+	}
+
+	// Verify: parent HEAD count increased again (+1 more, total +2 from start)
+	parentCountAfterUndo := gitLog(t, parentDir, "HEAD")
+	if parentCountAfterUndo != parentCountInitial+2 {
+		t.Errorf("parent count after undo: want %d, got %d", parentCountInitial+2, parentCountAfterUndo)
+	}
+
+	// Verify: parent gitlink SHA is back to the original (before the sub commit)
+	gitlinkAfterUndo := lsTreeSHA(t, lsTreeEntry(t, parentDir, "mysub"))
+	if gitlinkAfterUndo != gitlinkInitial {
+		t.Errorf("parent gitlink after undo = %s, want original = %s", gitlinkAfterUndo, gitlinkInitial)
+	}
+}
+
+// Test 5.6: Amend in submodule triggers another parent bump.
+func TestAutoBumpAmend(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+	subDir := prepSubmoduleForCommit(t, parentDir)
+	enableAutoBump(t, parentDir)
+	env := []string{"CLAUDE_CODE_SESSION_ID=autobump-amend-test"}
+
+	parentCountInitial := gitLog(t, parentDir, "HEAD")
+
+	// Commit file in submodule (bump happens)
+	if err := os.WriteFile(filepath.Join(subDir, "file.txt"), []byte("original\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegitEnv(t, subDir, env, "commit", "-m", "original msg", "--", "file.txt")
+	if code != 0 {
+		t.Fatalf("safegit commit failed (code %d): %s", code, stderr)
+	}
+
+	// Modify the file and amend
+	if err := os.WriteFile(filepath.Join(subDir, "file.txt"), []byte("amended\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code = runSafegitEnv(t, subDir, env, "commit", "--amend", "-m", "amended msg", "--", "file.txt")
+	if code != 0 {
+		t.Fatalf("safegit commit --amend failed (code %d): %s", code, stderr)
+	}
+
+	// Verify: parent has been bumped twice (initial + 2)
+	parentCountAfter := gitLog(t, parentDir, "HEAD")
+	if parentCountAfter != parentCountInitial+2 {
+		t.Errorf("parent count after amend: want %d, got %d", parentCountInitial+2, parentCountAfter)
+	}
+
+	// Verify: parent gitlink points to the amended commit SHA
+	subHEAD := revParseHEAD(t, subDir)
+	parentGitlink := lsTreeSHA(t, lsTreeEntry(t, parentDir, "mysub"))
+	if parentGitlink != subHEAD {
+		t.Errorf("parent gitlink = %s, want amended submodule HEAD = %s", parentGitlink, subHEAD)
+	}
+}
+
+// Test 5.7: Concurrent commits in different submodules both trigger auto-bumps.
+func TestAutoBumpConcurrentDifferentSubs(t *testing.T) {
+	t.Parallel()
+	parentDir, sub1Dir, sub2Dir := newRepoWithTwoSubmodules(t)
+	enableAutoBump(t, parentDir)
+
+	// Set CAS max attempts high for concurrent test
+	_, stderr, code := runSafegit(t, parentDir, "config", "set", "commit.casMaxAttempts", "50")
+	if code != 0 {
+		t.Fatalf("config set casMaxAttempts failed: %s", stderr)
+	}
+
+	parentCountBefore := gitLog(t, parentDir, "HEAD")
+
+	// Create files in both submodules
+	if err := os.WriteFile(filepath.Join(sub1Dir, "new1.txt"), []byte("sub1 data\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub2Dir, "new2.txt"), []byte("sub2 data\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Launch two concurrent safegit commits
+	stdouts := make([]string, 2)
+	stderrs := make([]string, 2)
+	codes := make([]int, 2)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		stdouts[0], stderrs[0], codes[0] = runSafegit(t, sub1Dir, "commit", "-m", "sub1 change", "--", "new1.txt")
+	}()
+	go func() {
+		defer wg.Done()
+		stdouts[1], stderrs[1], codes[1] = runSafegit(t, sub2Dir, "commit", "-m", "sub2 change", "--", "new2.txt")
+	}()
+	wg.Wait()
+
+	if codes[0] != 0 {
+		t.Fatalf("sub1 commit failed (code %d): %s", codes[0], stderrs[0])
+	}
+	if codes[1] != 0 {
+		t.Fatalf("sub2 commit failed (code %d): %s", codes[1], stderrs[1])
+	}
+
+	// Verify: parent HEAD count increased by at least 2
+	parentCountAfter := gitLog(t, parentDir, "HEAD")
+	if parentCountAfter < parentCountBefore+2 {
+		t.Errorf("parent count: want at least %d, got %d", parentCountBefore+2, parentCountAfter)
+	}
+
+	// Verify: both gitlinks are updated
+	sub1HEAD := revParseHEAD(t, sub1Dir)
+	sub2HEAD := revParseHEAD(t, sub2Dir)
+	gitlink1 := lsTreeSHA(t, lsTreeEntry(t, parentDir, "sub1"))
+	gitlink2 := lsTreeSHA(t, lsTreeEntry(t, parentDir, "sub2"))
+	if gitlink1 != sub1HEAD {
+		t.Errorf("sub1 gitlink = %s, want %s", gitlink1, sub1HEAD)
+	}
+	if gitlink2 != sub2HEAD {
+		t.Errorf("sub2 gitlink = %s, want %s", gitlink2, sub2HEAD)
+	}
+}
+
+// Test 5.8: Auto-bump commit includes proper trailers.
+func TestAutoBumpTrailers(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+	subDir := prepSubmoduleForCommit(t, parentDir)
+	enableAutoBump(t, parentDir)
+
+	// Commit in submodule
+	if err := os.WriteFile(filepath.Join(subDir, "file.txt"), []byte("trailer test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegit(t, subDir, "commit", "-m", "trigger trailers", "--", "file.txt")
+	if code != 0 {
+		t.Fatalf("safegit commit failed (code %d): %s", code, stderr)
+	}
+
+	// Read parent's HEAD commit message
+	msg := commitMessage(t, parentDir, "HEAD")
+	subHEAD := revParseHEAD(t, subDir)
+
+	// Verify: contains Triggered-by trailer with the sub's new SHA
+	if !strings.Contains(msg, "Triggered-by: "+subHEAD) {
+		t.Errorf("parent commit message missing 'Triggered-by: %s', got:\n%s", subHEAD, msg)
+	}
+
+	// Verify: contains Operation trailer
+	if !strings.Contains(msg, "Operation: commit") {
+		t.Errorf("parent commit message missing 'Operation: commit', got:\n%s", msg)
+	}
+}
+
+// Test 5.9: A second commit in submodule correctly bumps parent again.
+func TestAutoBumpNoopWhenCurrent(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+	subDir := prepSubmoduleForCommit(t, parentDir)
+	enableAutoBump(t, parentDir)
+
+	// First commit + bump
+	if err := os.WriteFile(filepath.Join(subDir, "file1.txt"), []byte("first\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegit(t, subDir, "commit", "-m", "first commit", "--", "file1.txt")
+	if code != 0 {
+		t.Fatalf("first commit failed (code %d): %s", code, stderr)
+	}
+
+	parentCountAfterFirst := gitLog(t, parentDir, "HEAD")
+	gitlinkAfterFirst := lsTreeSHA(t, lsTreeEntry(t, parentDir, "mysub"))
+
+	// Second commit + bump
+	if err := os.WriteFile(filepath.Join(subDir, "file2.txt"), []byte("second\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code = runSafegit(t, subDir, "commit", "-m", "second commit", "--", "file2.txt")
+	if code != 0 {
+		t.Fatalf("second commit failed (code %d): %s", code, stderr)
+	}
+
+	// Verify: parent bumped again
+	parentCountAfterSecond := gitLog(t, parentDir, "HEAD")
+	if parentCountAfterSecond != parentCountAfterFirst+1 {
+		t.Errorf("parent count after second commit: want %d, got %d", parentCountAfterFirst+1, parentCountAfterSecond)
+	}
+
+	// Verify: gitlink updated to the second commit's SHA
+	subHEAD := revParseHEAD(t, subDir)
+	gitlinkAfterSecond := lsTreeSHA(t, lsTreeEntry(t, parentDir, "mysub"))
+	if gitlinkAfterSecond == gitlinkAfterFirst {
+		t.Error("parent gitlink did not change after second commit")
+	}
+	if gitlinkAfterSecond != subHEAD {
+		t.Errorf("parent gitlink = %s, want submodule HEAD = %s", gitlinkAfterSecond, subHEAD)
 	}
 }
 
