@@ -2,9 +2,15 @@
 
 # Changelog
 
-## 0.15.2
+## 0.15.3
 
-Fix macOS CI: use portable GIT_CONFIG env vars instead of --global for file transport allow.
+Fix macOS symlink path resolution in submodule discovery.
+
+### Fixes
+
+- **Fix:** submodule path resolution now handles macOS `/tmp` symlinks correctly.
+
+## 0.15.2
 
 ### Fixes
 
