@@ -1,1 +1,2 @@
 {"commits":["462f97fe7fd1949f3861381682e6eb2bbaa89692"],"user_facing":true,"description":"**Rewrite-author now uses the repo-wide rewrite lock.** Prevents concurrent rewrite-author and scrub operations from corrupting history.","type":"fix"}
+{"commits":["a1eed9cc4b1c0ed4c295b8ca70a84c60d76bc7ad"],"user_facing":true,"description":"**New flag: scrub match --scope.** Glob pattern limiting which file paths are searched (e.g. `--scope '*.env'`). Blobs at paths outside scope are left untouched.","type":"feature"}
