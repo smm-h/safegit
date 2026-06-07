@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -23,6 +24,16 @@ func runScrubMatch(flags globalFlags, kwargs map[string]interface{}) int {
 	pattern := kwargs["pattern"].(string)
 	replace := kwargs["replace"].(string)
 	reason := kwargs["reason"].(string)
+
+	var scope *string
+	if v := kwargs["scope"]; v != nil {
+		s := v.(string)
+		scope = &s
+		// Validate the glob pattern at parse time.
+		if _, err := path.Match(s, ""); err != nil {
+			die(flags, cmd, 2, fmt.Sprintf("invalid --scope glob: %v", err))
+		}
+	}
 
 	var from *string
 	if v := kwargs["from"]; v != nil {
@@ -84,16 +95,17 @@ func runScrubMatch(flags globalFlags, kwargs map[string]interface{}) int {
 
 	// Dry-run mode
 	if flags.dryRun {
-		return scrubMatchDryRun(ctx, flags, cmd, compiledPattern, gitDir)
+		return scrubMatchDryRun(ctx, flags, cmd, compiledPattern, scope, gitDir)
 	}
 
 	// Execution mode
-	return scrubMatchExecute(ctx, flags, cmd, compiledPattern, replace, reason, fromSHA, entireHistory, gitDir, sgDir)
+	return scrubMatchExecute(ctx, flags, cmd, compiledPattern, replace, reason, fromSHA, entireHistory, scope, gitDir, sgDir)
 }
 
 // scrubMatchDryRun scans all objects and non-object files, prints categorized
-// output, and returns 0.
-func scrubMatchDryRun(ctx context.Context, flags globalFlags, cmd string, compiledPattern *regexp.Regexp, gitDir string) int {
+// output, and returns 0. When scope is non-nil, only blob matches whose path
+// matches the glob are shown.
+func scrubMatchDryRun(ctx context.Context, flags globalFlags, cmd string, compiledPattern *regexp.Regexp, scope *string, gitDir string) int {
 	fmt.Println("Scanning all objects...")
 	results, err := scan.ScanObjects(ctx, compiledPattern)
 	if err != nil {
@@ -109,11 +121,14 @@ func scrubMatchDryRun(ctx context.Context, flags globalFlags, cmd string, compil
 		die(flags, cmd, 1, fmt.Sprintf("scanning non-object files: %v", err))
 	}
 
-	// Categorize matches
+	// Categorize matches, applying scope filter to blobs.
 	var blobMatches, commitMatches, tagMatches []scan.Match
 	for _, m := range results.Matches {
 		switch m.ObjectType {
 		case "blob":
+			if scope != nil && !matchScope(*scope, m.Path) {
+				continue
+			}
 			blobMatches = append(blobMatches, m)
 		case "commit":
 			commitMatches = append(commitMatches, m)
@@ -179,7 +194,8 @@ func scrubMatchDryRun(ctx context.Context, flags globalFlags, cmd string, compil
 
 // scrubMatchExecute performs the actual rewrite: builds blob replacement map,
 // walks and rewrites commits, updates refs, rewrites tag annotations, syncs
-// the index, and logs to the oplog.
+// the index, and logs to the oplog. When scope is non-nil, only blobs that
+// appear at paths matching the glob are included in the replacement map.
 func scrubMatchExecute(
 	ctx context.Context,
 	flags globalFlags,
@@ -189,6 +205,7 @@ func scrubMatchExecute(
 	reason string,
 	fromSHA string,
 	entireHistory bool,
+	scope *string,
 	gitDir string,
 	sgDir string,
 ) int {
@@ -204,12 +221,25 @@ func scrubMatchExecute(
 		return 0
 	}
 
+	// When --scope is set, build a blob SHA -> paths index so we can filter
+	// blobs by the paths they appear at.
+	var scopedBlobSHAs map[string]bool
+	if scope != nil {
+		scopedBlobSHAs, err = buildScopedBlobSet(ctx, *scope)
+		if err != nil {
+			die(flags, cmd, 1, fmt.Sprintf("building scoped blob set: %v", err))
+		}
+	}
+
 	// Count matches by type for summary
 	var blobMatchCount, commitMatchCount, tagMatchCount int
 	uniqueBlobSHAs := make(map[string]bool)
 	for _, m := range results.Matches {
 		switch m.ObjectType {
 		case "blob":
+			if scope != nil && !scopedBlobSHAs[m.SHA] {
+				continue
+			}
 			blobMatchCount++
 			uniqueBlobSHAs[m.SHA] = true
 		case "commit":
@@ -219,8 +249,15 @@ func scrubMatchExecute(
 		}
 	}
 
+	// If scope filtered out all blob matches and there are no message/tag matches,
+	// treat as no matches.
+	if blobMatchCount == 0 && commitMatchCount == 0 && tagMatchCount == 0 {
+		fmt.Println("No matches found within scope. Nothing to rewrite.")
+		return 0
+	}
+
 	fmt.Printf("Found %d matches (%d in blobs, %d in commit messages, %d in tag annotations)\n",
-		len(results.Matches), blobMatchCount, commitMatchCount, tagMatchCount)
+		blobMatchCount+commitMatchCount+tagMatchCount, blobMatchCount, commitMatchCount, tagMatchCount)
 
 	// Confirmation prompt
 	if !flags.force {
@@ -366,11 +403,14 @@ func scrubMatchExecute(
 		fmt.Fprintf(os.Stderr, "warning: post-rewrite cleanup: %v\n", err)
 	}
 
-	// Post-rewrite verification: re-scan all objects to confirm the secret is gone
+	// Post-rewrite verification: re-scan objects to confirm the secret is gone.
+	// When --scope is set, only verify blobs within scope (out-of-scope blobs
+	// are expected to still contain the pattern).
 	fmt.Println("Verifying secret removal...")
 	exitCode := 0
-	if err := verifySecretRemoved(ctx, compiledPattern); err != nil {
-		fmt.Fprintf(os.Stderr, "CRITICAL: %v\n", err)
+	verifyErr := verifySecretRemovedScoped(ctx, compiledPattern, scope)
+	if verifyErr != nil {
+		fmt.Fprintf(os.Stderr, "CRITICAL: %v\n", verifyErr)
 		fmt.Fprintln(os.Stderr, "Secret may still be present in the local object store.")
 		fmt.Fprintln(os.Stderr, "Run 'git reflog expire --expire=now --all && git gc --prune=now' to force cleanup.")
 		exitCode = 1
@@ -481,5 +521,114 @@ func isBinaryContent(content []byte) bool {
 		limit = 8192
 	}
 	return bytes.ContainsRune(content[:limit], 0)
+}
+
+// verifySecretRemovedScoped re-scans git objects for the given pattern after a
+// scrub rewrite. When scope is non-nil, only blob matches at paths matching the
+// scope glob are considered failures; out-of-scope blobs are expected to still
+// contain the pattern. Non-blob matches (commit messages, tags) are always
+// checked regardless of scope.
+func verifySecretRemovedScoped(ctx context.Context, pattern *regexp.Regexp, scope *string) error {
+	if scope == nil {
+		return verifySecretRemoved(ctx, pattern)
+	}
+
+	results, err := scan.ScanObjects(ctx, pattern)
+	if err != nil {
+		return fmt.Errorf("re-scan failed: %w", err)
+	}
+	if len(results.Matches) == 0 {
+		return nil
+	}
+
+	// Add attribution so blob matches have paths.
+	if err := scan.AddAttribution(ctx, results); err != nil {
+		return fmt.Errorf("adding attribution for verification: %w", err)
+	}
+
+	// Also build the scoped blob set to check blobs by SHA (some blobs may
+	// appear at multiple paths, and attribution only records one).
+	scopedBlobs, err := buildScopedBlobSet(ctx, *scope)
+	if err != nil {
+		return fmt.Errorf("building scoped blob set for verification: %w", err)
+	}
+
+	var failures []scan.Match
+	for _, m := range results.Matches {
+		switch m.ObjectType {
+		case "blob":
+			// Only report blobs that are in scope (by path match or by SHA).
+			if matchScope(*scope, m.Path) || scopedBlobs[m.SHA] {
+				failures = append(failures, m)
+			}
+		default:
+			// Commit messages and tags are always checked.
+			failures = append(failures, m)
+		}
+	}
+
+	if len(failures) == 0 {
+		return nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("secret still present in %d object(s):\n", len(failures)))
+	for _, m := range failures {
+		reachable := "unreachable"
+		if m.Reachable {
+			reachable = "reachable"
+		}
+		sb.WriteString(fmt.Sprintf("  %s %s (%s, line %d): %s\n",
+			m.ObjectType, shortSHA(m.SHA), reachable, m.Line, m.Context))
+	}
+	return fmt.Errorf("%s", sb.String())
+}
+
+// matchScope checks whether a file path matches a glob scope pattern.
+// It tries path.Match against both the full path and the basename, so
+// patterns like "*.env" match "config/secret.env" as well as "secret.env".
+func matchScope(scope, filePath string) bool {
+	if filePath == "" {
+		return false
+	}
+	// Try matching against the full path first (supports patterns like "config/**").
+	if matched, _ := path.Match(scope, filePath); matched {
+		return true
+	}
+	// Try matching against just the filename (supports patterns like "*.env").
+	base := path.Base(filePath)
+	if matched, _ := path.Match(scope, base); matched {
+		return true
+	}
+	return false
+}
+
+// buildScopedBlobSet enumerates all blob-to-path mappings across all refs
+// using `git rev-list --all --objects` and returns the set of blob SHAs that
+// appear at paths matching the scope glob.
+func buildScopedBlobSet(ctx context.Context, scope string) (map[string]bool, error) {
+	stdout, _, err := git.Run(ctx, "rev-list", "--all", "--objects")
+	if err != nil {
+		return nil, fmt.Errorf("rev-list --all --objects: %w", err)
+	}
+
+	result := make(map[string]bool)
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		spaceIdx := strings.IndexByte(line, ' ')
+		if spaceIdx < 0 {
+			// No space: this is a commit SHA, skip.
+			continue
+		}
+		sha := line[:spaceIdx]
+		filePath := line[spaceIdx+1:]
+		if matchScope(scope, filePath) {
+			result[sha] = true
+		}
+	}
+	return result, nil
 }
 

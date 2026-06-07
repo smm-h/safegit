@@ -642,3 +642,52 @@ func TestScrubMatchCoordinationGuard(t *testing.T) {
 		t.Fatalf("second scrub match failed (lock not released?): code %d, stderr=%s", code2, stderr2)
 	}
 }
+
+// TestScrubMatchScope creates a repo with secret.txt and config/secret.env
+// both containing "SECRET_ABC". Runs scrub match with --scope '*.env' and
+// verifies only the .env file is scrubbed while secret.txt is left untouched.
+func TestScrubMatchScope(t *testing.T) {
+	dir := newRepo(t)
+
+	// Create secret.txt and config/secret.env, both containing SECRET_ABC
+	commitFileEnv(t, dir, scrubMatchEnv, "secret.txt", "data SECRET_ABC here\n", "add secret.txt")
+	commitFileEnv(t, dir, scrubMatchEnv, "config/secret.env", "KEY=SECRET_ABC\n", "add config/secret.env")
+
+	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
+		"--force", "scrub", "match",
+		"--pattern", "SECRET_ABC",
+		"--replace", "REDACTED",
+		"--reason", "test scope",
+		"--entire-history",
+		"--scope", "*.env",
+	)
+	if code != 0 {
+		t.Fatalf("scrub match --scope failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// Verify all commits: config/secret.env should have REDACTED, secret.txt should still have SECRET_ABC
+	shas := revListReverse(t, dir)
+	for i, sha := range shas {
+		// Check config/secret.env is scrubbed
+		content, ok := gitShow(t, dir, sha, "config/secret.env")
+		if ok {
+			if strings.Contains(content, "SECRET_ABC") {
+				t.Errorf("commit %d (%s): config/secret.env still contains SECRET_ABC: %q", i, sha[:12], content)
+			}
+			if !strings.Contains(content, "REDACTED") {
+				t.Errorf("commit %d (%s): config/secret.env missing REDACTED: %q", i, sha[:12], content)
+			}
+		}
+
+		// Check secret.txt is NOT scrubbed (outside scope)
+		content, ok = gitShow(t, dir, sha, "secret.txt")
+		if ok {
+			if !strings.Contains(content, "SECRET_ABC") {
+				t.Errorf("commit %d (%s): secret.txt should still contain SECRET_ABC (outside scope): %q", i, sha[:12], content)
+			}
+			if strings.Contains(content, "REDACTED") {
+				t.Errorf("commit %d (%s): secret.txt should NOT contain REDACTED (outside scope): %q", i, sha[:12], content)
+			}
+		}
+	}
+}
