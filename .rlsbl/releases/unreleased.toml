@@ -1,0 +1,8 @@
+# Version bump type: patch, minor, or major
+bump = "minor"
+# Short description of this release (required)
+description = "Full submodule support: commit/undo/redo inside submodules, auto-bump parent pointer, scrub auto-recurse, push hook cascade, doctor cleanup."
+# Optional context explaining why these changes were made
+context = "safegit previously refused to operate in repos with submodules. This release removes that limitation and adds deep submodule integration across all commands."
+include = ["go", "docker"]
+exclude = []
