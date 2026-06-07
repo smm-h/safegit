@@ -65,7 +65,13 @@ func detectMoves(
 		}
 		// Skip files that don't exist on disk — they are deletions, not
 		// new additions that could be the destination of a move.
-		if _, err := os.Lstat(abs); err != nil {
+		info, err := os.Lstat(abs)
+		if err != nil {
+			continue
+		}
+		// Skip directories — these are submodule working trees (gitlinks).
+		// They appear in the file list but are commit pointers, not blobs.
+		if info.IsDir() {
 			continue
 		}
 		rel, err := filepath.Rel(repoRoot, abs)
