@@ -7,6 +7,26 @@ import (
 	"github.com/smm-h/safegit/internal/repo"
 )
 
+// formatConfigValue formats a config value for display.
+// Handles *bool (prints "true", "false", or "not set") and other types via %v.
+func formatConfigValue(val interface{}) string {
+	if val == nil {
+		return "not set"
+	}
+	switch v := val.(type) {
+	case *bool:
+		if v == nil {
+			return "not set"
+		}
+		if *v {
+			return "true"
+		}
+		return "false"
+	default:
+		return fmt.Sprintf("%v", val)
+	}
+}
+
 func runConfigShow(flags globalFlags) int {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
@@ -22,7 +42,7 @@ func runConfigShow(flags globalFlags) int {
 
 	for _, key := range repo.ValidConfigKeys() {
 		val, _ := repo.GetConfigValue(cfg, key)
-		fmt.Printf("%s = %v\n", key, val)
+		fmt.Printf("%s = %s\n", key, formatConfigValue(val))
 	}
 	return 0
 }
@@ -45,7 +65,7 @@ func runConfigGet(flags globalFlags, key string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	fmt.Printf("%v\n", val)
+	fmt.Printf("%s\n", formatConfigValue(val))
 	return 0
 }
 

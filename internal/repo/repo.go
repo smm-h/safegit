@@ -24,7 +24,8 @@ type Config struct {
 
 // CommitConfig holds commit-related settings.
 type CommitConfig struct {
-	CASMaxAttempts int `json:"casMaxAttempts"`
+	CASMaxAttempts int   `json:"casMaxAttempts"`
+	AutoBumpParent *bool `json:"autoBumpParent,omitempty"`
 }
 
 // LockConfig holds ref-lock acquisition settings.
@@ -251,6 +252,8 @@ func GetConfigValue(cfg *Config, key string) (interface{}, error) {
 	switch key {
 	case "commit.casMaxAttempts":
 		return cfg.Commit.CASMaxAttempts, nil
+	case "commit.autoBumpParent":
+		return cfg.Commit.AutoBumpParent, nil
 	case "lock.acquireTimeoutSeconds":
 		return cfg.Lock.AcquireTimeoutSeconds, nil
 	case "hooks.preprepush.timeoutSeconds":
@@ -266,6 +269,22 @@ func GetConfigValue(cfg *Config, key string) (interface{}, error) {
 
 // SetConfigValue sets a dot-separated config key to the given string value.
 func SetConfigValue(cfg *Config, key, value string) error {
+	// Handle boolean config keys separately.
+	switch key {
+	case "commit.autoBumpParent":
+		switch value {
+		case "true":
+			v := true
+			cfg.Commit.AutoBumpParent = &v
+		case "false":
+			v := false
+			cfg.Commit.AutoBumpParent = &v
+		default:
+			return fmt.Errorf("invalid value %q for %s: must be \"true\" or \"false\"", value, key)
+		}
+		return nil
+	}
+
 	intVal, err := parseInt(value)
 	if err != nil {
 		return fmt.Errorf("invalid value %q for %s: must be an integer", value, key)
@@ -295,6 +314,7 @@ func SetConfigValue(cfg *Config, key, value string) error {
 func ValidConfigKeys() []string {
 	return []string{
 		"commit.casMaxAttempts",
+		"commit.autoBumpParent",
 		"lock.acquireTimeoutSeconds",
 		"hooks.preprepush.timeoutSeconds",
 		"push.retryAttempts",
