@@ -2,9 +2,15 @@
 
 # Changelog
 
-## 0.14.1
+## 0.14.2
 
-Rewrite-author lock, scrub match --scope flag, CLAUDE.md update.
+Improved documentation descriptions for AI discoverability.
+
+### Fixes
+
+- **Improved documentation descriptions.** Expanded CLI help strings and package doc comments for better AI discoverability.
+
+## 0.14.1
 
 ### Features
 
