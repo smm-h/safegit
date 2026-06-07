@@ -626,3 +626,51 @@ func (it *ObjectIterator) Close() error {
 	_ = it.cmd.Wait()
 	return nil
 }
+
+// RunWithGitDir executes a git command against a specific git directory and
+// work tree, rather than relying on cwd-based discovery. Sets GIT_DIR,
+// GIT_WORK_TREE, and cmd.Dir so both git and cwd-relative paths resolve
+// against the target repo.
+func RunWithGitDir(ctx context.Context, gitDir string, workTree string, args ...string) (stdout, stderr string, err error) {
+	fullArgs := append([]string{"--no-optional-locks"}, args...)
+	cmd := exec.CommandContext(ctx, "git", fullArgs...)
+
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	cmd.Dir = workTree
+	cmd.Env = append(os.Environ(), "GIT_DIR="+gitDir, "GIT_WORK_TREE="+workTree)
+
+	err = cmd.Run()
+	stdout = outBuf.String()
+	stderr = errBuf.String()
+
+	if err != nil {
+		err = fmt.Errorf("git %s: %w\nstderr: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr))
+	}
+	return
+}
+
+// CatFileBatchAllWithDir starts a git cat-file --batch-all-objects --batch
+// subprocess targeting a specific git directory. Returns an ObjectIterator for
+// streaming the results. The caller must call Close() when done.
+func CatFileBatchAllWithDir(ctx context.Context, gitDir string) (*ObjectIterator, error) {
+	cmd := exec.CommandContext(ctx, "git", "--no-optional-locks", "cat-file", "--batch-all-objects", "--batch")
+	cmd.Env = append(os.Environ(), "GIT_DIR="+gitDir)
+	cmd.Dir = gitDir
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("cat-file --batch-all-objects: stdout pipe: %w", err)
+	}
+	it := &ObjectIterator{
+		cmd:    cmd,
+		stdout: bufio.NewReaderSize(stdout, 256*1024),
+	}
+	cmd.Stderr = &it.stderr
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("cat-file --batch-all-objects: start: %w", err)
+	}
+	return it, nil
+}
