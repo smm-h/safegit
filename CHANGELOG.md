@@ -2,9 +2,15 @@
 
 # Changelog
 
-## 0.15.1
+## 0.15.2
 
-Fix submodule test infrastructure for CI environments with restricted file transport.
+Fix macOS CI: use portable GIT_CONFIG env vars instead of --global for file transport allow.
+
+### Fixes
+
+- **Fix:** submodule tests now pass on macOS CI (portable git config via environment variables).
+
+## 0.15.1
 
 ### Fixes
 
