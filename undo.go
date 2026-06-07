@@ -114,6 +114,12 @@ func runUndo(flags globalFlags, bypassSession bool) {
 		fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
 	}
 
+	// If the commit being undone triggered a parent bump, inform the user.
+	// The auto-bump call below will re-bump the parent to the restored SHA.
+	if bumpSHA := findAssociatedParentBump(sgDir, entry); bumpSHA != "" {
+		fmt.Fprintf(os.Stderr, "note: undoing commit that triggered parent bump %s\n", bumpSHA[:8])
+	}
+
 	if err := maybeAutoBumpParent(ctx, flags, gitDir, targetSHA, "undo", ""); err != nil {
 		fmt.Fprintf(os.Stderr, "error: auto-bump parent: %v\n", err)
 		os.Exit(1)
@@ -134,4 +140,36 @@ func runUndo(flags globalFlags, bypassSession bool) {
 		fmt.Printf("undid %s on %s\n", entry.Op, refShortName(ref))
 		fmt.Printf("  %s -> %s\n", currentSHA[:8], targetSHA[:8])
 	}
+}
+
+// findAssociatedParentBump scans the oplog for an "auto-bump-parent" entry
+// that immediately follows the given entry (by timestamp). Returns the parent
+// bump SHA if found, empty string otherwise.
+func findAssociatedParentBump(sgDir string, target *oplog.Entry) string {
+	entries, err := oplog.Read(sgDir)
+	if err != nil || len(entries) == 0 {
+		return ""
+	}
+
+	// Find the target entry's position by matching timestamp and op.
+	targetIdx := -1
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		if e.Op == target.Op && e.Timestamp.Equal(target.Timestamp) && e.PID == target.PID {
+			targetIdx = i
+			break
+		}
+	}
+	if targetIdx < 0 || targetIdx+1 >= len(entries) {
+		return ""
+	}
+
+	// Look at entries following the target for an auto-bump-parent.
+	next := entries[targetIdx+1]
+	if next.Op == "auto-bump-parent" && next.Extra != nil {
+		if sha, ok := next.Extra["parentBumpSHA"].(string); ok && sha != "" {
+			return sha
+		}
+	}
+	return ""
 }
