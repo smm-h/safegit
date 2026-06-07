@@ -20,6 +20,7 @@ order: 90
 - [internal/repo](internal-repo.html)
 - [internal/scan](internal-scan.html)
 - [internal/stage](internal-stage.html)
+- [internal/submodule](internal-submodule.html)
 - [internal/testutil](internal-testutil.html)
 - [internal/trailer](internal-trailer.html)
 - [safegit](safegit.html)
