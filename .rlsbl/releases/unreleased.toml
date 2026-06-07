@@ -1,8 +1,0 @@
-# Version bump type: patch, minor, or major
-bump = "patch"
-# Short description of this release (required)
-description = "Fix submodule test infrastructure for CI environments with restricted file transport."
-# Optional context explaining why these changes were made
-context = ""
-include = ["go", "docker"]
-exclude = []
