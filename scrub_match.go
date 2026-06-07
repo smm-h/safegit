@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/smm-h/safegit/internal/oplog"
 	"github.com/smm-h/safegit/internal/repo"
 	"github.com/smm-h/safegit/internal/scan"
+	"github.com/smm-h/safegit/internal/submodule"
 )
 
 func runScrubMatch(flags globalFlags, kwargs map[string]interface{}) int {
@@ -121,7 +123,37 @@ func scrubMatchDryRun(ctx context.Context, flags globalFlags, cmd string, compil
 		die(flags, cmd, 1, fmt.Sprintf("scanning non-object files: %v", err))
 	}
 
-	// Categorize matches, applying scope filter to blobs.
+	// Scan submodules for matches.
+	type subScanResult struct {
+		sub     submodule.SubmoduleInfo
+		results *scan.ScanResults
+	}
+	var subResults []subScanResult
+
+	subs, err := submodule.Enumerate(ctx, gitDir)
+	if err != nil {
+		// Non-fatal: warn and continue with parent-only results.
+		fmt.Fprintf(os.Stderr, "warning: enumerating submodules: %v\n", err)
+	} else {
+		for _, sub := range subs {
+			if !sub.Initialized {
+				continue
+			}
+			subScan, err := scan.ScanObjectsWithDir(ctx, compiledPattern, sub.GitDir, sub.WorkTreePath, sub.RelativePath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: scanning submodule %s: %v\n", sub.RelativePath, err)
+				continue
+			}
+			if err := scan.AddAttributionWithDir(ctx, subScan, sub.GitDir, sub.WorkTreePath); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: adding attribution for submodule %s: %v\n", sub.RelativePath, err)
+			}
+			if len(subScan.Matches) > 0 {
+				subResults = append(subResults, subScanResult{sub: sub, results: subScan})
+			}
+		}
+	}
+
+	// Categorize parent matches, applying scope filter to blobs.
 	var blobMatches, commitMatches, tagMatches []scan.Match
 	for _, m := range results.Matches {
 		switch m.ObjectType {
@@ -138,14 +170,28 @@ func scrubMatchDryRun(ctx context.Context, flags globalFlags, cmd string, compil
 	}
 
 	totalMatches := len(results.Matches) + len(nonObjectMatches)
+	for _, sr := range subResults {
+		totalMatches += len(sr.results.Matches)
+	}
 
 	// Count unique objects
 	uniqueObjects := make(map[string]bool)
 	for _, m := range results.Matches {
 		uniqueObjects[m.SHA] = true
 	}
+	for _, sr := range subResults {
+		for _, m := range sr.results.Matches {
+			uniqueObjects[m.SHA] = true
+		}
+	}
 
 	fmt.Printf("Found %d matches in %d objects:\n", totalMatches, len(uniqueObjects)+len(nonObjectMatches))
+
+	// Print parent repo header only if submodules have matches too.
+	hasSubMatches := len(subResults) > 0
+	if hasSubMatches {
+		fmt.Printf("\nParent repo:\n")
+	}
 
 	if len(blobMatches) > 0 {
 		fmt.Printf("\nBlobs:\n")
@@ -183,6 +229,54 @@ func scrubMatchDryRun(ctx context.Context, flags globalFlags, cmd string, compil
 		}
 	}
 
+	// Print submodule results grouped by submodule.
+	for _, sr := range subResults {
+		fmt.Printf("\n[%s]:\n", sr.sub.RelativePath)
+		var subBlobs, subCommits, subTags []scan.Match
+		for _, m := range sr.results.Matches {
+			switch m.ObjectType {
+			case "blob":
+				// Apply scope filtering for submodule blobs: strip submodule
+				// prefix from scope before matching.
+				if scope != nil {
+					subScope := scopeForSubmodule(*scope, sr.sub.RelativePath)
+					if subScope == "" || !matchScope(subScope, m.Path) {
+						continue
+					}
+				}
+				subBlobs = append(subBlobs, m)
+			case "commit":
+				subCommits = append(subCommits, m)
+			case "tag":
+				subTags = append(subTags, m)
+			}
+		}
+		if len(subBlobs) > 0 {
+			fmt.Printf("  Blobs:\n")
+			for _, m := range subBlobs {
+				if m.Path != "" && m.CommitSHA != "" {
+					fmt.Printf("    %s in commit %s (line %d): %s\n", m.Path, shortSHA(m.CommitSHA), m.Line, m.Context)
+				} else if m.Path != "" {
+					fmt.Printf("    %s (unreachable, line %d): %s\n", m.Path, m.Line, m.Context)
+				} else {
+					fmt.Printf("    blob %s (line %d): %s\n", shortSHA(m.SHA), m.Line, m.Context)
+				}
+			}
+		}
+		if len(subCommits) > 0 {
+			fmt.Printf("  Commit messages:\n")
+			for _, m := range subCommits {
+				fmt.Printf("    commit %s (line %d): %s\n", shortSHA(m.SHA), m.Line, m.Context)
+			}
+		}
+		if len(subTags) > 0 {
+			fmt.Printf("  Tag annotations:\n")
+			for _, m := range subTags {
+				fmt.Printf("    tag %s (line %d): %s\n", shortSHA(m.SHA), m.Line, m.Context)
+			}
+		}
+	}
+
 	fmt.Printf("\nSummary: %d blob matches, %d message matches, %d tag matches, %d file matches\n",
 		len(blobMatches), len(commitMatches), len(tagMatches), len(nonObjectMatches))
 	if results.Skipped > 0 {
@@ -190,6 +284,30 @@ func scrubMatchDryRun(ctx context.Context, flags globalFlags, cmd string, compil
 	}
 
 	return 0
+}
+
+// scopeForSubmodule checks if a scope pattern applies to a submodule. If the
+// scope path starts with the submodule's relative path, the prefix is stripped
+// and the remaining path is returned as the scope within the submodule. If the
+// scope doesn't match the submodule's prefix, returns empty string (meaning
+// this scope doesn't apply to this submodule). A bare glob like "*.env" applies
+// to all repos (parent and submodules).
+func scopeForSubmodule(scope, subRelPath string) string {
+	// Bare globs (no path separator) apply everywhere.
+	if !strings.Contains(scope, "/") {
+		return scope
+	}
+	// Check if scope starts with the submodule path prefix.
+	prefix := subRelPath + "/"
+	if strings.HasPrefix(scope, prefix) {
+		return scope[len(prefix):]
+	}
+	// Also check using filepath separator in case of OS-specific paths.
+	fpPrefix := filepath.ToSlash(subRelPath) + "/"
+	if strings.HasPrefix(scope, fpPrefix) {
+		return scope[len(fpPrefix):]
+	}
+	return ""
 }
 
 // scrubMatchExecute performs the actual rewrite: builds blob replacement map,
