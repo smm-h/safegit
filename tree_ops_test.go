@@ -352,7 +352,7 @@ func TestReplaceInTreeByBlobMapFlat(t *testing.T) {
 		origB: newB,
 	}
 
-	newTree, err := replaceInTreeByBlobMap(ctx, treeSHA, blobMap)
+	newTree, err := replaceInTreeByBlobMap(ctx, treeSHA, blobMap, nil)
 	if err != nil {
 		t.Fatalf("replaceInTreeByBlobMap: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestReplaceInTreeByBlobMapNested(t *testing.T) {
 		origDeep: newDeep,
 	}
 
-	newTree, err := replaceInTreeByBlobMap(ctx, treeSHA, blobMap)
+	newTree, err := replaceInTreeByBlobMap(ctx, treeSHA, blobMap, nil)
 	if err != nil {
 		t.Fatalf("replaceInTreeByBlobMap: %v", err)
 	}
@@ -437,7 +437,7 @@ func TestReplaceInTreeByBlobMapNoMatch(t *testing.T) {
 		bogusOld: bogusNew,
 	}
 
-	newTree, err := replaceInTreeByBlobMap(ctx, treeSHA, blobMap)
+	newTree, err := replaceInTreeByBlobMap(ctx, treeSHA, blobMap, nil)
 	if err != nil {
 		t.Fatalf("replaceInTreeByBlobMap: %v", err)
 	}
@@ -485,7 +485,7 @@ func TestReplaceInTreeByBlobMapWithCache(t *testing.T) {
 	if ok {
 		t.Fatal("expected cache miss on first call")
 	}
-	result1, err = replaceInTreeByBlobMap(ctx, tree1, blobMap)
+	result1, err = replaceInTreeByBlobMap(ctx, tree1, blobMap, nil)
 	if err != nil {
 		t.Fatalf("replaceInTreeByBlobMap (first): %v", err)
 	}
