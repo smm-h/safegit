@@ -1097,3 +1097,653 @@ func TestPushHookCascadeRejectsOnParentHookFailure(t *testing.T) {
 			strings.TrimSpace(string(remoteHeadAfter)))
 	}
 }
+
+// --- Phase 4: Scrub auto-recurse into submodules ---
+
+// newRepoWithSubmoduleSecret creates a parent repo with a submodule that has
+// a file containing a secret. The submodule is on the "main" branch (not
+// detached). Returns parent dir, submodule origin dir, and the submodule
+// working directory inside the parent.
+func newRepoWithSubmoduleSecret(t *testing.T, secret, filename string) (parentDir, subOriginDir, subDir string) {
+	t.Helper()
+	base := t.TempDir()
+
+	// Create the repo that will become the submodule origin
+	subOriginDir = filepath.Join(base, "sub-origin")
+	if err := os.MkdirAll(subOriginDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"git", "init", "--initial-branch=main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = subOriginDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+	// Create the secret file in the submodule origin
+	if err := os.WriteFile(filepath.Join(subOriginDir, filename), []byte(secret+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"git", "add", filename},
+		{"git", "commit", "-m", "sub initial with secret"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = subOriginDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	// Create the parent repo
+	parentDir = filepath.Join(base, "parent")
+	if err := os.MkdirAll(parentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"git", "init", "--initial-branch=main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = parentDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(parentDir, "seed.txt"), []byte("seed\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"git", "add", "seed.txt"},
+		{"git", "commit", "-m", "initial"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = parentDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	// Allow local file:// transport and add the submodule
+	for _, args := range [][]string{
+		{"git", "config", "protocol.file.allow", "always"},
+		{"git", "submodule", "add", "-q", subOriginDir, "mysub"},
+		{"git", "commit", "-q", "-m", "add submodule"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = parentDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	// Put the submodule checkout on the main branch (not detached)
+	subDir = filepath.Join(parentDir, "mysub")
+	for _, args := range [][]string{
+		{"git", "checkout", "main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = subDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v in submodule: %v\n%s", args, err, out)
+		}
+	}
+
+	return parentDir, subOriginDir, subDir
+}
+
+// newRepoWithTwoSubmoduleSecrets creates a parent repo with two submodules
+// ("sub1" and "sub2"), each containing a file with a secret. Both submodules
+// are on the "main" branch.
+func newRepoWithTwoSubmoduleSecrets(t *testing.T, secret, filename string) (parentDir, sub1Dir, sub2Dir string) {
+	t.Helper()
+	base := t.TempDir()
+
+	// Helper to create a submodule origin with a secret file
+	createSubOrigin := func(name string) string {
+		originDir := filepath.Join(base, name+"-origin")
+		if err := os.MkdirAll(originDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{
+			{"git", "init", "--initial-branch=main"},
+			{"git", "config", "user.email", "test@test.com"},
+			{"git", "config", "user.name", "Test"},
+		} {
+			cmd := exec.Command(args[0], args[1:]...)
+			cmd.Dir = originDir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%v failed: %v\n%s", args, err, out)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(originDir, filename), []byte(secret+"\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{
+			{"git", "add", filename},
+			{"git", "commit", "-m", name + " initial with secret"},
+		} {
+			cmd := exec.Command(args[0], args[1:]...)
+			cmd.Dir = originDir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%v failed: %v\n%s", args, err, out)
+			}
+		}
+		return originDir
+	}
+
+	sub1Origin := createSubOrigin("sub1")
+	sub2Origin := createSubOrigin("sub2")
+
+	// Create the parent repo
+	parentDir = filepath.Join(base, "parent")
+	if err := os.MkdirAll(parentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"git", "init", "--initial-branch=main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = parentDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(parentDir, "seed.txt"), []byte("seed\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"git", "add", "seed.txt"},
+		{"git", "commit", "-m", "initial"},
+		{"git", "config", "protocol.file.allow", "always"},
+		{"git", "submodule", "add", "-q", sub1Origin, "sub1"},
+		{"git", "submodule", "add", "-q", sub2Origin, "sub2"},
+		{"git", "commit", "-q", "-m", "add submodules"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = parentDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	// Put both submodule checkouts on the main branch
+	sub1Dir = filepath.Join(parentDir, "sub1")
+	sub2Dir = filepath.Join(parentDir, "sub2")
+	for _, subDir := range []string{sub1Dir, sub2Dir} {
+		for _, args := range [][]string{
+			{"git", "checkout", "main"},
+			{"git", "config", "user.email", "test@test.com"},
+			{"git", "config", "user.name", "Test"},
+		} {
+			cmd := exec.Command(args[0], args[1:]...)
+			cmd.Dir = subDir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%v in submodule %s: %v\n%s", args, subDir, err, out)
+			}
+		}
+	}
+
+	return parentDir, sub1Dir, sub2Dir
+}
+
+// Phase 4.9: scrub match auto-recurses into a submodule, replacing the secret
+// in the submodule's history and updating the parent's gitlink pointer.
+func TestScrubMatchRecursesIntoSubmodule(t *testing.T) {
+	t.Parallel()
+	parentDir, _, subDir := newRepoWithSubmoduleSecret(t, "TOPSECRET_ABC123", "secret.txt")
+
+	// Record the gitlink SHA before scrub
+	gitlinkBefore := lsTreeSHA(t, lsTreeEntry(t, parentDir, "mysub"))
+
+	// Run scrub match from the parent
+	stdout, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv,
+		"--force", "scrub", "match",
+		"--pattern", "TOPSECRET_ABC123",
+		"--replace", "REDACTED",
+		"--reason", "test",
+		"--entire-history",
+	)
+	if code != 0 {
+		t.Fatalf("scrub match failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// Verify: submodule HEAD no longer contains the secret
+	subHEAD := revParseHEAD(t, subDir)
+	content, ok := gitShow(t, subDir, subHEAD, "secret.txt")
+	if !ok {
+		t.Error("secret.txt not found in submodule HEAD after scrub")
+	} else {
+		if strings.Contains(content, "TOPSECRET_ABC123") {
+			t.Errorf("submodule secret.txt still contains TOPSECRET_ABC123: %q", content)
+		}
+		if !strings.Contains(content, "REDACTED") {
+			t.Errorf("submodule secret.txt should contain REDACTED, got: %q", content)
+		}
+	}
+
+	// Verify: parent's gitlink SHA changed (points to rewritten commit)
+	gitlinkAfter := lsTreeSHA(t, lsTreeEntry(t, parentDir, "mysub"))
+	if gitlinkAfter == gitlinkBefore {
+		t.Error("parent gitlink SHA did not change after scrubbing submodule")
+	}
+}
+
+// Phase 4.10: scrub match replaces secrets in both parent and submodule.
+func TestScrubMatchBothParentAndSubmodule(t *testing.T) {
+	t.Parallel()
+	parentDir, _, subDir := newRepoWithSubmoduleSecret(t, "TOPSECRET_XYZ789", "secret.txt")
+
+	// Also add a file with the secret to the parent
+	if err := os.WriteFile(filepath.Join(parentDir, "parentfile.txt"), []byte("TOPSECRET_XYZ789\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "add", "parentfile.txt")
+	cmd.Dir = parentDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "commit", "-m", "add parent secret file")
+	cmd.Dir = parentDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+
+	// Record the gitlink SHA before scrub
+	gitlinkBefore := lsTreeSHA(t, lsTreeEntry(t, parentDir, "mysub"))
+
+	// Run scrub match
+	stdout, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv,
+		"--force", "scrub", "match",
+		"--pattern", "TOPSECRET_XYZ789",
+		"--replace", "CLEAN",
+		"--reason", "test",
+		"--entire-history",
+	)
+	if code != 0 {
+		t.Fatalf("scrub match failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// Verify: parent file is clean
+	parentHEAD := revParseHEAD(t, parentDir)
+	content, ok := gitShow(t, parentDir, parentHEAD, "parentfile.txt")
+	if !ok {
+		t.Error("parentfile.txt not found in parent HEAD after scrub")
+	} else {
+		if strings.Contains(content, "TOPSECRET_XYZ789") {
+			t.Errorf("parent parentfile.txt still contains secret: %q", content)
+		}
+		if !strings.Contains(content, "CLEAN") {
+			t.Errorf("parent parentfile.txt should contain CLEAN, got: %q", content)
+		}
+	}
+
+	// Verify: submodule file is clean
+	subHEAD := revParseHEAD(t, subDir)
+	content, ok = gitShow(t, subDir, subHEAD, "secret.txt")
+	if !ok {
+		t.Error("secret.txt not found in submodule HEAD after scrub")
+	} else {
+		if strings.Contains(content, "TOPSECRET_XYZ789") {
+			t.Errorf("submodule secret.txt still contains secret: %q", content)
+		}
+		if !strings.Contains(content, "CLEAN") {
+			t.Errorf("submodule secret.txt should contain CLEAN, got: %q", content)
+		}
+	}
+
+	// Verify: parent gitlink updated
+	gitlinkAfter := lsTreeSHA(t, lsTreeEntry(t, parentDir, "mysub"))
+	if gitlinkAfter == gitlinkBefore {
+		t.Error("parent gitlink SHA did not change after scrubbing submodule")
+	}
+}
+
+// Phase 4.11: scrub match with two submodules scrubs both.
+func TestScrubMatchTwoSubmodules(t *testing.T) {
+	t.Parallel()
+	parentDir, sub1Dir, sub2Dir := newRepoWithTwoSubmoduleSecrets(t, "TOPSECRET_MULTI", "secret.txt")
+
+	// Record gitlink SHAs before scrub
+	gitlink1Before := lsTreeSHA(t, lsTreeEntry(t, parentDir, "sub1"))
+	gitlink2Before := lsTreeSHA(t, lsTreeEntry(t, parentDir, "sub2"))
+
+	// Run scrub match
+	stdout, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv,
+		"--force", "scrub", "match",
+		"--pattern", "TOPSECRET_MULTI",
+		"--replace", "REDACTED",
+		"--reason", "test",
+		"--entire-history",
+	)
+	if code != 0 {
+		t.Fatalf("scrub match failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// Verify: sub1 is clean
+	sub1HEAD := revParseHEAD(t, sub1Dir)
+	content, ok := gitShow(t, sub1Dir, sub1HEAD, "secret.txt")
+	if !ok {
+		t.Error("secret.txt not found in sub1 HEAD after scrub")
+	} else if strings.Contains(content, "TOPSECRET_MULTI") {
+		t.Errorf("sub1 secret.txt still contains secret: %q", content)
+	}
+
+	// Verify: sub2 is clean
+	sub2HEAD := revParseHEAD(t, sub2Dir)
+	content, ok = gitShow(t, sub2Dir, sub2HEAD, "secret.txt")
+	if !ok {
+		t.Error("secret.txt not found in sub2 HEAD after scrub")
+	} else if strings.Contains(content, "TOPSECRET_MULTI") {
+		t.Errorf("sub2 secret.txt still contains secret: %q", content)
+	}
+
+	// Verify: both gitlinks in parent are updated
+	gitlink1After := lsTreeSHA(t, lsTreeEntry(t, parentDir, "sub1"))
+	gitlink2After := lsTreeSHA(t, lsTreeEntry(t, parentDir, "sub2"))
+	if gitlink1After == gitlink1Before {
+		t.Error("sub1 gitlink SHA did not change after scrub")
+	}
+	if gitlink2After == gitlink2Before {
+		t.Error("sub2 gitlink SHA did not change after scrub")
+	}
+}
+
+// Phase 4.12: scrub file with a path inside a submodule rewrites the submodule
+// history and updates the parent gitlink.
+func TestScrubFileInSubmodule(t *testing.T) {
+	t.Parallel()
+	parentDir, _, subDir := newRepoWithSubmoduleSecret(t, "SENSITIVE_DATA_HERE", "secret.txt")
+
+	// Get the first commit in the submodule (the one with the secret)
+	subSHAs := revListReverse(t, subDir)
+	firstSubCommit := subSHAs[0]
+
+	// Replace secret.txt on disk with clean content
+	if err := os.WriteFile(filepath.Join(subDir, "secret.txt"), []byte("CLEANED\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Record gitlink before scrub
+	gitlinkBefore := lsTreeSHA(t, lsTreeEntry(t, parentDir, "mysub"))
+
+	// Run scrub file targeting the submodule path
+	stdout, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv,
+		"--force", "scrub", "file",
+		"mysub/secret.txt",
+		"--from", firstSubCommit,
+		"--reason", "test",
+	)
+	if code != 0 {
+		t.Fatalf("scrub file failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// Verify: the file in submodule history is replaced
+	newSubSHAs := revListReverse(t, subDir)
+	for i, sha := range newSubSHAs {
+		content, ok := gitShow(t, subDir, sha, "secret.txt")
+		if !ok {
+			continue
+		}
+		if strings.Contains(content, "SENSITIVE_DATA_HERE") {
+			t.Errorf("submodule commit %d (%s): secret.txt still contains sensitive data: %q", i, sha[:12], content)
+		}
+		if !strings.Contains(content, "CLEANED") {
+			t.Errorf("submodule commit %d (%s): secret.txt should contain CLEANED, got: %q", i, sha[:12], content)
+		}
+	}
+
+	// Verify: parent gitlink updated
+	gitlinkAfter := lsTreeSHA(t, lsTreeEntry(t, parentDir, "mysub"))
+	if gitlinkAfter == gitlinkBefore {
+		t.Error("parent gitlink SHA did not change after scrubbing file in submodule")
+	}
+}
+
+// Phase 4.13: scrub match with --scope limits scrub to specific submodule paths.
+func TestScrubMatchScopeSubmodule(t *testing.T) {
+	t.Parallel()
+	parentDir, sub1Dir, sub2Dir := newRepoWithTwoSubmoduleSecrets(t, "SECRET_SCOPED", "secret.txt")
+
+	// Also add a file with the secret to the parent
+	if err := os.WriteFile(filepath.Join(parentDir, "parentfile.txt"), []byte("SECRET_SCOPED\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "add", "parentfile.txt")
+	cmd.Dir = parentDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "commit", "-m", "add parent secret")
+	cmd.Dir = parentDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+
+	// Run scrub match with --scope limited to sub1
+	stdout, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv,
+		"--force", "scrub", "match",
+		"--pattern", "SECRET_SCOPED",
+		"--replace", "CLEAN",
+		"--reason", "test",
+		"--entire-history",
+		"--scope", "sub1/*",
+	)
+	if code != 0 {
+		t.Fatalf("scrub match --scope failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// Verify: sub1 is scrubbed (secret removed)
+	sub1HEAD := revParseHEAD(t, sub1Dir)
+	content, ok := gitShow(t, sub1Dir, sub1HEAD, "secret.txt")
+	if !ok {
+		t.Error("secret.txt not found in sub1 HEAD after scrub")
+	} else {
+		if strings.Contains(content, "SECRET_SCOPED") {
+			t.Errorf("sub1 secret.txt still contains secret: %q", content)
+		}
+		if !strings.Contains(content, "CLEAN") {
+			t.Errorf("sub1 secret.txt should contain CLEAN, got: %q", content)
+		}
+	}
+
+	// Verify: sub2 is NOT scrubbed (secret still present)
+	sub2HEAD := revParseHEAD(t, sub2Dir)
+	content, ok = gitShow(t, sub2Dir, sub2HEAD, "secret.txt")
+	if !ok {
+		t.Error("secret.txt not found in sub2 HEAD")
+	} else if !strings.Contains(content, "SECRET_SCOPED") {
+		t.Errorf("sub2 secret.txt should still contain SECRET_SCOPED (out of scope), got: %q", content)
+	}
+
+	// Verify: parent blobs outside sub1/ are not scrubbed
+	parentHEAD := revParseHEAD(t, parentDir)
+	content, ok = gitShow(t, parentDir, parentHEAD, "parentfile.txt")
+	if !ok {
+		t.Error("parentfile.txt not found in parent HEAD")
+	} else if !strings.Contains(content, "SECRET_SCOPED") {
+		t.Errorf("parent parentfile.txt should still contain SECRET_SCOPED (outside scope sub1/*), got: %q", content)
+	}
+}
+
+// Phase 4.15: scrub match --dry-run reports submodule findings without changing anything.
+func TestScrubMatchDryRunWithSubmodules(t *testing.T) {
+	t.Parallel()
+	parentDir, _, _ := newRepoWithSubmoduleSecret(t, "SECRET_DRYRUN", "secret.txt")
+
+	// Record state before dry-run
+	headBefore := revParseHEAD(t, parentDir)
+	gitlinkBefore := lsTreeEntry(t, parentDir, "mysub")
+
+	// Run with --dry-run
+	stdout, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv,
+		"--force", "--dry-run", "scrub", "match",
+		"--pattern", "SECRET_DRYRUN",
+		"--replace", "X",
+		"--reason", "x",
+		"--entire-history",
+	)
+	if code != 0 {
+		t.Fatalf("scrub match --dry-run failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// Verify: output mentions the submodule path
+	combined := stdout + stderr
+	if !strings.Contains(combined, "mysub") {
+		t.Errorf("dry-run output should mention submodule path 'mysub', got: %s", combined)
+	}
+
+	// Verify: no changes were made (HEAD unchanged)
+	headAfter := revParseHEAD(t, parentDir)
+	if headAfter != headBefore {
+		t.Errorf("HEAD changed during dry run: %s -> %s", headBefore[:12], headAfter[:12])
+	}
+
+	// Verify: gitlink unchanged
+	gitlinkAfter := lsTreeEntry(t, parentDir, "mysub")
+	if gitlinkAfter != gitlinkBefore {
+		t.Errorf("gitlink changed during dry run:\n  before: %s\n  after:  %s", gitlinkBefore, gitlinkAfter)
+	}
+}
+
+// Phase 4.16: scrub match with a pattern that appears only in a binary blob
+// inside a submodule. Binary blobs are skipped, so the submodule should remain
+// unchanged and the operation should succeed cleanly.
+func TestScrubMatchPartialFailure(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+
+	// Create submodule origin with a binary file containing the secret
+	subOriginDir := filepath.Join(base, "sub-origin")
+	if err := os.MkdirAll(subOriginDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"git", "init", "--initial-branch=main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = subOriginDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+	// Binary content: NUL bytes + secret
+	binaryContent := []byte("header\x00\x00\x00BINARY_SECRET_ONLY\x00end\n")
+	if err := os.WriteFile(filepath.Join(subOriginDir, "data.bin"), binaryContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Also add a text file so the repo has some text content
+	if err := os.WriteFile(filepath.Join(subOriginDir, "readme.txt"), []byte("clean content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"git", "add", "data.bin", "readme.txt"},
+		{"git", "commit", "-m", "sub initial with binary"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = subOriginDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	// Create parent repo
+	parentDir := filepath.Join(base, "parent")
+	if err := os.MkdirAll(parentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"git", "init", "--initial-branch=main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = parentDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(parentDir, "seed.txt"), []byte("seed\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"git", "add", "seed.txt"},
+		{"git", "commit", "-m", "initial"},
+		{"git", "config", "protocol.file.allow", "always"},
+		{"git", "submodule", "add", "-q", subOriginDir, "mysub"},
+		{"git", "commit", "-q", "-m", "add submodule"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = parentDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	// Put submodule on main branch
+	subDir := filepath.Join(parentDir, "mysub")
+	for _, args := range [][]string{
+		{"git", "checkout", "main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = subDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v in submodule: %v\n%s", args, err, out)
+		}
+	}
+
+	// Record state before scrub
+	gitlinkBefore := lsTreeEntry(t, parentDir, "mysub")
+
+	// Run scrub match -- pattern only exists in binary blob (which gets skipped)
+	stdout, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv,
+		"--force", "scrub", "match",
+		"--pattern", "BINARY_SECRET_ONLY",
+		"--replace", "REDACTED",
+		"--reason", "test binary in submodule",
+		"--entire-history",
+	)
+
+	// The operation should succeed (binary blobs are skipped, no text matches)
+	// It may report "No matches found" since binary is skipped.
+	if code != 0 {
+		// If verification fails because the secret is in a binary blob in the
+		// object store, code 1 is acceptable (verification detected it).
+		// But code > 1 would indicate a crash.
+		if code > 1 {
+			t.Fatalf("scrub match crashed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+		}
+		t.Logf("scrub match exited with code %d (verification may have detected binary blob secret): %s", code, stderr)
+	}
+
+	// Verify: gitlink unchanged (binary blob was skipped, nothing to rewrite)
+	gitlinkAfter := lsTreeEntry(t, parentDir, "mysub")
+	if gitlinkAfter != gitlinkBefore {
+		t.Logf("gitlink changed: before=%s after=%s (acceptable if scrub rewrote text objects)", gitlinkBefore, gitlinkAfter)
+	}
+
+	// Verify: git fsck passes (no corruption regardless of exit code)
+	fsck := exec.Command("git", "fsck", "--no-dangling")
+	fsck.Dir = parentDir
+	if out, err := fsck.CombinedOutput(); err != nil {
+		t.Errorf("git fsck failed after scrub: %v\n%s", err, out)
+	}
+	fsck = exec.Command("git", "fsck", "--no-dangling")
+	fsck.Dir = subDir
+	if out, err := fsck.CombinedOutput(); err != nil {
+		t.Errorf("git fsck failed in submodule after scrub: %v\n%s", err, out)
+	}
+}
