@@ -552,3 +552,314 @@ func TestSubmoduleConcurrentParent(t *testing.T) {
 		t.Errorf("submodule entry changed:\n  before: %s\n  after:  %s", subEntryBefore, subEntryAfter)
 	}
 }
+
+// prepSubmoduleForCommit puts the submodule checkout on the "main" branch
+// (submodule add leaves it detached) and configures user identity so safegit
+// commit can operate inside it. Returns the submodule directory path.
+func prepSubmoduleForCommit(t *testing.T, parentDir string) string {
+	t.Helper()
+	subDir := filepath.Join(parentDir, "mysub")
+	for _, args := range [][]string{
+		{"git", "checkout", "main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = subDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v in submodule: %v\n%s", args, err, out)
+		}
+	}
+	return subDir
+}
+
+// Phase 0.8: Commit a new file inside the submodule using safegit.
+// Verify the commit lands on the submodule's branch and the parent is unaffected.
+func TestSubmoduleCommitInside(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+	subDir := prepSubmoduleForCommit(t, parentDir)
+
+	parentCountBefore := gitLog(t, parentDir, "HEAD")
+	subCountBefore := gitLog(t, subDir, "HEAD")
+
+	// Create a new file in the submodule.
+	if err := os.WriteFile(filepath.Join(subDir, "new_in_sub.txt"), []byte("hello from sub\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Commit from inside the submodule.
+	_, stderr, code := runSafegit(t, subDir, "commit", "-m", "sub commit", "--", "new_in_sub.txt")
+	if code != 0 {
+		t.Fatalf("safegit commit in submodule failed (code %d): %s", code, stderr)
+	}
+
+	// Verify: submodule branch advanced by 1.
+	subCountAfter := gitLog(t, subDir, "HEAD")
+	if subCountAfter != subCountBefore+1 {
+		t.Errorf("submodule commit count: want %d, got %d", subCountBefore+1, subCountAfter)
+	}
+
+	// Verify: parent repo is unaffected.
+	parentCountAfter := gitLog(t, parentDir, "HEAD")
+	if parentCountAfter != parentCountBefore {
+		t.Errorf("parent commit count changed: was %d, now %d", parentCountBefore, parentCountAfter)
+	}
+
+	// Verify the file is in the submodule's HEAD tree.
+	cmd := exec.Command("git", "ls-tree", "-r", "--name-only", "HEAD")
+	cmd.Dir = subDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "new_in_sub.txt") {
+		t.Errorf("new_in_sub.txt not found in submodule HEAD tree; got:\n%s", out)
+	}
+}
+
+// Phase 0.9: safegit commit should refuse to operate in a detached HEAD state.
+// Submodules are often in detached HEAD after checkout; this documents that
+// safegit commit does not support detached HEAD.
+func TestSubmoduleCommitDetachedHead(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+	subDir := filepath.Join(parentDir, "mysub")
+
+	// Configure user identity (needed even for a failing commit attempt).
+	for _, args := range [][]string{
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = subDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v in submodule: %v\n%s", args, err, out)
+		}
+	}
+
+	// Detach HEAD in the submodule.
+	cmd := exec.Command("git", "checkout", "--detach")
+	cmd.Dir = subDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout --detach: %v\n%s", err, out)
+	}
+
+	// Create a new file.
+	if err := os.WriteFile(filepath.Join(subDir, "detached.txt"), []byte("detached\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// safegit commit should fail with an error about detached HEAD.
+	_, stderr, code := runSafegit(t, subDir, "commit", "-m", "detached commit", "--", "detached.txt")
+	if code == 0 {
+		t.Fatal("safegit commit in detached HEAD should have failed, but exited 0")
+	}
+
+	combined := strings.ToLower(stderr)
+	if !strings.Contains(combined, "detach") && !strings.Contains(combined, "branch") {
+		t.Errorf("expected error mentioning detached HEAD or branch, got: %s", stderr)
+	}
+}
+
+// Phase 0.10: Undo inside a submodule reverts the submodule HEAD to the
+// pre-commit SHA. The parent repo's recorded pointer to the submodule is
+// unchanged (undo only touches the submodule's own refs).
+func TestSubmoduleUndo(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+	subDir := prepSubmoduleForCommit(t, parentDir)
+	env := []string{"CLAUDE_CODE_SESSION_ID=submodule-undo-test"}
+
+	parentSubPointerBefore := lsTreeSHA(t, lsTreeEntry(t, parentDir, "mysub"))
+	subHEADBefore := revParseHEAD(t, subDir)
+
+	// Create a file and commit inside the submodule.
+	if err := os.WriteFile(filepath.Join(subDir, "undo_me.txt"), []byte("will undo\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegitEnv(t, subDir, env, "commit", "-m", "commit to undo", "--", "undo_me.txt")
+	if code != 0 {
+		t.Fatalf("safegit commit in submodule failed (code %d): %s", code, stderr)
+	}
+
+	subHEADAfterCommit := revParseHEAD(t, subDir)
+	if subHEADAfterCommit == subHEADBefore {
+		t.Fatal("submodule HEAD did not advance after commit")
+	}
+
+	// Undo from inside the submodule.
+	_, stderr, code = runSafegitEnv(t, subDir, env, "undo")
+	if code != 0 {
+		t.Fatalf("safegit undo in submodule failed (code %d): %s", code, stderr)
+	}
+
+	// Verify: submodule HEAD is back to pre-commit SHA.
+	subHEADAfterUndo := revParseHEAD(t, subDir)
+	if subHEADAfterUndo != subHEADBefore {
+		t.Errorf("after undo, submodule HEAD = %s, want %s", subHEADAfterUndo, subHEADBefore)
+	}
+
+	// Verify: parent repo's pointer to submodule is unchanged.
+	parentSubPointerAfter := lsTreeSHA(t, lsTreeEntry(t, parentDir, "mysub"))
+	if parentSubPointerAfter != parentSubPointerBefore {
+		t.Errorf("parent's submodule pointer changed: was %s, now %s", parentSubPointerBefore, parentSubPointerAfter)
+	}
+}
+
+// Phase 0.11: Redo inside a submodule restores the commit after undo.
+// commit -> undo -> redo should return the submodule HEAD to the post-commit
+// SHA. Parent repo remains unaffected throughout.
+func TestSubmoduleRedo(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+	subDir := prepSubmoduleForCommit(t, parentDir)
+	env := []string{"CLAUDE_CODE_SESSION_ID=submodule-redo-test"}
+
+	parentCountBefore := gitLog(t, parentDir, "HEAD")
+	parentSubPointerBefore := lsTreeSHA(t, lsTreeEntry(t, parentDir, "mysub"))
+
+	// Create a file and commit inside the submodule.
+	if err := os.WriteFile(filepath.Join(subDir, "redo_me.txt"), []byte("will redo\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegitEnv(t, subDir, env, "commit", "-m", "commit for redo", "--", "redo_me.txt")
+	if code != 0 {
+		t.Fatalf("safegit commit in submodule failed (code %d): %s", code, stderr)
+	}
+	subHEADAfterCommit := revParseHEAD(t, subDir)
+
+	// Undo.
+	_, stderr, code = runSafegitEnv(t, subDir, env, "undo")
+	if code != 0 {
+		t.Fatalf("safegit undo in submodule failed (code %d): %s", code, stderr)
+	}
+
+	// Redo.
+	_, stderr, code = runSafegitEnv(t, subDir, env, "redo")
+	if code != 0 {
+		t.Fatalf("safegit redo in submodule failed (code %d): %s", code, stderr)
+	}
+
+	// Verify: submodule HEAD is back to the post-commit SHA.
+	subHEADAfterRedo := revParseHEAD(t, subDir)
+	if subHEADAfterRedo != subHEADAfterCommit {
+		t.Errorf("after redo, submodule HEAD = %s, want %s", subHEADAfterRedo, subHEADAfterCommit)
+	}
+
+	// Verify: parent repo is unaffected.
+	parentCountAfter := gitLog(t, parentDir, "HEAD")
+	if parentCountAfter != parentCountBefore {
+		t.Errorf("parent commit count changed: was %d, now %d", parentCountBefore, parentCountAfter)
+	}
+	parentSubPointerAfter := lsTreeSHA(t, lsTreeEntry(t, parentDir, "mysub"))
+	if parentSubPointerAfter != parentSubPointerBefore {
+		t.Errorf("parent's submodule pointer changed: was %s, now %s", parentSubPointerBefore, parentSubPointerAfter)
+	}
+}
+
+// Phase 0.12: Concurrent safegit commits in the parent and submodule should
+// not block each other. Their .git directories are separate, so lock files
+// are independent.
+func TestSubmoduleLockIsolation(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+	subDir := prepSubmoduleForCommit(t, parentDir)
+
+	// Create files for each commit.
+	if err := os.WriteFile(filepath.Join(parentDir, "parent_new.txt"), []byte("parent file\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "sub_new.txt"), []byte("sub file\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var parentCode, subCode int
+	var parentStderr, subStderr string
+
+	// Launch both commits concurrently.
+	parallel(2, func(i int) {
+		if i == 0 {
+			_, parentStderr, parentCode = runSafegit(t, parentDir, "commit", "-m", "parent concurrent", "--", "parent_new.txt")
+		} else {
+			_, subStderr, subCode = runSafegit(t, subDir, "commit", "-m", "sub concurrent", "--", "sub_new.txt")
+		}
+	})
+
+	if parentCode != 0 {
+		t.Fatalf("parent commit failed (code %d): %s", parentCode, parentStderr)
+	}
+	if subCode != 0 {
+		t.Fatalf("submodule commit failed (code %d): %s", subCode, subStderr)
+	}
+
+	// Verify: parent has its new file.
+	cmd := exec.Command("git", "ls-tree", "-r", "--name-only", "HEAD")
+	cmd.Dir = parentDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "parent_new.txt") {
+		t.Errorf("parent_new.txt not found in parent HEAD tree; got:\n%s", out)
+	}
+
+	// Verify: submodule has its new file.
+	cmd = exec.Command("git", "ls-tree", "-r", "--name-only", "HEAD")
+	cmd.Dir = subDir
+	out, err = cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "sub_new.txt") {
+		t.Errorf("sub_new.txt not found in submodule HEAD tree; got:\n%s", out)
+	}
+}
+
+// Phase 0.13: Amending a commit in the parent preserves the submodule's
+// gitlink entry. The recorded submodule SHA must not change when only a
+// regular file is amended.
+func TestSubmoduleAmendPreservesGitlink(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+	env := []string{"CLAUDE_CODE_SESSION_ID=submodule-amend-test"}
+
+	// Record the submodule pointer before the test.
+	subPointerBefore := lsTreeSHA(t, lsTreeEntry(t, parentDir, "mysub"))
+
+	// Create and commit a file in the parent.
+	filePath := filepath.Join(parentDir, "amend_target.txt")
+	if err := os.WriteFile(filePath, []byte("original content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegitEnv(t, parentDir, env, "commit", "-m", "will amend", "--", "amend_target.txt")
+	if code != 0 {
+		t.Fatalf("initial commit failed (code %d): %s", code, stderr)
+	}
+
+	// Modify the file and amend.
+	if err := os.WriteFile(filePath, []byte("amended content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code = runSafegitEnv(t, parentDir, env, "commit", "--amend", "-m", "amended", "--", "amend_target.txt")
+	if code != 0 {
+		t.Fatalf("amend commit failed (code %d): %s", code, stderr)
+	}
+
+	// Verify: the gitlink entry for the submodule is preserved.
+	subPointerAfter := lsTreeSHA(t, lsTreeEntry(t, parentDir, "mysub"))
+	if subPointerAfter != subPointerBefore {
+		t.Errorf("submodule gitlink changed after amend: was %s, now %s", subPointerBefore, subPointerAfter)
+	}
+
+	// Verify: the amended file has the new content in the tree.
+	cmd := exec.Command("git", "show", "HEAD:amend_target.txt")
+	cmd.Dir = parentDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git show HEAD:amend_target.txt: %v", err)
+	}
+	if !strings.Contains(string(out), "amended content") {
+		t.Errorf("amended content not found in HEAD tree; got: %s", out)
+	}
+}
