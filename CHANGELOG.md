@@ -2,22 +2,19 @@
 
 # Changelog
 
+## 0.14.1
+
+Rewrite-author lock, scrub match --scope flag, CLAUDE.md update.
+
+### Features
+
+- **New flag: scrub match --scope.** Glob pattern limiting which file paths are searched (e.g. `--scope '*.env'`). Blobs at paths outside scope are left untouched.
+
+### Fixes
+
+- **Rewrite-author now uses the repo-wide rewrite lock.** Prevents concurrent rewrite-author and scrub operations from corrupting history.
+
 ## 0.14.0
-
-New scrub match command for pattern-based secret removal with surgical cleanup.
-
-<details>
-<summary>Context</summary>
-
-Major release driven by a real secret leak incident. A user ran scrub on leaked API keys and found secrets persisted in reflog entries and unreachable objects.
-
-New: safegit scrub match --pattern <regex> --replace <text> --reason <text> --entire-history searches all git objects (blobs, commit messages, tag annotations) for a pattern and replaces matches. Includes surgical post-rewrite cleanup (tainted reflog entries expired, unreachable objects pruned) and re-scan verification that hard-errors if any matches survive.
-
-Breaking: safegit scrub is now a command group. The old 'safegit scrub <file>' becomes 'safegit scrub file <file>'. TreeEntry.BlobSHA renamed to TreeEntry.SHA.
-
-Also: shared walkAndRewrite extraction, ParseCommit dedup in verification, branch ref verification, streaming object enumeration, new scan package.
-
-</details>
 
 ### Breaking
 
