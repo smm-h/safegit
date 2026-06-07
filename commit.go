@@ -98,6 +98,11 @@ func runCommit(flags globalFlags, messages []string, messageFile string, branch 
 		fmt.Fprintf(os.Stderr, "  sha: %s\n", result.SHA)
 	}
 
+	if err := maybeAutoBumpParent(context.Background(), flags, gitDir, result.SHA, "commit", firstLine(msg)); err != nil {
+		fmt.Fprintf(os.Stderr, "error: auto-bump parent: %v\n", err)
+		os.Exit(1)
+	}
+
 	if !flags.quiet {
 		fmt.Printf("[%s %s] %s\n", refShortName(result.Ref), result.SHA[:8], firstLine(msg))
 		fmt.Printf(" %d file(s) committed", len(files)+len(result.AutoStagedDeletions))
@@ -165,6 +170,11 @@ func runCommitAmend(flags globalFlags, gitDir string, messages []string, branch 
 			fmt.Fprintf(os.Stderr, "  sha: %s\n", result.SHA)
 		}
 
+		if err := maybeAutoBumpParent(context.Background(), flags, gitDir, result.SHA, "amend", firstLine(msg)); err != nil {
+			fmt.Fprintf(os.Stderr, "error: auto-bump parent: %v\n", err)
+			os.Exit(1)
+		}
+
 		if !flags.quiet {
 			msgDisplay := msg
 			if msgDisplay == "" {
@@ -214,6 +224,11 @@ func runCommitAmend(flags globalFlags, gitDir string, messages []string, branch 
 			fmt.Fprintf(os.Stderr, "  ref: %s\n", result.Ref)
 			fmt.Fprintf(os.Stderr, "  old: %s\n", result.OldSHA)
 			fmt.Fprintf(os.Stderr, "  sha: %s\n", result.SHA)
+		}
+
+		if err := maybeAutoBumpParent(context.Background(), flags, gitDir, result.SHA, "reword", firstLine(msg)); err != nil {
+			fmt.Fprintf(os.Stderr, "error: auto-bump parent: %v\n", err)
+			os.Exit(1)
 		}
 
 		if !flags.quiet {
