@@ -6,7 +6,7 @@
   "pipelines": {
     "go": {
       "type": "go",
-      "local": false
+      "local": true
     },
     "docker": {
       "type": "docker",
