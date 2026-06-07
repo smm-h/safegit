@@ -816,6 +816,99 @@ func TestSubmoduleLockIsolation(t *testing.T) {
 	}
 }
 
+// Phase 2.4: Doctor --fix cleans up orphan tmp dirs and stale locks inside
+// submodule safegit directories.
+func TestDoctorCleansSubmoduleState(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+	subDir := prepSubmoduleForCommit(t, parentDir)
+
+	// Initialize safegit in the parent repo by committing a file.
+	if err := os.WriteFile(filepath.Join(parentDir, "doctor_init.txt"), []byte("init\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegit(t, parentDir, "commit", "-m", "init parent safegit", "--", "doctor_init.txt")
+	if code != 0 {
+		t.Fatalf("safegit commit in parent failed (code %d): %s", code, stderr)
+	}
+
+	// Run safegit commit inside the submodule to initialize its safegit dir.
+	if err := os.WriteFile(filepath.Join(subDir, "init_safegit.txt"), []byte("init\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code = runSafegit(t, subDir, "commit", "-m", "init safegit", "--", "init_safegit.txt")
+	if code != 0 {
+		t.Fatalf("safegit commit in submodule failed (code %d): %s", code, stderr)
+	}
+
+	// Resolve the submodule's git dir to find .git/modules/mysub/safegit/.
+	gitDirCmd := exec.Command("git", "rev-parse", "--git-dir")
+	gitDirCmd.Dir = subDir
+	gitDirOut, err := gitDirCmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse --git-dir in submodule: %v", err)
+	}
+	subGitDir := strings.TrimSpace(string(gitDirOut))
+	if !filepath.IsAbs(subGitDir) {
+		subGitDir = filepath.Join(subDir, subGitDir)
+	}
+	subSafegitDir := filepath.Join(subGitDir, "safegit")
+
+	// Verify the safegit dir exists (created by the commit above).
+	if _, err := os.Stat(subSafegitDir); os.IsNotExist(err) {
+		t.Fatalf("submodule safegit dir does not exist at %s", subSafegitDir)
+	}
+
+	// Create an orphan tmp dir with a fake dead PID.
+	orphanDir := filepath.Join(subSafegitDir, "tmp", "99999-fake")
+	if err := os.MkdirAll(orphanDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(orphanDir, "index"), []byte("fake index"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a stale lock file with a dead PID.
+	lockDir := filepath.Join(subSafegitDir, "locks", "refs", "heads")
+	if err := os.MkdirAll(lockDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	lockFile := filepath.Join(lockDir, "main.lock")
+	lockContent := "pid=99999\nts=2020-01-01T00:00:00Z\nop=commit\n"
+	if err := os.WriteFile(lockFile, []byte(lockContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the artifacts exist before running doctor.
+	if _, err := os.Stat(orphanDir); os.IsNotExist(err) {
+		t.Fatal("orphan dir not created")
+	}
+	if _, err := os.Stat(lockFile); os.IsNotExist(err) {
+		t.Fatal("stale lock file not created")
+	}
+
+	// Run safegit doctor --fix from the parent repo.
+	stdout, stderr, code := runSafegit(t, parentDir, "doctor", "--fix")
+	if code != 0 {
+		t.Fatalf("doctor --fix failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// Verify: the orphan tmp dir is removed.
+	if _, err := os.Stat(orphanDir); !os.IsNotExist(err) {
+		t.Errorf("orphan tmp dir still exists at %s", orphanDir)
+	}
+
+	// Verify: the stale lock is removed.
+	if _, err := os.Stat(lockFile); !os.IsNotExist(err) {
+		t.Errorf("stale lock file still exists at %s", lockFile)
+	}
+
+	// Verify: output mentions the submodule cleanup.
+	if !strings.Contains(stdout, "[mysub]") {
+		t.Errorf("doctor output should mention [mysub], got: %s", stdout)
+	}
+}
+
 // Phase 0.13: Amending a commit in the parent preserves the submodule's
 // gitlink entry. The recorded submodule SHA must not change when only a
 // regular file is amended.
@@ -861,5 +954,144 @@ func TestSubmoduleAmendPreservesGitlink(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "amended content") {
 		t.Errorf("amended content not found in HEAD tree; got: %s", out)
+	}
+}
+
+// Phase 3.3: Push from a submodule should run parent's pre-pre-push hooks first.
+// Install a hook in the parent that writes a marker file, push from the submodule,
+// verify the marker exists.
+func TestPushHookCascadeFromParent(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+	subDir := prepSubmoduleForCommit(t, parentDir)
+
+	// Create a bare remote for the submodule to push to
+	bareRemote := filepath.Join(t.TempDir(), "sub-bare")
+	cmd := exec.Command("git", "init", "--bare", bareRemote)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v\n%s", err, out)
+	}
+
+	// Set the bare remote as "origin" in the submodule
+	cmd = exec.Command("git", "remote", "set-url", "origin", bareRemote)
+	cmd.Dir = subDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git remote set-url: %v\n%s", err, out)
+	}
+
+	// Push the existing main branch to the bare remote so it's not empty
+	cmd = exec.Command("git", "push", "origin", "main")
+	cmd.Dir = subDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("initial push to bare remote: %v\n%s", err, out)
+	}
+
+	// Install a pre-pre-push hook in the parent's .git/hooks/
+	parentGitDir := filepath.Join(parentDir, ".git")
+	hooksDir := filepath.Join(parentGitDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	markerFile := filepath.Join(t.TempDir(), "cascade-marker")
+	hookScript := fmt.Sprintf("#!/bin/sh\ntouch %s\n", markerFile)
+	hookPath := filepath.Join(hooksDir, "pre-pre-push")
+	if err := os.WriteFile(hookPath, []byte(hookScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make a commit in the submodule so there's something to push
+	if err := os.WriteFile(filepath.Join(subDir, "push-test.txt"), []byte("push test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegit(t, subDir, "commit", "-m", "push test commit", "--", "push-test.txt")
+	if code != 0 {
+		t.Fatalf("safegit commit failed (code %d): %s", code, stderr)
+	}
+
+	// Push from the submodule using safegit
+	_, stderr, code = runSafegit(t, subDir, "push", "origin", "main")
+	if code != 0 {
+		t.Fatalf("safegit push failed (code %d): %s", code, stderr)
+	}
+
+	// Verify the parent hook ran by checking the marker file
+	if _, err := os.Stat(markerFile); os.IsNotExist(err) {
+		t.Error("parent pre-pre-push hook did not run: marker file not found")
+	}
+}
+
+// Phase 3.4: Parent hook failure should block submodule push with exit code 20.
+func TestPushHookCascadeRejectsOnParentHookFailure(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+	subDir := prepSubmoduleForCommit(t, parentDir)
+
+	// Create a bare remote for the submodule to push to
+	bareRemote := filepath.Join(t.TempDir(), "sub-bare")
+	cmd := exec.Command("git", "init", "--bare", bareRemote)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v\n%s", err, out)
+	}
+
+	// Set the bare remote as "origin" in the submodule
+	cmd = exec.Command("git", "remote", "set-url", "origin", bareRemote)
+	cmd.Dir = subDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git remote set-url: %v\n%s", err, out)
+	}
+
+	// Push the existing main branch so remote isn't empty
+	cmd = exec.Command("git", "push", "origin", "main")
+	cmd.Dir = subDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("initial push to bare remote: %v\n%s", err, out)
+	}
+
+	// Install a failing pre-pre-push hook in the parent's .git/hooks/
+	parentGitDir := filepath.Join(parentDir, ".git")
+	hooksDir := filepath.Join(parentGitDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	hookScript := "#!/bin/sh\necho 'parent hook rejects push' >&2\nexit 1\n"
+	hookPath := filepath.Join(hooksDir, "pre-pre-push")
+	if err := os.WriteFile(hookPath, []byte(hookScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make a commit in the submodule so there's something to push
+	if err := os.WriteFile(filepath.Join(subDir, "reject-test.txt"), []byte("reject test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegit(t, subDir, "commit", "-m", "reject test commit", "--", "reject-test.txt")
+	if code != 0 {
+		t.Fatalf("safegit commit failed (code %d): %s", code, stderr)
+	}
+
+	// Record the remote HEAD before the push attempt
+	cmd = exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = bareRemote
+	remoteHeadBefore, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD on bare remote: %v", err)
+	}
+
+	// Push from the submodule using safegit -- should fail
+	_, stderr, code = runSafegit(t, subDir, "push", "origin", "main")
+	if code != exitPushHookFailed {
+		t.Errorf("expected exit code %d (hook failure), got %d; stderr: %s", exitPushHookFailed, code, stderr)
+	}
+
+	// Verify no push occurred: remote HEAD unchanged
+	cmd = exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = bareRemote
+	remoteHeadAfter, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD on bare remote after failed push: %v", err)
+	}
+	if string(remoteHeadAfter) != string(remoteHeadBefore) {
+		t.Errorf("remote HEAD changed despite hook failure: before=%s after=%s",
+			strings.TrimSpace(string(remoteHeadBefore)),
+			strings.TrimSpace(string(remoteHeadAfter)))
 	}
 }

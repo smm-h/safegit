@@ -13,6 +13,7 @@ import (
 	"github.com/smm-h/safegit/internal/lock"
 	"github.com/smm-h/safegit/internal/oplog"
 	"github.com/smm-h/safegit/internal/repo"
+	"github.com/smm-h/safegit/internal/submodule"
 )
 
 type checkResult struct {
@@ -315,4 +316,96 @@ func doctorFix(flags globalFlags, gitDir string) {
 			fmt.Println("log rotated (old log saved as log.1)")
 		}
 	}
+
+	// Submodule safegit directory cleanup.
+	ctx := context.Background()
+	submodules, enumErr := submodule.Enumerate(ctx, gitDir)
+	if enumErr != nil && !flags.quiet {
+		fmt.Fprintf(os.Stderr, "warning: enumerating submodules: %v\n", enumErr)
+	}
+	for _, sub := range submodules {
+		if _, err := os.Stat(sub.SafegitDir); os.IsNotExist(err) {
+			continue
+		}
+		doctorFixSubmodule(flags, sub.Name, sub.SafegitDir)
+	}
+}
+
+// doctorFixSubmodule cleans orphan tmp dirs and stale locks in a submodule's
+// safegit directory.
+func doctorFixSubmodule(flags globalFlags, name, sgDir string) {
+	if flags.dryRun {
+		orphans, err := index.GarbageCollectDryRun(sgDir)
+		if err != nil && !flags.quiet {
+			fmt.Fprintf(os.Stderr, "warning: [%s] scanning orphan tmp dirs: %v\n", name, err)
+		}
+		staleLocks := countStaleLocks(sgDir)
+		if !flags.quiet {
+			if len(orphans) > 0 {
+				fmt.Printf("[%s] would remove %d orphan tmp dir(s)\n", name, len(orphans))
+			}
+			if staleLocks > 0 {
+				fmt.Printf("[%s] would remove %d stale lock(s)\n", name, staleLocks)
+			}
+		}
+		return
+	}
+
+	removed, err := index.GarbageCollect(sgDir)
+	if err != nil && !flags.quiet {
+		fmt.Fprintf(os.Stderr, "warning: [%s] cleaning orphan tmp dirs: %v\n", name, err)
+	}
+	staleCleaned := removeStaleLocks(sgDir)
+
+	if !flags.quiet {
+		if removed > 0 {
+			fmt.Printf("[%s] removed %d orphan tmp dir(s)\n", name, removed)
+		}
+		if staleCleaned > 0 {
+			fmt.Printf("[%s] removed %d stale lock(s)\n", name, staleCleaned)
+		}
+	}
+}
+
+// countStaleLocks counts stale lock files under sgDir/locks/.
+func countStaleLocks(sgDir string) int {
+	count := 0
+	locksRoot := filepath.Join(sgDir, "locks")
+	_ = filepath.Walk(locksRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(info.Name(), ".lock") {
+			return nil
+		}
+		stale, sErr := lock.IsStale(path)
+		if sErr == nil && stale {
+			count++
+		}
+		return nil
+	})
+	return count
+}
+
+// removeStaleLocks removes stale lock files under sgDir/locks/ and returns the
+// count removed.
+func removeStaleLocks(sgDir string) int {
+	removed := 0
+	locksRoot := filepath.Join(sgDir, "locks")
+	_ = filepath.Walk(locksRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(info.Name(), ".lock") {
+			return nil
+		}
+		stale, sErr := lock.IsStale(path)
+		if sErr == nil && stale {
+			if os.Remove(path) == nil {
+				removed++
+			}
+		}
+		return nil
+	})
+	return removed
 }
