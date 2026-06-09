@@ -179,8 +179,8 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 		die(flags, cmd, 1, fmt.Sprintf("updating refs: %v", err))
 	}
 
-	// Sync main index so git status/diff reflect the rewritten HEAD
-	if err := git.SyncMainIndex(ctx, "HEAD"); err != nil {
+	// Sync main index and working tree to match rewritten HEAD
+	if err := git.SyncMainIndexWithWorktree(ctx, "HEAD"); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
 	}
 
@@ -467,8 +467,8 @@ func runScrubFileInSubmodule(
 		die(flags, cmd, 1, fmt.Sprintf("updating parent refs: %v", err))
 	}
 
-	// Sync parent index.
-	if err := git.SyncMainIndex(ctx, "HEAD"); err != nil {
+	// Sync parent index and working tree to match rewritten HEAD.
+	if err := git.SyncMainIndexWithWorktree(ctx, "HEAD"); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to sync parent main index: %v\n", err)
 	}
 

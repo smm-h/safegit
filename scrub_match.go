@@ -768,8 +768,8 @@ func scrubMatchExecute(
 	// Tag annotation rewriting (second pass for annotation text)
 	tagsRewritten := rewriteTagAnnotations(ctx, flags, cmd, compiledPattern, replaceBytes, shaMap)
 
-	// Sync main index
-	if err := git.SyncMainIndex(ctx, "HEAD"); err != nil {
+	// Sync main index and working tree to match rewritten HEAD
+	if err := git.SyncMainIndexWithWorktree(ctx, "HEAD"); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
 	}
 

@@ -49,6 +49,31 @@ func TestScrubMatchBlobReplace(t *testing.T) {
 			}
 		}
 	}
+
+	// Verify on-disk files have REDACTED and not the original secret
+	for _, fname := range []string{"file1.txt", "file2.txt", "file3.txt"} {
+		diskContent, err := os.ReadFile(filepath.Join(dir, fname))
+		if err != nil {
+			t.Fatalf("reading %s from disk: %v", fname, err)
+		}
+		if strings.Contains(string(diskContent), "SECRET_ABC") {
+			t.Errorf("on-disk %s still contains SECRET_ABC: %q", fname, string(diskContent))
+		}
+		if !strings.Contains(string(diskContent), "REDACTED") {
+			t.Errorf("on-disk %s missing REDACTED: %q", fname, string(diskContent))
+		}
+	}
+
+	// Verify working tree is clean after scrub match
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = dir
+	statusOut, err := statusCmd.Output()
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
+	if strings.TrimSpace(string(statusOut)) != "" {
+		t.Errorf("working tree is dirty after scrub match: %s", string(statusOut))
+	}
 }
 
 // TestScrubMatchCommitMessage verifies that scrub match replaces patterns

@@ -132,6 +132,15 @@ func TestScrubFlatFile(t *testing.T) {
 			t.Errorf("commit %d (%s): secret.txt = %q, want %q", i, newSHAs[i][:12], content, "REDACTED\n")
 		}
 	}
+
+	// Verify on-disk file matches the replacement content (working tree sync)
+	diskContent, err := os.ReadFile(filepath.Join(dir, "secret.txt"))
+	if err != nil {
+		t.Fatalf("reading secret.txt from disk: %v", err)
+	}
+	if string(diskContent) != "REDACTED\n" {
+		t.Errorf("on-disk secret.txt = %q, want %q", string(diskContent), "REDACTED\n")
+	}
 }
 
 // TestScrubNestedPath scrubs a file in a nested directory and verifies
@@ -896,7 +905,7 @@ func TestScrubCleanWorkingTree(t *testing.T) {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
 
-	// git status --porcelain should be empty after scrub (SyncMainIndex keeps it clean)
+	// git status --porcelain should be empty after scrub (SyncMainIndexWithWorktree keeps it clean)
 	cmd := exec.Command("git", "status", "--porcelain")
 	cmd.Dir = dir
 	out, err := cmd.Output()
@@ -905,6 +914,15 @@ func TestScrubCleanWorkingTree(t *testing.T) {
 	}
 	if strings.TrimSpace(string(out)) != "" {
 		t.Errorf("working tree is dirty after scrub: %s", string(out))
+	}
+
+	// Verify on-disk file has the scrubbed content (not the old secret)
+	diskContent, err := os.ReadFile(filepath.Join(dir, "secret.txt"))
+	if err != nil {
+		t.Fatalf("reading secret.txt from disk: %v", err)
+	}
+	if string(diskContent) != "SCRUBBED\n" {
+		t.Errorf("on-disk secret.txt = %q, want %q", string(diskContent), "SCRUBBED\n")
 	}
 }
 
