@@ -114,7 +114,7 @@ func TestScrubFlatFile(t *testing.T) {
 	}
 
 	// Scrub from the initial commit (exclusive), so all 3 secret.txt commits are rewritten
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", initialSHA, "--reason", "test flat scrub", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test flat scrub", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -152,7 +152,7 @@ func TestScrubNestedPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", initialSHA, "--reason", "test nested scrub", "a/b/secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test nested scrub", "a/b/secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -198,7 +198,7 @@ func TestScrubRemoveFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", initialSHA, "--reason", "test removal", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test removal", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -271,7 +271,7 @@ func TestScrubMergeCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", initialSHA, "--reason", "test merge scrub", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test merge scrub", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -317,7 +317,7 @@ func TestScrubAnnotatedTag(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", initialSHA, "--reason", "test tag scrub", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test tag scrub", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -378,7 +378,7 @@ func TestScrubFromScope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", fromSHA, "--reason", "test scope", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", fromSHA, "--reason", "test scope", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -427,7 +427,7 @@ func TestScrubReasonInOplog(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", initialSHA, "--reason", "sensitive data leaked", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "sensitive data leaked", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -485,7 +485,7 @@ func TestScrubReasonInOplog(t *testing.T) {
 	}
 }
 
-// TestScrubConfirmationAbort runs scrub without --force and pipes "n" to stdin.
+// TestScrubConfirmationAbort runs scrub without --yes and pipes "n" to stdin.
 // Verifies the command exits without rewriting anything.
 func TestScrubConfirmationAbort(t *testing.T) {
 	dir := newRepo(t)
@@ -510,7 +510,7 @@ func TestScrubConfirmationAbort(t *testing.T) {
 	// we expect to be preserved when the user aborts).
 	headBefore := revParseHEAD(t, dir)
 
-	// Run WITHOUT --force, pipe "n" to stdin
+	// Run WITHOUT --yes, pipe "n" to stdin
 	cmd := exec.Command(safegitBin, "scrub", "file", "--from", initialSHA, "--reason", "should abort", "secret.txt")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "CLAUDE_CODE_SESSION_ID=scrub-test")
@@ -560,7 +560,7 @@ func TestScrubDryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stdout, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "--dry-run", "scrub", "file", "--from", initialSHA, "--reason", "dry run test", "secret.txt")
+	stdout, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--dry-run", "scrub", "file", "--from", initialSHA, "--reason", "dry run test", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub --dry-run failed (code %d): %s", code, stderr)
 	}
@@ -591,7 +591,7 @@ func TestScrubUndoRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", initialSHA, "--reason", "test undo reject", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test undo reject", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -663,7 +663,7 @@ func TestScrubRootCommitInclusive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", rootSHA, "--reason", "test root inclusive", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", rootSHA, "--reason", "test root inclusive", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -706,7 +706,7 @@ func TestScrubFromHead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", "HEAD", "--reason", "test from HEAD", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", "HEAD", "--reason", "test from HEAD", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -787,7 +787,7 @@ func TestScrubFromMergeCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", mergeSHA, "--reason", "test merge from", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", mergeSHA, "--reason", "test merge from", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -866,7 +866,7 @@ func TestScrubFromNonAncestor(t *testing.T) {
 	}
 
 	// Attempt scrub with --from pointing to the feature commit (not an ancestor of main HEAD)
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", featureSHA, "--reason", "test non-ancestor", "main.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", featureSHA, "--reason", "test non-ancestor", "main.txt")
 	if code == 0 {
 		t.Fatal("scrub with non-ancestor --from should have failed, but exited 0")
 	}
@@ -891,7 +891,7 @@ func TestScrubCleanWorkingTree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", initialSHA, "--reason", "test clean tree", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test clean tree", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -933,7 +933,7 @@ func TestScrubDirtyTreeRejected(t *testing.T) {
 	}
 
 	// With --force, scrub should succeed
-	_, stderr, code = runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", initialSHA, "--reason", "test dirty guard force", "secret.txt")
+	_, stderr, code = runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test dirty guard force", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub with --force on dirty tree failed (code %d): %s", code, stderr)
 	}
@@ -956,7 +956,7 @@ func TestScrubIdempotent(t *testing.T) {
 	}
 
 	// First scrub
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", initialSHA, "--reason", "idempotent test 1", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "idempotent test 1", "secret.txt")
 	if code != 0 {
 		t.Fatalf("first scrub failed (code %d): %s", code, stderr)
 	}
@@ -968,7 +968,7 @@ func TestScrubIdempotent(t *testing.T) {
 	newInitialSHA := newSHAs[0]
 
 	// Second scrub with --force (on-disk content may differ from committed tree)
-	_, stderr, code = runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", newInitialSHA, "--reason", "idempotent test 2", "secret.txt")
+	_, stderr, code = runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", newInitialSHA, "--reason", "idempotent test 2", "secret.txt")
 	if code != 0 {
 		t.Fatalf("second scrub failed (code %d): %s", code, stderr)
 	}
@@ -1024,7 +1024,7 @@ func TestScrubMultipleBranches(t *testing.T) {
 
 	// Scrub from the initial commit (inclusive), so all secret.txt commits are rewritten.
 	// The feature branch points to branchPointSHA which is in the rewrite range.
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", initialSHA, "--reason", "test multi-branch scrub", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test multi-branch scrub", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -1087,7 +1087,7 @@ func TestCleanupExpiresTaintedReflog(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", initialSHA, "--reason", "test cleanup reflog", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test cleanup reflog", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -1145,7 +1145,7 @@ func TestScrubLightweightTag(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--force", "scrub", "file", "--from", initialSHA, "--reason", "test lightweight tag", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test lightweight tag", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}

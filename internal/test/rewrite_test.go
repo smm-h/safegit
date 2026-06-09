@@ -122,7 +122,7 @@ func TestRewriteAuthorBasic(t *testing.T) {
 	beforeCount := getCommitCount(t, dir)
 	beforeTrees := getTreeHashes(t, dir)
 
-	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	stdout, stderr, code := runSafegit(t, dir, "--yes", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -158,7 +158,7 @@ func TestRewriteAuthorMixedAuthors(t *testing.T) {
 	makeCommits(t, dir, "alice", "alice@test.com", 5, "alice")
 	makeCommits(t, dir, "bob", "bob@test.com", 5, "bob")
 
-	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "alice", "--new-name", "alice-new")
+	stdout, stderr, code := runSafegit(t, dir, "--yes", "rewrite-author", "--old-name", "alice", "--new-name", "alice-new")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -221,7 +221,7 @@ func TestRewriteAuthorWithTags(t *testing.T) {
 
 	beforeCount := getCommitCount(t, dir)
 
-	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	stdout, stderr, code := runSafegit(t, dir, "--yes", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -311,7 +311,7 @@ func TestRewriteAuthorMerge(t *testing.T) {
 	beforeCount := getCommitCount(t, dir)
 	beforeTrees := getTreeHashes(t, dir)
 
-	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	stdout, stderr, code := runSafegit(t, dir, "--yes", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -378,7 +378,7 @@ func TestRewriteAuthorMultipleBranches(t *testing.T) {
 
 	beforeCount := getCommitCount(t, dir)
 
-	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	stdout, stderr, code := runSafegit(t, dir, "--yes", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -413,7 +413,7 @@ func TestRewriteAuthorNoOp(t *testing.T) {
 	beforeTrees := getTreeHashes(t, dir)
 	beforeNames := getAuthorNames(t, dir)
 
-	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "nonexistent", "--new-name", "something")
+	stdout, stderr, code := runSafegit(t, dir, "--yes", "rewrite-author", "--old-name", "nonexistent", "--new-name", "something")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -439,7 +439,7 @@ func TestRewriteAuthorIdempotent(t *testing.T) {
 	makeCommits(t, dir, "oldname", "old@test.com", 5, "idem")
 
 	// First rewrite
-	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	stdout, stderr, code := runSafegit(t, dir, "--yes", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
 	if code != 0 {
 		t.Fatalf("first rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -448,7 +448,7 @@ func TestRewriteAuthorIdempotent(t *testing.T) {
 	afterFirstTrees := getTreeHashes(t, dir)
 
 	// Second rewrite (same arguments -- should be a no-op)
-	stdout, stderr, code = runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	stdout, stderr, code = runSafegit(t, dir, "--yes", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
 	if code != 0 {
 		t.Fatalf("second rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -514,7 +514,7 @@ func TestRewriteAuthorRootCommit(t *testing.T) {
 	// Initialize safegit in the repo (rewrite-author requires it)
 	runSafegit(t, dir, "config", "set", "commit.casMaxAttempts", "200")
 
-	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	stdout, stderr, code := runSafegit(t, dir, "--yes", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -596,7 +596,7 @@ func TestRewriteAuthorAnnotatedTags(t *testing.T) {
 	cmd.Dir = dir
 	beforeMsg, _ := cmd.Output()
 
-	_, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	_, stderr, code := runSafegit(t, dir, "--yes", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (exit %d): %s", code, stderr)
 	}
@@ -674,7 +674,7 @@ func TestRewriteAuthorFlagEquals(t *testing.T) {
 	makeCommits(t, dir, "oldname", "old@test.com", 5, "eq")
 
 	// --force skips the interactive confirmation prompt (runSafegit has no stdin)
-	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name=oldname", "--new-name=newname")
+	stdout, stderr, code := runSafegit(t, dir, "--yes", "rewrite-author", "--old-name=oldname", "--new-name=newname")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -693,7 +693,7 @@ func TestRewriteAuthorEmailOnly(t *testing.T) {
 	makeCommits(t, dir, "alice", "old@test.com", 5, "email")
 
 	// --force skips the interactive confirmation prompt (runSafegit has no stdin)
-	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-email=old@test.com", "--new-email=new@test.com")
+	stdout, stderr, code := runSafegit(t, dir, "--yes", "rewrite-author", "--old-email=old@test.com", "--new-email=new@test.com")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -722,7 +722,7 @@ func TestRewriteAuthorANDMatching(t *testing.T) {
 	makeCommits(t, dir, "alice", "alice@work.com", 3, "work")
 	makeCommits(t, dir, "alice", "alice@home.com", 3, "home")
 
-	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author",
+	stdout, stderr, code := runSafegit(t, dir, "--yes", "rewrite-author",
 		"--old-name=alice", "--new-name=alice-new",
 		"--old-email=alice@work.com", "--new-email=new@work.com")
 	if code != 0 {
@@ -779,7 +779,7 @@ func TestRewriteAuthorForceSkipsDirtyTree(t *testing.T) {
 
 	// With --force: should succeed (force skips pre-rewrite dirty check;
 	// tree is now clean so post-rewrite verification also passes)
-	stdout, stderr, code := runSafegit(t, dir, "--force", "rewrite-author", "--old-name=oldname", "--new-name=newname")
+	stdout, stderr, code := runSafegit(t, dir, "--yes", "rewrite-author", "--old-name=oldname", "--new-name=newname")
 	if code != 0 {
 		t.Fatalf("rewrite-author with --force failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -860,11 +860,11 @@ func TestRewriteAuthorConfirmProceed(t *testing.T) {
 	}
 }
 
-func TestRewriteAuthorForceSkipsPrompt(t *testing.T) {
+func TestRewriteAuthorYesSkipsPrompt(t *testing.T) {
 	dir := newRepo(t)
 	makeCommits(t, dir, "oldname", "old@test.com", 3, "noprompt")
 
-	cmd := exec.Command(safegitBin, "--force", "rewrite-author", "--old-name=oldname", "--new-name=newname")
+	cmd := exec.Command(safegitBin, "--yes", "rewrite-author", "--old-name=oldname", "--new-name=newname")
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader("")
 
@@ -883,12 +883,12 @@ func TestRewriteAuthorForceSkipsPrompt(t *testing.T) {
 	}
 
 	if exitCode != 0 {
-		t.Fatalf("expected exit code 0 with --force, got %d: stdout=%s stderr=%s", exitCode, outBuf.String(), errBuf.String())
+		t.Fatalf("expected exit code 0 with --yes, got %d: stdout=%s stderr=%s", exitCode, outBuf.String(), errBuf.String())
 	}
 
 	names := getAuthorNames(t, dir)
 	if containsName(names, "oldname") {
-		t.Errorf("author name 'oldname' still present after --force rewrite: %v", names)
+		t.Errorf("author name 'oldname' still present after --yes rewrite: %v", names)
 	}
 }
 
