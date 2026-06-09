@@ -1,6 +1,7 @@
 package test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -714,5 +715,215 @@ func TestScrubMatchScope(t *testing.T) {
 				t.Errorf("commit %d (%s): secret.txt should NOT contain REDACTED (outside scope): %q", i, sha[:12], content)
 			}
 		}
+	}
+}
+
+// TestScrubMatchMangle creates a repo with a file containing "SECRET_KEY_12345",
+// runs scrub match with --mangle, and verifies the replacement has the same
+// byte length, does not contain the original, and uses only printable ASCII.
+func TestScrubMatchMangle(t *testing.T) {
+	dir := newRepo(t)
+
+	original := "SECRET_KEY_12345"
+	commitFileEnv(t, dir, scrubMatchEnv, "secret.txt", original+"\n", "add secret")
+
+	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
+		"--yes", "scrub", "match",
+		"--pattern", "SECRET_KEY_\\w+",
+		"--mangle",
+		"--reason", "test mangle",
+		"--entire-history",
+	)
+	if code != 0 {
+		t.Fatalf("scrub match --mangle failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// Read on-disk file
+	diskContent, err := os.ReadFile(filepath.Join(dir, "secret.txt"))
+	if err != nil {
+		t.Fatalf("reading secret.txt: %v", err)
+	}
+	content := strings.TrimRight(string(diskContent), "\n")
+
+	// Verify same byte length as original match
+	if len(content) != len(original) {
+		t.Errorf("mangled content length %d != original %d; got %q", len(content), len(original), content)
+	}
+
+	// Verify original is gone
+	if strings.Contains(string(diskContent), original) {
+		t.Errorf("on-disk secret.txt still contains original: %q", string(diskContent))
+	}
+
+	// Verify all bytes are printable ASCII (0x21-0x7E) or preserved whitespace
+	for i, b := range []byte(content) {
+		if b == ' ' || b == '\t' || b == '\n' || b == '\r' {
+			continue
+		}
+		if b < 0x21 || b > 0x7E {
+			t.Errorf("byte %d is not printable ASCII: 0x%02x", i, b)
+		}
+	}
+
+	// Verify git history is also clean
+	shas := revListReverse(t, dir)
+	for i, sha := range shas {
+		c, ok := gitShow(t, dir, sha, "secret.txt")
+		if !ok {
+			continue
+		}
+		if strings.Contains(c, original) {
+			t.Errorf("commit %d (%s): secret.txt still contains original: %q", i, sha[:12], c)
+		}
+	}
+
+	// Verify working tree is clean
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = dir
+	statusOut, err := statusCmd.Output()
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
+	if strings.TrimSpace(string(statusOut)) != "" {
+		t.Errorf("working tree is dirty after scrub match --mangle: %s", string(statusOut))
+	}
+}
+
+// TestScrubMatchMangleLength tests that --mangle preserves byte length
+// across multiple files with secrets of different lengths.
+func TestScrubMatchMangleLength(t *testing.T) {
+	dir := newRepo(t)
+
+	// Use a specific prefix pattern that won't match random printable ASCII.
+	secrets := []struct {
+		file   string
+		secret string
+	}{
+		{"short.txt", "xyzSECRET123xyz"},
+		{"medium.txt", "xyzSECRET_KEY_12345_ABCDEFxyz"},
+		{"long.txt", "xyzSECRET_VERY_LONG_VALUE_WITH_MANY_CHARACTERS_1234567890xyz"},
+	}
+
+	for _, s := range secrets {
+		commitFileEnv(t, dir, scrubMatchEnv, s.file, s.secret+"\n", "add "+s.file)
+	}
+
+	// Pattern matches the SECRET... portion between xyz markers.
+	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
+		"--yes", "scrub", "match",
+		"--pattern", "xyzSECRET[A-Za-z0-9_]+xyz",
+		"--mangle",
+		"--reason", "test mangle length",
+		"--entire-history",
+	)
+	if code != 0 {
+		t.Fatalf("scrub match --mangle failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	for _, s := range secrets {
+		diskContent, err := os.ReadFile(filepath.Join(dir, s.file))
+		if err != nil {
+			t.Fatalf("reading %s: %v", s.file, err)
+		}
+		content := strings.TrimRight(string(diskContent), "\n")
+
+		if len(content) != len(s.secret) {
+			t.Errorf("%s: mangled length %d != original %d; got %q", s.file, len(content), len(s.secret), content)
+		}
+		if strings.Contains(string(diskContent), s.secret) {
+			t.Errorf("%s: still contains original %q", s.file, s.secret)
+		}
+	}
+}
+
+// TestScrubMatchMutexFlags verifies that --replace and --mangle are mutually
+// exclusive (exactly one required).
+func TestScrubMatchMutexFlags(t *testing.T) {
+	dir := newRepo(t)
+	commitFileEnv(t, dir, scrubMatchEnv, "data.txt", "SECRET_ABC\n", "add data")
+
+	// Both --replace and --mangle: should fail
+	_, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
+		"--yes", "scrub", "match",
+		"--pattern", "SECRET_ABC",
+		"--replace", "REDACTED",
+		"--mangle",
+		"--reason", "test mutex both",
+		"--entire-history",
+	)
+	if code == 0 {
+		t.Error("expected failure when both --replace and --mangle are provided, but got exit 0")
+	}
+	_ = stderr // error message comes from strictcli
+
+	// Neither --replace nor --mangle: should fail
+	_, stderr, code = runSafegitEnv(t, dir, scrubMatchEnv,
+		"--yes", "scrub", "match",
+		"--pattern", "SECRET_ABC",
+		"--reason", "test mutex neither",
+		"--entire-history",
+	)
+	if code == 0 {
+		t.Error("expected failure when neither --replace nor --mangle is provided, but got exit 0")
+	}
+
+	// Just --replace: should succeed
+	var stdout string
+	stdout, stderr, code = runSafegitEnv(t, dir, scrubMatchEnv,
+		"--yes", "scrub", "match",
+		"--pattern", "SECRET_ABC",
+		"--replace", "REDACTED",
+		"--reason", "test mutex replace only",
+		"--entire-history",
+	)
+	if code != 0 {
+		t.Fatalf("--replace only failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// Re-add the secret for the mangle test
+	commitFileEnv(t, dir, scrubMatchEnv, "data.txt", "SECRET_ABC\n", "re-add secret")
+
+	// Just --mangle: should succeed
+	stdout, stderr, code = runSafegitEnv(t, dir, scrubMatchEnv,
+		"--yes", "scrub", "match",
+		"--pattern", "SECRET_ABC",
+		"--mangle",
+		"--reason", "test mutex mangle only",
+		"--entire-history",
+	)
+	if code != 0 {
+		t.Fatalf("--mangle only failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+}
+
+// TestScrubMatchMangleNonDeterministic verifies that two mangle runs on
+// identical content produce different results (crypto-random, not deterministic).
+func TestScrubMatchMangleNonDeterministic(t *testing.T) {
+	// Run mangle twice on identical repos and check results differ
+	var results [2]string
+	for i := 0; i < 2; i++ {
+		dir := newRepo(t)
+		commitFileEnv(t, dir, scrubMatchEnv, "data.txt", "SECRET_KEY_ABCDEFGHIJKLMNOP\n", fmt.Sprintf("run %d", i))
+
+		stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
+			"--yes", "scrub", "match",
+			"--pattern", "SECRET_KEY_\\w+",
+			"--mangle",
+			"--reason", "nondeterminism test",
+			"--entire-history",
+		)
+		if code != 0 {
+			t.Fatalf("run %d failed (code %d): stdout=%s stderr=%s", i, code, stdout, stderr)
+		}
+
+		content, err := os.ReadFile(filepath.Join(dir, "data.txt"))
+		if err != nil {
+			t.Fatalf("run %d: reading data.txt: %v", i, err)
+		}
+		results[i] = string(content)
+	}
+
+	if results[0] == results[1] {
+		t.Errorf("two mangle runs produced identical output (should be non-deterministic): %q", results[0])
 	}
 }
