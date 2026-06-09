@@ -39,6 +39,7 @@ type globalFlags struct {
 	verbose    bool
 	dryRun     bool
 	force      bool
+	yes        bool
 	configPath string
 }
 
@@ -49,6 +50,7 @@ func main() {
 	app.GlobalFlag(strictcli.BoolFlag("verbose", "verbose output"))
 	app.GlobalFlag(strictcli.BoolFlag("dry-run", "preview changes without writing", strictcli.Short("n")))
 	app.GlobalFlag(strictcli.BoolFlag("force", "force operation", strictcli.Short("f")))
+	app.GlobalFlag(strictcli.BoolFlag("yes", "auto-confirm prompts", strictcli.Short("y")))
 	app.GlobalFlag(strictcli.StringFlag("config", "config file path", strictcli.Default("")))
 
 	pt := func(name string, args []string, globals map[string]interface{}) int {
@@ -308,6 +310,7 @@ func globalsToFlags(globals map[string]interface{}) globalFlags {
 		verbose:    globals["verbose"].(bool),
 		dryRun:     globals["dry_run"].(bool),
 		force:      globals["force"].(bool),
+		yes:        globals["yes"].(bool),
 		configPath: globals["config"].(string),
 	}
 }
@@ -349,6 +352,18 @@ func mustGitDir(flags globalFlags) string {
 		abs = gitDir
 	}
 	return abs
+}
+
+// confirmOrAbort prompts the user for confirmation, returning true if
+// confirmed (via --yes or interactive y/Y) and false otherwise.
+func confirmOrAbort(flags globalFlags, format string, args ...interface{}) bool {
+	if flags.yes {
+		return true
+	}
+	fmt.Printf("\n"+format+" [y/N] ", args...)
+	var answer string
+	fmt.Scanln(&answer)
+	return answer == "y" || answer == "Y"
 }
 
 // requireCleanTree dies if the working tree has uncommitted changes,
