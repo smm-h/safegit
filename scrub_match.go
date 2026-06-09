@@ -495,15 +495,10 @@ func scrubMatchExecute(
 		fmt.Printf("  Submodules with matches: %d\n", len(subScans))
 	}
 
-	// Confirmation prompt
-	if !flags.force {
-		fmt.Printf("This will rewrite history to replace pattern matches. This cannot be undone. Proceed? [y/N] ")
-		var answer string
-		fmt.Scanln(&answer)
-		if answer != "y" && answer != "Y" {
-			fmt.Println("Aborted.")
-			return 0
-		}
+	// Confirmation prompt (skipped with --yes)
+	if !confirmOrAbort(flags, "This will rewrite history to replace pattern matches. This cannot be undone. Proceed?") {
+		fmt.Println("Aborted.")
+		return 0
 	}
 
 	// Capture old HEAD

@@ -126,15 +126,10 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 	fmt.Printf("  Commits: %d\n", commitCount)
 	fmt.Printf("  Reason:  %s\n", reason)
 
-	// Confirmation prompt (skipped with --force)
-	if !flags.force {
-		fmt.Printf("\nThis will rewrite %d commits. This cannot be undone. Proceed? [y/N] ", commitCount)
-		var answer string
-		fmt.Scanln(&answer)
-		if answer != "y" && answer != "Y" {
-			fmt.Println("Aborted.")
-			return 0
-		}
+	// Confirmation prompt (skipped with --yes)
+	if !confirmOrAbort(flags, "This will rewrite %d commits. This cannot be undone. Proceed?", commitCount) {
+		fmt.Println("Aborted.")
+		return 0
 	}
 
 	// Dry-run check
@@ -350,16 +345,11 @@ func runScrubFileInSubmodule(
 	fmt.Printf("  Sub commits: %d\n", subCommitCount)
 	fmt.Printf("  Reason:     %s\n", reason)
 
-	// Confirmation prompt
-	if !flags.force {
-		fmt.Printf("\nThis will rewrite submodule + parent history. This cannot be undone. Proceed? [y/N] ")
-		var answer string
-		fmt.Scanln(&answer)
-		if answer != "y" && answer != "Y" {
-			fmt.Println("Aborted.")
-			os.Chdir(parentDir)
-			return 0
-		}
+	// Confirmation prompt (skipped with --yes)
+	if !confirmOrAbort(flags, "This will rewrite submodule + parent history. This cannot be undone. Proceed?") {
+		fmt.Println("Aborted.")
+		os.Chdir(parentDir)
+		return 0
 	}
 
 	if flags.dryRun {

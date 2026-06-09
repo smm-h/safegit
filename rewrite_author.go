@@ -118,8 +118,8 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 		return 0
 	}
 
-	// Confirmation prompt (skipped with --force)
-	if !flags.force {
+	// Confirmation prompt (skipped with --yes)
+	{
 		countArgs := append([]string{"rev-list", "--topo-order", "--reverse"}, refGlobs...)
 		out, _, err := git.Run(ctx, countArgs...)
 		if err != nil {
@@ -127,10 +127,7 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 		}
 		total := len(splitNonEmpty(out))
 
-		fmt.Printf("About to rewrite %d commits. This cannot be undone. Proceed? [y/N] ", total)
-		var answer string
-		fmt.Scanln(&answer)
-		if answer != "y" && answer != "Y" {
+		if !confirmOrAbort(flags, "About to rewrite %d commits. This cannot be undone. Proceed?", total) {
 			fmt.Println("Aborted.")
 			return 0
 		}
@@ -209,15 +206,10 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 		},
 	})
 
-	// Push confirmation (skipped with --force)
-	if push && !flags.force {
-		fmt.Printf("Force-push ALL branches and tags to origin? [y/N] ")
-		var answer string
-		fmt.Scanln(&answer)
-		if answer != "y" && answer != "Y" {
-			fmt.Println("Push skipped.")
-			push = false
-		}
+	// Push confirmation (skipped with --yes)
+	if push && !confirmOrAbort(flags, "Force-push ALL branches and tags to origin?") {
+		fmt.Println("Push skipped.")
+		push = false
 	}
 
 	// Push if requested
