@@ -241,10 +241,15 @@ func main() {
 	},
 		strictcli.WithFlags(
 			strictcli.StringFlag("pattern", "regex pattern to search for"),
-			strictcli.StringFlag("replace", "replacement string"),
 			strictcli.StringFlag("reason", "audit trail explaining why the scrub is needed"),
 			strictcli.StringFlag("scope", "glob pattern limiting which file paths are searched (e.g. '*.env', 'config/**')", strictcli.Default(nil)),
 		),
+		strictcli.WithMutex(strictcli.MutexGroup{
+			Flags: []strictcli.Flag{
+				strictcli.StringFlag("replace", "replacement string", strictcli.Default(nil)),
+				strictcli.BoolFlag("mangle", "replace matches with random printable ASCII of same length"),
+			},
+		}),
 		strictcli.WithMutex(strictcli.MutexGroup{
 			Flags: []strictcli.Flag{
 				strictcli.StringFlag("from", "first commit to include in the rewrite", strictcli.Default(nil)),

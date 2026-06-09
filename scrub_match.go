@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	crypto_rand "crypto/rand"
 	"fmt"
 	"os"
 	"path"
@@ -24,7 +25,13 @@ func runScrubMatch(flags globalFlags, kwargs map[string]interface{}) int {
 
 	// Flag extraction
 	pattern := kwargs["pattern"].(string)
-	replace := kwargs["replace"].(string)
+	var replace string
+	var mangleMode bool
+	if kwargs["replace"] != nil {
+		replace = kwargs["replace"].(string)
+	} else {
+		mangleMode = true
+	}
 	reason := kwargs["reason"].(string)
 
 	var scope *string
@@ -101,7 +108,7 @@ func runScrubMatch(flags globalFlags, kwargs map[string]interface{}) int {
 	}
 
 	// Execution mode
-	return scrubMatchExecute(ctx, flags, cmd, compiledPattern, replace, reason, fromSHA, entireHistory, scope, gitDir, sgDir)
+	return scrubMatchExecute(ctx, flags, cmd, compiledPattern, replace, mangleMode, reason, fromSHA, entireHistory, scope, gitDir, sgDir)
 }
 
 // scrubMatchDryRun scans all objects and non-object files, prints categorized
@@ -331,6 +338,7 @@ func scrubMatchExecute(
 	cmd string,
 	compiledPattern *regexp.Regexp,
 	replace string,
+	mangleMode bool,
 	reason string,
 	fromSHA string,
 	entireHistory bool,
@@ -538,7 +546,12 @@ func scrubMatchExecute(
 			if isBinaryContent(content) {
 				continue
 			}
-			modified := compiledPattern.ReplaceAll(content, []byte(replace))
+			var modified []byte
+			if mangleMode {
+				modified = compiledPattern.ReplaceAllFunc(content, mangleBytes)
+			} else {
+				modified = compiledPattern.ReplaceAll(content, []byte(replace))
+			}
 			if bytes.Equal(content, modified) {
 				continue
 			}
@@ -586,7 +599,14 @@ func scrubMatchExecute(
 			}
 
 			if compiledPattern.Match([]byte(info.Message)) {
-				newMessage := compiledPattern.ReplaceAllString(info.Message, replace)
+				var newMessage string
+				if mangleMode {
+					newMessage = compiledPattern.ReplaceAllStringFunc(info.Message, func(s string) string {
+						return string(mangleBytes([]byte(s)))
+					})
+				} else {
+					newMessage = compiledPattern.ReplaceAllString(info.Message, replace)
+				}
 				if newMessage != info.Message {
 					xform.Message = newMessage
 					subMessagesModified++
@@ -646,7 +666,12 @@ func scrubMatchExecute(
 		if isBinaryContent(content) {
 			continue
 		}
-		modified := compiledPattern.ReplaceAll(content, []byte(replace))
+		var modified []byte
+		if mangleMode {
+			modified = compiledPattern.ReplaceAllFunc(content, mangleBytes)
+		} else {
+			modified = compiledPattern.ReplaceAll(content, []byte(replace))
+		}
 		if bytes.Equal(content, modified) {
 			continue
 		}
@@ -696,7 +721,14 @@ func scrubMatchExecute(
 		}
 
 		if compiledPattern.Match([]byte(info.Message)) {
-			newMessage := compiledPattern.ReplaceAllString(info.Message, replace)
+			var newMessage string
+			if mangleMode {
+				newMessage = compiledPattern.ReplaceAllStringFunc(info.Message, func(s string) string {
+					return string(mangleBytes([]byte(s)))
+				})
+			} else {
+				newMessage = compiledPattern.ReplaceAllString(info.Message, replace)
+			}
 			if newMessage != info.Message {
 				xform.Message = newMessage
 				messagesModified++
@@ -723,7 +755,7 @@ func scrubMatchExecute(
 			die(flags, cmd, 1, fmt.Sprintf("submodule %s: updating refs: %v", sr.sub.RelativePath, err))
 		}
 
-		subTagsRewritten := rewriteTagAnnotations(ctx, flags, cmd, compiledPattern, replaceBytes, sr.shaMap)
+		subTagsRewritten := rewriteTagAnnotations(ctx, flags, cmd, compiledPattern, replaceBytes, mangleMode, sr.shaMap)
 		if subTagsRewritten > 0 && flags.verbose {
 			fmt.Fprintf(os.Stderr, "  [%s] %d tag annotations rewritten\n", sr.sub.RelativePath, subTagsRewritten)
 		}
@@ -738,19 +770,24 @@ func scrubMatchExecute(
 			subRef = "HEAD (detached)"
 		}
 		subNewHead, _ := git.RevParse(ctx, "HEAD")
+		subOplogExtra := map[string]interface{}{
+			"ref":              subRef,
+			"pattern":          compiledPattern.String(),
+			"reason":           reason,
+			"sha":              subNewHead,
+			"rewritten":        sr.rewrittenCount,
+			"blobsReplaced":    len(sr.blobMap),
+			"messagesModified": sr.messagesModified,
+			"parentScrub":      true,
+		}
+		if mangleMode {
+			subOplogExtra["mode"] = "mangle"
+		} else {
+			subOplogExtra["replace"] = replace
+		}
 		_ = oplog.Append(sr.sub.SafegitDir, oplog.Entry{
-			Op: "scrub-match",
-			Extra: map[string]interface{}{
-				"ref":              subRef,
-				"pattern":          compiledPattern.String(),
-				"replace":          replace,
-				"reason":           reason,
-				"sha":              subNewHead,
-				"rewritten":        sr.rewrittenCount,
-				"blobsReplaced":    len(sr.blobMap),
-				"messagesModified": sr.messagesModified,
-				"parentScrub":      true,
-			},
+			Op:    "scrub-match",
+			Extra: subOplogExtra,
 		})
 	}
 
@@ -766,7 +803,7 @@ func scrubMatchExecute(
 	}
 
 	// Tag annotation rewriting (second pass for annotation text)
-	tagsRewritten := rewriteTagAnnotations(ctx, flags, cmd, compiledPattern, replaceBytes, shaMap)
+	tagsRewritten := rewriteTagAnnotations(ctx, flags, cmd, compiledPattern, replaceBytes, mangleMode, shaMap)
 
 	// Sync main index and working tree to match rewritten HEAD
 	if err := git.SyncMainIndexWithWorktree(ctx, "HEAD"); err != nil {
@@ -786,21 +823,26 @@ func scrubMatchExecute(
 	}
 
 	// Oplog entry for parent
+	parentOplogExtra := map[string]interface{}{
+		"ref":              ref,
+		"pattern":          compiledPattern.String(),
+		"reason":           reason,
+		"oldHead":          oldHeadSHA,
+		"sha":              newHeadSHA,
+		"rewritten":        rewrittenCount,
+		"blobsReplaced":    len(blobMap),
+		"messagesModified": messagesModified,
+		"tagsRewritten":    tagsRewritten,
+		"submodules":       len(subScrubResults),
+	}
+	if mangleMode {
+		parentOplogExtra["mode"] = "mangle"
+	} else {
+		parentOplogExtra["replace"] = replace
+	}
 	_ = oplog.Append(sgDir, oplog.Entry{
-		Op: "scrub-match",
-		Extra: map[string]interface{}{
-			"ref":              ref,
-			"pattern":          compiledPattern.String(),
-			"replace":          replace,
-			"reason":           reason,
-			"oldHead":          oldHeadSHA,
-			"sha":              newHeadSHA,
-			"rewritten":        rewrittenCount,
-			"blobsReplaced":    len(blobMap),
-			"messagesModified": messagesModified,
-			"tagsRewritten":    tagsRewritten,
-			"submodules":       len(subScrubResults),
-		},
+		Op:    "scrub-match",
+		Extra: parentOplogExtra,
 	})
 
 	// Surgical post-rewrite cleanup for parent
@@ -988,7 +1030,7 @@ func buildScopedBlobSetWithDir(ctx context.Context, scope, gitDir, workTree stri
 // rewriteTagAnnotations does a second pass over annotated tags after updateRefs,
 // checking each tag's annotation body for the pattern and rewriting if matched.
 // Returns the count of tags whose annotations were rewritten.
-func rewriteTagAnnotations(ctx context.Context, flags globalFlags, cmd string, compiledPattern *regexp.Regexp, replaceBytes []byte, shaMap map[string]string) int {
+func rewriteTagAnnotations(ctx context.Context, flags globalFlags, cmd string, compiledPattern *regexp.Regexp, replaceBytes []byte, mangleMode bool, shaMap map[string]string) int {
 	out, _, err := git.Run(ctx, "for-each-ref", "--format=%(refname) %(objecttype) %(objectname)", "refs/tags/")
 	if err != nil {
 		if flags.verbose {
@@ -1033,7 +1075,14 @@ func rewriteTagAnnotations(ctx context.Context, flags globalFlags, cmd string, c
 			continue
 		}
 
-		newBody := compiledPattern.ReplaceAllString(body, string(replaceBytes))
+		var newBody string
+		if mangleMode {
+			newBody = compiledPattern.ReplaceAllStringFunc(body, func(s string) string {
+				return string(mangleBytes([]byte(s)))
+			})
+		} else {
+			newBody = compiledPattern.ReplaceAllString(body, string(replaceBytes))
+		}
 		if newBody == body {
 			continue
 		}
@@ -1184,5 +1233,25 @@ func buildScopedBlobSet(ctx context.Context, scope string) (map[string]bool, err
 		}
 	}
 	return result, nil
+}
+
+// mangleBytes replaces each non-whitespace byte in match with a random
+// printable ASCII character (0x21-0x7E). Whitespace characters (space, tab,
+// newline, carriage return) are preserved to maintain formatting structure.
+// Uses crypto/rand for security.
+func mangleBytes(match []byte) []byte {
+	const printable = "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+	result := make([]byte, len(match))
+	for i, b := range match {
+		switch b {
+		case ' ', '\t', '\n', '\r':
+			result[i] = b
+		default:
+			idx := make([]byte, 1)
+			crypto_rand.Read(idx)
+			result[i] = printable[int(idx[0])%len(printable)]
+		}
+	}
+	return result
 }
 
