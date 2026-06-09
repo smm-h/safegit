@@ -5,3 +5,4 @@
 {"commits":["4704fe8cd448196875be26a33e5049950b5c93bc","3a81c5091892f36026d489116736feb0f3392a7c","994248248edff1a413c14220393d8f4e05f3281a"],"user_facing":false}
 {"commits":["810a5265f58e4a2bfe4e92ba7e3688446aa87587"],"user_facing":false}
 {"commits":["b4c82e2fdfdaa26a168a0057aab523da380b7068"],"user_facing":true,"description":"**New `--yes`/`-y` global flag.** Auto-confirms interactive prompts for scrub, rewrite-author, and doctor commands.","type":"feature"}
+{"commits":["41ea905314245011c3e5eebd0df8661db90d514b","952d1dcf61ebb5d0b5cebda5fbcebb8da12e503e"],"user_facing":false}
