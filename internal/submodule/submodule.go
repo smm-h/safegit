@@ -205,7 +205,7 @@ func DetectParent(ctx context.Context) (parentGitDir string, submodulePath strin
 		return "", "", false
 	}
 
-	parentWorkTree := strings.TrimSpace(out)
+	parentWorkTree := cleanPath(strings.TrimSpace(out))
 
 	pgd, err := runGit(ctx, parentWorkTree, "rev-parse", "--git-dir")
 	if err != nil {
@@ -222,6 +222,7 @@ func DetectParent(ctx context.Context) (parentGitDir string, submodulePath strin
 	if err != nil {
 		return "", "", false
 	}
+	cwd = cleanPath(cwd)
 	rel, err := filepath.Rel(parentWorkTree, cwd)
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return "", "", false
