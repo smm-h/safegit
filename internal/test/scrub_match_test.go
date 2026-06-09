@@ -23,7 +23,7 @@ func TestScrubMatchBlobReplace(t *testing.T) {
 	commitFileEnv(t, dir, scrubMatchEnv, "file2.txt", "updated SECRET_ABC v2\n", "update file2")
 
 	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
-		"--yes", "scrub", "match",
+		"--yes", "--force", "scrub", "match",
 		"--pattern", "SECRET_ABC",
 		"--replace", "REDACTED",
 		"--reason", "test blob replace",
@@ -59,7 +59,7 @@ func TestScrubMatchCommitMessage(t *testing.T) {
 	commitFileEnv(t, dir, scrubMatchEnv, "data.txt", "some SECRET_ABC data\n", "added SECRET_ABC key")
 
 	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
-		"--yes", "scrub", "match",
+		"--yes", "--force", "scrub", "match",
 		"--pattern", "SECRET_ABC",
 		"--replace", "REDACTED",
 		"--reason", "test commit message",
@@ -97,7 +97,7 @@ func TestScrubMatchTagAnnotation(t *testing.T) {
 	}
 
 	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
-		"--yes", "scrub", "match",
+		"--yes", "--force", "scrub", "match",
 		"--pattern", "SECRET_ABC",
 		"--replace", "REDACTED",
 		"--reason", "test tag annotation",
@@ -161,7 +161,7 @@ func TestScrubMatchBinarySkipped(t *testing.T) {
 	blobSHABefore := strings.TrimSpace(string(blobSHAOut))
 
 	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
-		"--yes", "scrub", "match",
+		"--yes", "--force", "scrub", "match",
 		"--pattern", "SECRET_ABC",
 		"--replace", "REDACTED",
 		"--reason", "test binary skip",
@@ -228,7 +228,7 @@ func TestScrubMatchUnreachablePruned(t *testing.T) {
 	}
 
 	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
-		"--yes", "scrub", "match",
+		"--yes", "--force", "scrub", "match",
 		"--pattern", "SECRET_ABC",
 		"--replace", "REDACTED",
 		"--reason", "test unreachable prune",
@@ -263,7 +263,7 @@ func TestScrubMatchSurgicalReflog(t *testing.T) {
 	}
 
 	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
-		"--yes", "scrub", "match",
+		"--yes", "--force", "scrub", "match",
 		"--pattern", "SECRET_ABC",
 		"--replace", "REDACTED",
 		"--reason", "test surgical reflog",
@@ -336,7 +336,7 @@ func TestScrubMatchStashWarning(t *testing.T) {
 	}
 
 	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
-		"--yes", "scrub", "match",
+		"--yes", "--force", "scrub", "match",
 		"--pattern", "SECRET_ABC",
 		"--replace", "REDACTED",
 		"--reason", "test stash warning",
@@ -383,7 +383,7 @@ func TestScrubMatchEntireHistory(t *testing.T) {
 	allSHAsBefore := revListReverse(t, dir)
 
 	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
-		"--yes", "scrub", "match",
+		"--yes", "--force", "scrub", "match",
 		"--pattern", "SECRET_ABC",
 		"--replace", "REDACTED",
 		"--reason", "test entire history",
@@ -431,7 +431,7 @@ func TestScrubMatchFromScope(t *testing.T) {
 	fromSHA := allSHAs[3]
 
 	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
-		"--yes", "scrub", "match",
+		"--yes", "--force", "scrub", "match",
 		"--pattern", "SECRET_ABC",
 		"--replace", "REDACTED",
 		"--reason", "test from scope",
@@ -482,7 +482,7 @@ func TestScrubMatchIdempotent(t *testing.T) {
 
 	// First run
 	stdout1, stderr1, code1 := runSafegitEnv(t, dir, scrubMatchEnv,
-		"--yes", "scrub", "match",
+		"--yes", "--force", "scrub", "match",
 		"--pattern", "SECRET_ABC",
 		"--replace", "REDACTED",
 		"--reason", "idempotent test 1",
@@ -496,7 +496,7 @@ func TestScrubMatchIdempotent(t *testing.T) {
 
 	// Second run
 	stdout2, stderr2, code2 := runSafegitEnv(t, dir, scrubMatchEnv,
-		"--yes", "scrub", "match",
+		"--yes", "--force", "scrub", "match",
 		"--pattern", "SECRET_ABC",
 		"--replace", "REDACTED",
 		"--reason", "idempotent test 2",
@@ -553,7 +553,7 @@ func TestScrubMatchDryRun(t *testing.T) {
 	headBefore := revParseHEAD(t, dir)
 
 	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
-		"--yes", "--dry-run", "scrub", "match",
+		"--yes", "--force", "--dry-run", "scrub", "match",
 		"--pattern", "SECRET_ABC",
 		"--replace", "REDACTED",
 		"--reason", "test dry run",
@@ -584,7 +584,7 @@ func TestScrubMatchNoMatches(t *testing.T) {
 	commitFileEnv(t, dir, scrubMatchEnv, "data.txt", "normal content\n", "add data")
 
 	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
-		"--yes", "scrub", "match",
+		"--yes", "--force", "scrub", "match",
 		"--pattern", "NONEXISTENT_PATTERN_XYZ",
 		"--replace", "REDACTED",
 		"--reason", "test no matches",
@@ -609,7 +609,7 @@ func TestScrubMatchCoordinationGuard(t *testing.T) {
 
 	// Run scrub match and check that it succeeds (lock is acquired and released)
 	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
-		"--yes", "scrub", "match",
+		"--yes", "--force", "scrub", "match",
 		"--pattern", "SECRET_ABC",
 		"--replace", "REDACTED",
 		"--reason", "test coordination",
@@ -632,7 +632,7 @@ func TestScrubMatchCoordinationGuard(t *testing.T) {
 
 	// Verify we can run a second scrub (lock was released properly)
 	_, stderr2, code2 := runSafegitEnv(t, dir, scrubMatchEnv,
-		"--yes", "scrub", "match",
+		"--yes", "--force", "scrub", "match",
 		"--pattern", "SECRET_ABC",
 		"--replace", "REDACTED",
 		"--reason", "test coordination 2",
@@ -654,7 +654,7 @@ func TestScrubMatchScope(t *testing.T) {
 	commitFileEnv(t, dir, scrubMatchEnv, "config/secret.env", "KEY=SECRET_ABC\n", "add config/secret.env")
 
 	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
-		"--yes", "scrub", "match",
+		"--yes", "--force", "scrub", "match",
 		"--pattern", "SECRET_ABC",
 		"--replace", "REDACTED",
 		"--reason", "test scope",
