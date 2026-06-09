@@ -79,7 +79,6 @@ func runCommit(flags globalFlags, messages []string, messageFile string, branch 
 		Branch:     branch,
 		Trailers:   trailers,
 		AllowEmpty: allowEmpty,
-		Force:      flags.force,
 		DryRun:     flags.dryRun,
 	})
 	if err != nil {
@@ -150,7 +149,6 @@ func runCommitAmend(flags globalFlags, gitDir string, messages []string, branch 
 			FileSpecs: fileSpecs,
 			Branch:    branch,
 			Trailers:  trailers,
-			Force:     flags.force,
 			DryRun:    flags.dryRun,
 		})
 		if err != nil {

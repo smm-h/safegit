@@ -23,7 +23,6 @@ type AmendRequest struct {
 	FileSpecs []FileSpec // files to stage into the amended commit
 	Branch    string     // target branch ref; empty = HEAD
 	Trailers  []string   // user-provided trailers ("Key: Value" format)
-	Force     bool       // skip gitignore check
 	DryRun    bool
 }
 
@@ -79,7 +78,7 @@ func (p *Pipeline) Amend(ctx context.Context, req AmendRequest) (*AmendResult, e
 		filePaths[i] = fs.Path
 	}
 
-	absFiles, err := p.resolveFiles(ctx, repoRoot, filePaths, req.Force)
+	absFiles, err := p.resolveFiles(ctx, repoRoot, filePaths)
 	if err != nil {
 		return nil, err
 	}

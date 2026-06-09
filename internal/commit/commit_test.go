@@ -718,8 +718,8 @@ func TestPreCommitHook(t *testing.T) {
 		}
 	})
 
-	t.Run("hook skipped with Force", func(t *testing.T) {
-		// Failing hook should be skipped when Force is set
+	t.Run("hook always runs", func(t *testing.T) {
+		// Failing hook must always block the commit (no bypass)
 		if err := os.WriteFile(hookPath, []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -727,15 +727,16 @@ func TestPreCommitHook(t *testing.T) {
 			t.Fatal(err)
 		}
 		p := newPipeline(sgDir)
-		result, err := p.Execute(context.Background(), CommitRequest{
-			Message: "force bypasses hook",
+		_, err := p.Execute(context.Background(), CommitRequest{
+			Message: "hook should block",
 			Files:   []string{"force.txt"},
-			Force:   true,
 		})
-		if err != nil {
-			t.Fatalf("Execute with Force: %v", err)
+		if err == nil {
+			t.Fatal("expected error from failing pre-commit hook, got nil")
 		}
-		treeHasFile(t, result.SHA, "force.txt")
+		if !strings.Contains(err.Error(), "pre-commit hook failed") {
+			t.Errorf("unexpected error message: %v", err)
+		}
 	})
 
 	t.Run("hook skipped with DryRun", func(t *testing.T) {

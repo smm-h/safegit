@@ -62,7 +62,6 @@ type CommitRequest struct {
 	Branch     string     // empty = current branch
 	Trailers   []string   // user-provided trailers ("Key: Value" format)
 	AllowEmpty bool
-	Force      bool // skip gitignore check
 	DryRun     bool
 }
 
@@ -123,7 +122,7 @@ func (p *Pipeline) Execute(ctx context.Context, req CommitRequest) (*CommitResul
 	}
 
 	// Validate and normalize file paths before entering the retry loop
-	absFiles, err := p.resolveFiles(ctx, repoRoot, filePaths, req.Force)
+	absFiles, err := p.resolveFiles(ctx, repoRoot, filePaths)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +215,7 @@ func (p *Pipeline) tryCommit(
 
 	// Step 2.5: Run pre-commit hook (if present) against the tmp index.
 	// Skipped for --dry-run and --force (matching git's --no-verify).
-	if !req.DryRun && !req.Force {
+	if !req.DryRun {
 		gitDir, err := git.GitDir(ctx)
 		if err != nil {
 			return nil, false, fmt.Errorf("resolving git dir: %w", err)
@@ -339,7 +338,7 @@ func (p *Pipeline) tryCommit(
 // resolveFiles validates and returns absolute paths for all requested files.
 // Relative paths are resolved against the current working directory (not the
 // repo root), matching how users specify files from their shell.
-func (p *Pipeline) resolveFiles(ctx context.Context, repoRoot string, files []string, force bool) ([]string, error) {
+func (p *Pipeline) resolveFiles(ctx context.Context, repoRoot string, files []string) ([]string, error) {
 	abs := make([]string, 0, len(files))
 	for _, f := range files {
 		var absPath string
@@ -383,11 +382,11 @@ func (p *Pipeline) resolveFiles(ctx context.Context, repoRoot string, files []st
 			if !tracked {
 				return nil, fmt.Errorf("file %s does not exist and is not tracked by git", f)
 			}
-		} else if !force {
+		} else {
 			// Check gitignore
 			ignored, _ := git.IsIgnored(ctx, rel)
 			if ignored {
-				return nil, fmt.Errorf("file %s is gitignored; use --force to override", f)
+				return nil, fmt.Errorf("file %s is gitignored", f)
 			}
 		}
 
