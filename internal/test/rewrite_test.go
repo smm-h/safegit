@@ -673,7 +673,7 @@ func TestRewriteAuthorFlagEquals(t *testing.T) {
 	dir := newRepo(t)
 	makeCommits(t, dir, "oldname", "old@test.com", 5, "eq")
 
-	// --force skips the interactive confirmation prompt (runSafegit has no stdin)
+	// --yes skips the interactive confirmation prompt (runSafegit has no stdin)
 	stdout, stderr, code := runSafegit(t, dir, "--yes", "rewrite-author", "--old-name=oldname", "--new-name=newname")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
@@ -692,7 +692,7 @@ func TestRewriteAuthorEmailOnly(t *testing.T) {
 	dir := newRepo(t)
 	makeCommits(t, dir, "alice", "old@test.com", 5, "email")
 
-	// --force skips the interactive confirmation prompt (runSafegit has no stdin)
+	// --yes skips the interactive confirmation prompt (runSafegit has no stdin)
 	stdout, stderr, code := runSafegit(t, dir, "--yes", "rewrite-author", "--old-email=old@test.com", "--new-email=new@test.com")
 	if code != 0 {
 		t.Fatalf("rewrite-author failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
@@ -753,7 +753,7 @@ func TestRewriteAuthorANDMatching(t *testing.T) {
 	}
 }
 
-func TestRewriteAuthorForceSkipsDirtyTree(t *testing.T) {
+func TestRewriteAuthorDirtyTreeAlwaysRejected(t *testing.T) {
 	dir := newRepo(t)
 	makeCommits(t, dir, "oldname", "old@test.com", 3, "dirty")
 
@@ -763,30 +763,13 @@ func TestRewriteAuthorForceSkipsDirtyTree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Without --force: should fail due to dirty tree
-	_, stderr, code := runSafegit(t, dir, "rewrite-author", "--old-name=oldname", "--new-name=newname")
+	// Even with --yes, should fail due to dirty tree (dirty check is unconditional)
+	_, stderr, code := runSafegit(t, dir, "--yes", "rewrite-author", "--old-name=oldname", "--new-name=newname")
 	if code == 0 {
-		t.Error("rewrite-author without --force should fail on dirty tree, but exited 0")
+		t.Error("rewrite-author with --yes should still fail on dirty tree, but exited 0")
 	}
-	if !strings.Contains(stderr, "dirty") {
+	if !strings.Contains(stderr, "working tree is dirty") {
 		t.Errorf("expected dirty-tree error message, got stderr: %s", stderr)
-	}
-
-	// Remove the dirty file so the post-rewrite verification also passes
-	if err := os.Remove(dirtyPath); err != nil {
-		t.Fatalf("removing dirty file: %v", err)
-	}
-
-	// With --force: should succeed (force skips pre-rewrite dirty check;
-	// tree is now clean so post-rewrite verification also passes)
-	stdout, stderr, code := runSafegit(t, dir, "--yes", "rewrite-author", "--old-name=oldname", "--new-name=newname")
-	if code != 0 {
-		t.Fatalf("rewrite-author with --force failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
-	}
-
-	names := getAuthorNames(t, dir)
-	if containsName(names, "oldname") {
-		t.Errorf("author name 'oldname' still present after rewrite with --force: %v", names)
 	}
 }
 

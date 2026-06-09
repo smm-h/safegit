@@ -321,7 +321,7 @@ func getRemoteSHA(ctx context.Context, remote, ref string) string {
 func buildGitPushArgs(remote string, refspecs []string, force bool) []string {
 	args := []string{"push"}
 	if force {
-		args = append(args, "--force")
+		args = append(args, "--force-with-lease")
 	}
 	args = append(args, remote)
 	args = append(args, refspecs...)

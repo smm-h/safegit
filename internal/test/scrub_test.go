@@ -108,13 +108,11 @@ func TestScrubFlatFile(t *testing.T) {
 	// shas[0] = initial (seed.txt), shas[1..3] = secret.txt commits
 	initialSHA := shas[0]
 
-	// Write replacement content on disk
-	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("REDACTED\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Write replacement content and commit so tree is clean for scrub
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "REDACTED\n", "commit replacement")
 
 	// Scrub from the initial commit (exclusive), so all 3 secret.txt commits are rewritten
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", initialSHA, "--reason", "test flat scrub", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test flat scrub", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -156,12 +154,10 @@ func TestScrubNestedPath(t *testing.T) {
 	shas := revListReverse(t, dir)
 	initialSHA := shas[0]
 
-	// Write replacement
-	if err := os.WriteFile(filepath.Join(dir, "a", "b", "secret.txt"), []byte("SCRUBBED\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Write replacement and commit so tree is clean for scrub
+	commitFileEnv(t, dir, scrubEnv, "a/b/secret.txt", "SCRUBBED\n", "commit replacement")
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", initialSHA, "--reason", "test nested scrub", "a/b/secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test nested scrub", "a/b/secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -202,12 +198,22 @@ func TestScrubRemoveFile(t *testing.T) {
 	shas := revListReverse(t, dir)
 	initialSHA := shas[0]
 
-	// Delete secret.txt from disk to trigger removal mode
+	// Delete secret.txt from disk and commit the deletion so tree is clean
 	if err := os.Remove(filepath.Join(dir, "secret.txt")); err != nil {
 		t.Fatal(err)
 	}
+	gitRm := exec.Command("git", "rm", "secret.txt")
+	gitRm.Dir = dir
+	if out, err := gitRm.CombinedOutput(); err != nil {
+		t.Fatalf("git rm: %v\n%s", err, out)
+	}
+	gitCommit := exec.Command("git", "commit", "-m", "remove secret.txt")
+	gitCommit.Dir = dir
+	if out, err := gitCommit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", initialSHA, "--reason", "test removal", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test removal", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -275,30 +281,34 @@ func TestScrubMergeCommit(t *testing.T) {
 		t.Fatalf("expected merge to have 2 parents, got %d", len(preParents))
 	}
 
-	// Write replacement on disk
-	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("REDACTED\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Write replacement and commit so tree is clean for scrub
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "REDACTED\n", "commit replacement")
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", initialSHA, "--reason", "test merge scrub", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test merge scrub", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
 
-	// Verify the new HEAD (merge commit) still has 2 parents
-	newMergeSHA := revParseHEAD(t, dir)
-	newParents := gitParents(t, dir, newMergeSHA)
-	if len(newParents) != 2 {
-		t.Errorf("merge commit after scrub has %d parents, want 2", len(newParents))
+	// HEAD is the replacement commit (1 parent). The rewritten merge commit
+	// is HEAD~1. Verify the merge structure is preserved.
+	headSHA := revParseHEAD(t, dir)
+	headParents := gitParents(t, dir, headSHA)
+	if len(headParents) != 1 {
+		t.Fatalf("HEAD (replacement commit) should have 1 parent, got %d", len(headParents))
+	}
+	rewrittenMergeSHA := headParents[0]
+	mergeParents := gitParents(t, dir, rewrittenMergeSHA)
+	if len(mergeParents) != 2 {
+		t.Errorf("rewritten merge commit after scrub has %d parents, want 2", len(mergeParents))
 	}
 
-	// Verify secret.txt is REDACTED in the merge commit
-	content, ok := gitShow(t, dir, newMergeSHA, "secret.txt")
+	// Verify secret.txt is REDACTED in HEAD
+	content, ok := gitShow(t, dir, headSHA, "secret.txt")
 	if !ok {
-		t.Error("secret.txt not found in merge commit after scrub")
+		t.Error("secret.txt not found in HEAD after scrub")
 	}
 	if ok && content != "REDACTED\n" {
-		t.Errorf("merge commit secret.txt = %q, want %q", content, "REDACTED\n")
+		t.Errorf("HEAD secret.txt = %q, want %q", content, "REDACTED\n")
 	}
 }
 
@@ -321,12 +331,10 @@ func TestScrubAnnotatedTag(t *testing.T) {
 	shas := revListReverse(t, dir)
 	initialSHA := shas[0]
 
-	// Write replacement
-	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("REDACTED\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Write replacement and commit so tree is clean for scrub
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "REDACTED\n", "commit replacement")
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", initialSHA, "--reason", "test tag scrub", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test tag scrub", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -382,12 +390,10 @@ func TestScrubFromScope(t *testing.T) {
 	// (git range is exclusive of the left side)
 	fromSHA := allSHAs[2] // 2nd added commit (3rd overall including initial)
 
-	// Write replacement
-	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("SCRUBBED\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Write replacement and commit so tree is clean for scrub
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "SCRUBBED\n", "commit replacement")
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", fromSHA, "--reason", "test scope", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", fromSHA, "--reason", "test scope", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -432,11 +438,10 @@ func TestScrubReasonInOplog(t *testing.T) {
 	shas := revListReverse(t, dir)
 	initialSHA := shas[0]
 
-	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("REDACTED\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Write replacement and commit so tree is clean for scrub
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "REDACTED\n", "commit replacement")
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", initialSHA, "--reason", "sensitive data leaked", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "sensitive data leaked", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -563,13 +568,13 @@ func TestScrubDryRun(t *testing.T) {
 
 	shas := revListReverse(t, dir)
 	initialSHA := shas[0]
+
+	// Write replacement and commit so tree is clean for scrub
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "REDACTED\n", "commit replacement")
+
 	headBefore := revParseHEAD(t, dir)
 
-	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("REDACTED\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	stdout, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "--dry-run", "scrub", "file", "--from", initialSHA, "--reason", "dry run test", "secret.txt")
+	stdout, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--dry-run", "scrub", "file", "--from", initialSHA, "--reason", "dry run test", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub --dry-run failed (code %d): %s", code, stderr)
 	}
@@ -596,11 +601,10 @@ func TestScrubUndoRejected(t *testing.T) {
 	shas := revListReverse(t, dir)
 	initialSHA := shas[0]
 
-	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("REDACTED\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Write replacement and commit so tree is clean for scrub
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "REDACTED\n", "commit replacement")
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", initialSHA, "--reason", "test undo reject", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test undo reject", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -667,12 +671,22 @@ func TestScrubRootCommitInclusive(t *testing.T) {
 		}
 	}
 
-	// Write replacement
+	// Write replacement and commit so tree is clean for scrub
 	if err := os.WriteFile(secretPath, []byte("SCRUBBED\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	for _, args := range [][]string{
+		{"git", "add", "secret.txt"},
+		{"git", "commit", "-m", "commit replacement"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v failed: %v\n%s", args, err, out)
+		}
+	}
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", rootSHA, "--reason", "test root inclusive", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", rootSHA, "--reason", "test root inclusive", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -700,50 +714,57 @@ func TestScrubRootCommitInclusive(t *testing.T) {
 	}
 }
 
-// TestScrubFromHead verifies that --from HEAD rewrites only the HEAD commit.
+// TestScrubFromHead verifies that --from on a specific commit only rewrites
+// that commit and its descendants, not earlier commits.
 func TestScrubFromHead(t *testing.T) {
 	dir := newRepo(t)
 
 	commitFileEnv(t, dir, scrubEnv, "secret.txt", "sensitive data\n", "add secret")
-	parentSHA := revParseHEAD(t, dir)
+	firstSecretSHA := revParseHEAD(t, dir)
 
 	commitFileEnv(t, dir, scrubEnv, "secret.txt", "more sensitive\n", "update secret")
-	headBefore := revParseHEAD(t, dir)
+	secondSecretSHA := revParseHEAD(t, dir)
 
-	// Write replacement
-	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("SCRUBBED\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Write replacement and commit so tree is clean for scrub
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "SCRUBBED\n", "commit replacement")
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", "HEAD", "--reason", "test from HEAD", "secret.txt")
+	// Use --from on the second secret commit so only it and the replacement
+	// commit are in the rewrite range. The first secret commit is outside.
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", secondSecretSHA, "--reason", "test from specific commit", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
 
 	headAfter := revParseHEAD(t, dir)
 
-	// HEAD should have changed (rewritten)
-	if headAfter == headBefore {
-		t.Error("HEAD was not rewritten despite --from HEAD")
-	}
-
-	// The parent of the new HEAD should be the same as the old parent
-	// (only HEAD was in the rewrite range)
 	newSHAs := revListReverse(t, dir)
-	// newSHAs should have: seed, first secret commit, rewritten HEAD
-	if len(newSHAs) < 3 {
-		t.Fatalf("expected at least 3 commits, got %d", len(newSHAs))
+	// newSHAs: seed, first secret, rewritten second secret, rewritten replacement
+	if len(newSHAs) < 4 {
+		t.Fatalf("expected at least 4 commits, got %d", len(newSHAs))
 	}
 
-	// The commit before the rewritten HEAD should be unchanged
-	if newSHAs[len(newSHAs)-2] != parentSHA {
-		t.Errorf("parent commit changed: %s -> %s (should be unchanged)", parentSHA[:12], newSHAs[len(newSHAs)-2][:12])
+	// The first secret commit should be unchanged (outside --from range)
+	if newSHAs[1] != firstSecretSHA {
+		t.Errorf("first secret commit changed: %s -> %s (should be unchanged)", firstSecretSHA[:12], newSHAs[1][:12])
 	}
 
-	// Verify scrubbed content in the new HEAD
-	content, ok := gitShow(t, dir, headAfter, "secret.txt")
+	// The second secret commit should be rewritten (inside --from range)
+	if newSHAs[2] == secondSecretSHA {
+		t.Errorf("second secret commit was NOT rewritten: SHA still %s", secondSecretSHA[:12])
+	}
+
+	// Verify scrubbed content in the rewritten second secret commit
+	content, ok := gitShow(t, dir, newSHAs[2], "secret.txt")
 	if !ok {
-		t.Error("secret.txt not found in rewritten HEAD")
+		t.Error("secret.txt not found in rewritten second secret commit")
+	} else if content != "SCRUBBED\n" {
+		t.Errorf("rewritten second secret secret.txt = %q, want %q", content, "SCRUBBED\n")
+	}
+
+	// Verify scrubbed content in HEAD
+	content, ok = gitShow(t, dir, headAfter, "secret.txt")
+	if !ok {
+		t.Error("secret.txt not found in HEAD")
 	} else if content != "SCRUBBED\n" {
 		t.Errorf("HEAD secret.txt = %q, want %q", content, "SCRUBBED\n")
 	}
@@ -791,12 +812,10 @@ func TestScrubFromMergeCommit(t *testing.T) {
 	// Add a post-merge commit
 	commitFileEnv(t, dir, scrubEnv, "secret.txt", "post-merge\n", "post-merge update")
 
-	// Write replacement
-	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("SCRUBBED\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Write replacement and commit so tree is clean for scrub
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "SCRUBBED\n", "commit replacement")
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", mergeSHA, "--reason", "test merge from", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", mergeSHA, "--reason", "test merge from", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -869,13 +888,11 @@ func TestScrubFromNonAncestor(t *testing.T) {
 		t.Fatalf("git checkout main: %v\n%s", err, out)
 	}
 
-	// Write a file to scrub (so scrub has a valid target)
-	if err := os.WriteFile(filepath.Join(dir, "main.txt"), []byte("SCRUBBED\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Write a file to scrub and commit so tree is clean
+	commitFileEnv(t, dir, scrubEnv, "main.txt", "SCRUBBED\n", "commit replacement")
 
 	// Attempt scrub with --from pointing to the feature commit (not an ancestor of main HEAD)
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", featureSHA, "--reason", "test non-ancestor", "main.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", featureSHA, "--reason", "test non-ancestor", "main.txt")
 	if code == 0 {
 		t.Fatal("scrub with non-ancestor --from should have failed, but exited 0")
 	}
@@ -884,8 +901,8 @@ func TestScrubFromNonAncestor(t *testing.T) {
 	}
 }
 
-// TestScrubCleanWorkingTree verifies that after a scrub with --force,
-// the working tree is clean (git status --porcelain returns empty).
+// TestScrubCleanWorkingTree verifies that after a scrub, the working tree
+// is clean (git status --porcelain returns empty).
 func TestScrubCleanWorkingTree(t *testing.T) {
 	dir := newRepo(t)
 
@@ -895,12 +912,10 @@ func TestScrubCleanWorkingTree(t *testing.T) {
 	shas := revListReverse(t, dir)
 	initialSHA := shas[0]
 
-	// Write replacement
-	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("SCRUBBED\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Write replacement and commit so tree is clean for scrub
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "SCRUBBED\n", "commit replacement")
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", initialSHA, "--reason", "test clean tree", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test clean tree", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -926,8 +941,8 @@ func TestScrubCleanWorkingTree(t *testing.T) {
 	}
 }
 
-// TestScrubDirtyTreeRejected verifies that scrub rejects a dirty working tree
-// unless --force is used.
+// TestScrubDirtyTreeRejected verifies that scrub always rejects a dirty
+// working tree (the check is unconditional, --force does not bypass it).
 func TestScrubDirtyTreeRejected(t *testing.T) {
 	dir := newRepo(t)
 
@@ -941,19 +956,13 @@ func TestScrubDirtyTreeRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Without --force, scrub should fail with dirty tree error
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "scrub", "file", "--from", initialSHA, "--reason", "test dirty guard", "secret.txt")
+	// Dirty tree is always rejected, even with --yes
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test dirty guard", "secret.txt")
 	if code == 0 {
-		t.Fatal("scrub without --force on dirty tree should have failed, but exited 0")
+		t.Fatal("scrub on dirty tree should have failed, but exited 0")
 	}
 	if !strings.Contains(stderr, "working tree is dirty") {
 		t.Errorf("error should contain 'working tree is dirty', got: %s", stderr)
-	}
-
-	// With --force, scrub should succeed
-	_, stderr, code = runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", initialSHA, "--reason", "test dirty guard force", "secret.txt")
-	if code != 0 {
-		t.Fatalf("scrub with --force on dirty tree failed (code %d): %s", code, stderr)
 	}
 }
 
@@ -968,13 +977,11 @@ func TestScrubIdempotent(t *testing.T) {
 	shas := revListReverse(t, dir)
 	initialSHA := shas[0]
 
-	// Write replacement
-	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("SCRUBBED\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Write replacement and commit so tree is clean for scrub
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "SCRUBBED\n", "commit replacement")
 
 	// First scrub
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", initialSHA, "--reason", "idempotent test 1", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "idempotent test 1", "secret.txt")
 	if code != 0 {
 		t.Fatalf("first scrub failed (code %d): %s", code, stderr)
 	}
@@ -985,8 +992,8 @@ func TestScrubIdempotent(t *testing.T) {
 	newSHAs := revListReverse(t, dir)
 	newInitialSHA := newSHAs[0]
 
-	// Second scrub with --force (on-disk content may differ from committed tree)
-	_, stderr, code = runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", newInitialSHA, "--reason", "idempotent test 2", "secret.txt")
+	// Second scrub (tree is already clean since scrub syncs the working tree)
+	_, stderr, code = runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", newInitialSHA, "--reason", "idempotent test 2", "secret.txt")
 	if code != 0 {
 		t.Fatalf("second scrub failed (code %d): %s", code, stderr)
 	}
@@ -1035,14 +1042,12 @@ func TestScrubMultipleBranches(t *testing.T) {
 	shas := revListReverse(t, dir)
 	initialSHA := shas[0]
 
-	// Write replacement on disk
-	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("REDACTED\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Write replacement and commit so tree is clean for scrub
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "REDACTED\n", "commit replacement")
 
 	// Scrub from the initial commit (inclusive), so all secret.txt commits are rewritten.
 	// The feature branch points to branchPointSHA which is in the rewrite range.
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", initialSHA, "--reason", "test multi-branch scrub", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test multi-branch scrub", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -1100,12 +1105,10 @@ func TestCleanupExpiresTaintedReflog(t *testing.T) {
 		preScrubSHAs[sha] = true
 	}
 
-	// Write replacement
-	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("REDACTED\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Write replacement and commit so tree is clean for scrub
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "REDACTED\n", "commit replacement")
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", initialSHA, "--reason", "test cleanup reflog", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test cleanup reflog", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}
@@ -1158,12 +1161,10 @@ func TestScrubLightweightTag(t *testing.T) {
 	shas := revListReverse(t, dir)
 	initialSHA := shas[0]
 
-	// Write replacement
-	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("SCRUBBED\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Write replacement and commit so tree is clean for scrub
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "SCRUBBED\n", "commit replacement")
 
-	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "--force", "scrub", "file", "--from", initialSHA, "--reason", "test lightweight tag", "secret.txt")
+	_, stderr, code := runSafegitEnv(t, dir, scrubEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test lightweight tag", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub failed (code %d): %s", code, stderr)
 	}

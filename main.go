@@ -112,7 +112,7 @@ func main() {
 	app.Command("push", "push with pre-hooks and retry", func(kwargs map[string]interface{}) int {
 		gf := globalsToFlags(kwargs)
 		noPrePrePush := kwargs["no_pre_pre_push"].(bool)
-		forcePush := kwargs["force_push"].(bool) || kwargs["force"].(bool)
+		forcePush := kwargs["force_push"].(bool)
 		remote := "origin"
 		if v := kwargs["remote"]; v != nil {
 			remote = v.(string)
@@ -366,15 +366,14 @@ func confirmOrAbort(flags globalFlags, format string, args ...interface{}) bool 
 	return answer == "y" || answer == "Y"
 }
 
-// requireCleanTree dies if the working tree has uncommitted changes,
-// unless --force is set.
+// requireCleanTree dies if the working tree has uncommitted changes.
 func requireCleanTree(ctx context.Context, flags globalFlags, cmd string) {
 	statusOut, _, err := git.Run(ctx, "status", "--porcelain")
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("checking working tree: %v", err))
 	}
-	if strings.TrimSpace(statusOut) != "" && !flags.force {
-		die(flags, cmd, 1, "working tree is dirty; commit changes or use --force to skip this check")
+	if strings.TrimSpace(statusOut) != "" {
+		die(flags, cmd, 1, "working tree is dirty; commit or stash changes before proceeding")
 	}
 }
 

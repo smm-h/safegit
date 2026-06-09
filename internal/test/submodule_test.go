@@ -351,13 +351,11 @@ func TestScrubFilePreservesGitlink(t *testing.T) {
 	shas := revListReverse(t, parentDir)
 	initialSHA := shas[0]
 
-	// Modify the file on disk to contain clean content (scrub replaces with on-disk content)
-	if err := os.WriteFile(filepath.Join(parentDir, "secret.txt"), []byte("clean content\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Modify the file on disk and commit so tree is clean for scrub
+	commitFileEnv(t, parentDir, submoduleEnv, "secret.txt", "clean content\n", "commit replacement")
 
 	// Run scrub file
-	_, stderr, code = runSafegitEnv(t, parentDir, submoduleEnv, "--yes", "--force", "scrub", "file", "--from", initialSHA, "--reason", "test gitlink preservation", "secret.txt")
+	_, stderr, code = runSafegitEnv(t, parentDir, submoduleEnv, "--yes", "scrub", "file", "--from", initialSHA, "--reason", "test gitlink preservation", "secret.txt")
 	if code != 0 {
 		t.Fatalf("scrub file failed (code %d): %s", code, stderr)
 	}
@@ -404,7 +402,7 @@ func TestScrubMatchPreservesGitlink(t *testing.T) {
 
 	// Run scrub match
 	_, stderr, code = runSafegitEnv(t, parentDir, submoduleEnv,
-		"--yes", "--force", "scrub", "match",
+		"--yes", "scrub", "match",
 		"--pattern", "SUPERSECRET123",
 		"--replace", "REDACTED",
 		"--reason", "test gitlink preservation",
@@ -442,22 +440,46 @@ func TestScrubFileGitlinkPath(t *testing.T) {
 	t.Parallel()
 	parentDir, _ := newRepoWithSubmodule(t)
 
-	// Record tree state before scrub
-	subEntryBefore := lsTreeEntry(t, parentDir, "mysub")
-	headBefore := revParseHEAD(t, parentDir)
-
 	shas := revListReverse(t, parentDir)
 	firstSHA := shas[0]
 
-	// Create the file on disk so scrub has something to read (even though
-	// the path traverses a gitlink in the committed tree)
+	// Create the file inside the submodule and commit it to keep the tree clean.
 	subFilePath := filepath.Join(parentDir, "mysub", "somefile.txt")
 	if err := os.WriteFile(subFilePath, []byte("replacement\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	// Commit inside the submodule
+	subDir := filepath.Join(parentDir, "mysub")
+	for _, args := range [][]string{
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+		{"git", "add", "somefile.txt"},
+		{"git", "commit", "-m", "add somefile"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = subDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v in submodule: %v\n%s", args, err, out)
+		}
+	}
+	// Update submodule ref in parent
+	for _, args := range [][]string{
+		{"git", "add", "mysub"},
+		{"git", "commit", "-m", "update submodule ref"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = parentDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v in parent: %v\n%s", args, err, out)
+		}
+	}
+
+	// Record tree state AFTER setup commits (before scrub)
+	subEntryBefore := lsTreeEntry(t, parentDir, "mysub")
+	headBefore := revParseHEAD(t, parentDir)
 
 	// Run scrub file targeting a path inside the submodule
-	_, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv, "--yes", "--force", "scrub", "file", "--from", firstSHA, "--reason", "test gitlink path", "mysub/somefile.txt")
+	_, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv, "--yes", "scrub", "file", "--from", firstSHA, "--reason", "test gitlink path", "mysub/somefile.txt")
 
 	// Either clean exit (no-op) or meaningful error is acceptable.
 	// Crash (signal death, panic) or corruption is not.
@@ -1318,7 +1340,7 @@ func TestScrubMatchRecursesIntoSubmodule(t *testing.T) {
 
 	// Run scrub match from the parent
 	stdout, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv,
-		"--yes", "--force", "scrub", "match",
+		"--yes", "scrub", "match",
 		"--pattern", "TOPSECRET_ABC123",
 		"--replace", "REDACTED",
 		"--reason", "test",
@@ -1374,7 +1396,7 @@ func TestScrubMatchBothParentAndSubmodule(t *testing.T) {
 
 	// Run scrub match
 	stdout, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv,
-		"--yes", "--force", "scrub", "match",
+		"--yes", "scrub", "match",
 		"--pattern", "TOPSECRET_XYZ789",
 		"--replace", "CLEAN",
 		"--reason", "test",
@@ -1430,7 +1452,7 @@ func TestScrubMatchTwoSubmodules(t *testing.T) {
 
 	// Run scrub match
 	stdout, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv,
-		"--yes", "--force", "scrub", "match",
+		"--yes", "scrub", "match",
 		"--pattern", "TOPSECRET_MULTI",
 		"--replace", "REDACTED",
 		"--reason", "test",
@@ -1479,9 +1501,31 @@ func TestScrubFileInSubmodule(t *testing.T) {
 	subSHAs := revListReverse(t, subDir)
 	firstSubCommit := subSHAs[0]
 
-	// Replace secret.txt on disk with clean content
+	// Replace secret.txt on disk and commit in submodule + parent so tree is clean
 	if err := os.WriteFile(filepath.Join(subDir, "secret.txt"), []byte("CLEANED\n"), 0644); err != nil {
 		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+		{"git", "add", "secret.txt"},
+		{"git", "commit", "-m", "commit replacement"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = subDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v in submodule: %v\n%s", args, err, out)
+		}
+	}
+	for _, args := range [][]string{
+		{"git", "add", "mysub"},
+		{"git", "commit", "-m", "update submodule ref"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = parentDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v in parent: %v\n%s", args, err, out)
+		}
 	}
 
 	// Record gitlink before scrub
@@ -1489,7 +1533,7 @@ func TestScrubFileInSubmodule(t *testing.T) {
 
 	// Run scrub file targeting the submodule path
 	stdout, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv,
-		"--yes", "--force", "scrub", "file",
+		"--yes", "scrub", "file",
 		"mysub/secret.txt",
 		"--from", firstSubCommit,
 		"--reason", "test",
@@ -1542,7 +1586,7 @@ func TestScrubMatchScopeSubmodule(t *testing.T) {
 
 	// Run scrub match with --scope limited to sub1
 	stdout, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv,
-		"--yes", "--force", "scrub", "match",
+		"--yes", "scrub", "match",
 		"--pattern", "SECRET_SCOPED",
 		"--replace", "CLEAN",
 		"--reason", "test",
@@ -1597,7 +1641,7 @@ func TestScrubMatchDryRunWithSubmodules(t *testing.T) {
 
 	// Run with --dry-run
 	stdout, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv,
-		"--yes", "--force", "--dry-run", "scrub", "match",
+		"--yes", "--dry-run", "scrub", "match",
 		"--pattern", "SECRET_DRYRUN",
 		"--replace", "X",
 		"--reason", "x",
@@ -2215,7 +2259,7 @@ func TestScrubMatchPartialFailure(t *testing.T) {
 
 	// Run scrub match -- pattern only exists in binary blob (which gets skipped)
 	stdout, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv,
-		"--yes", "--force", "scrub", "match",
+		"--yes", "scrub", "match",
 		"--pattern", "BINARY_SECRET_ONLY",
 		"--replace", "REDACTED",
 		"--reason", "test binary in submodule",

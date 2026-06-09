@@ -218,10 +218,10 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 			die(flags, cmd, 1, "no 'origin' remote configured; add one with git remote add origin <url>")
 		}
 		fmt.Println("Force-pushing all branches and tags...")
-		if _, _, err := git.Run(ctx, "push", "origin", "--all", "--force"); err != nil {
+		if _, _, err := git.Run(ctx, "push", "origin", "--all", "--force-with-lease"); err != nil {
 			die(flags, cmd, 1, fmt.Sprintf("pushing branches: %v", err))
 		}
-		if _, _, err := git.Run(ctx, "push", "origin", "--tags", "--force"); err != nil {
+		if _, _, err := git.Run(ctx, "push", "origin", "--tags", "--force-with-lease"); err != nil {
 			die(flags, cmd, 1, fmt.Sprintf("pushing tags: %v", err))
 		}
 		fmt.Println("Push complete.")
