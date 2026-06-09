@@ -200,10 +200,11 @@ func ListSkipWorktreeFiles(ctx context.Context) ([]string, error) {
 	return files, nil
 }
 
-// SyncMainIndex updates the main .git/index to match the given treeish.
-// This makes git status/diff reflect the committed state after safegit commits.
+// syncMainIndexInner updates the main .git/index to match the given treeish.
+// When updateWorktree is true, it also checks out files into the working tree
+// (using --reset -u), which is needed after history rewrites like scrub.
 // Skip-worktree flags are preserved across the read-tree rebuild.
-func SyncMainIndex(ctx context.Context, treeish string) error {
+func syncMainIndexInner(ctx context.Context, treeish string, updateWorktree bool) error {
 	// Collect skip-worktree files before read-tree clears the index.
 	skipFiles, err := ListSkipWorktreeFiles(ctx)
 	if err != nil {
@@ -211,7 +212,13 @@ func SyncMainIndex(ctx context.Context, treeish string) error {
 		skipFiles = nil
 	}
 
-	_, _, err = Run(ctx, "read-tree", treeish)
+	args := []string{"read-tree"}
+	if updateWorktree {
+		args = append(args, "--reset", "-u")
+	}
+	args = append(args, treeish)
+
+	_, _, err = Run(ctx, args...)
 	if err != nil {
 		return err
 	}
@@ -224,6 +231,22 @@ func SyncMainIndex(ctx context.Context, treeish string) error {
 		}
 	}
 	return nil
+}
+
+// SyncMainIndex updates the main .git/index to match the given treeish.
+// This makes git status/diff reflect the committed state after safegit commits.
+// Skip-worktree flags are preserved across the read-tree rebuild.
+func SyncMainIndex(ctx context.Context, treeish string) error {
+	return syncMainIndexInner(ctx, treeish, false)
+}
+
+// SyncMainIndexWithWorktree updates the main .git/index AND the working tree
+// to match the given treeish. Uses --reset -u, so the working tree must be
+// clean before calling. Needed after history rewrites (scrub) where committed
+// blobs have changed and the working tree must reflect the new content.
+// Skip-worktree flags are preserved across the read-tree rebuild.
+func SyncMainIndexWithWorktree(ctx context.Context, treeish string) error {
+	return syncMainIndexInner(ctx, treeish, true)
 }
 
 // RunPassthrough executes a git command with stdin/stdout/stderr wired to
