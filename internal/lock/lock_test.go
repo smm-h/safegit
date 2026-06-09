@@ -269,18 +269,18 @@ func TestParsePID(t *testing.T) {
 	f := filepath.Join(dir, "test.lock")
 
 	os.WriteFile(f, []byte("pid=42\nts=2026-01-01T00:00:00Z\nop=test\nhost=test\n"), 0644)
-	pid, err := parsePID(f)
+	pid, err := ParsePID(f)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if pid != 42 {
-		t.Errorf("parsePID = %d, want 42", pid)
+		t.Errorf("ParsePID = %d, want 42", pid)
 	}
 
 	// Missing pid line
 	noPID := filepath.Join(dir, "nopid.lock")
 	os.WriteFile(noPID, []byte("ts=2026-01-01T00:00:00Z\n"), 0644)
-	_, err = parsePID(noPID)
+	_, err = ParsePID(noPID)
 	if err == nil {
 		t.Error("expected error when no pid= line")
 	}

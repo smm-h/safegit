@@ -30,17 +30,16 @@ func runUnlock(flags globalFlags, ref string) int {
 		return 1
 	}
 
-	// Unless --force, refuse if holder is alive
-	if !flags.force {
-		stale, err := lock.IsStale(lp)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: cannot check lock status: %v\n", err)
-			return 1
-		}
-		if !stale {
-			fmt.Fprintf(os.Stderr, "error: lock on %s is held by a live process; use --force to override\n", ref)
-			return 1
-		}
+	// Always check liveness -- refuse to release locks held by live processes
+	stale, err := lock.IsStale(lp)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: cannot check lock status: %v\n", err)
+		return 1
+	}
+	if !stale {
+		pid, _ := lock.ParsePID(lp)
+		fmt.Fprintf(os.Stderr, "error: lock on %s is held by a live process (pid %d); kill the process or wait for it to finish\n", ref, pid)
+		return 1
 	}
 
 	// Release the lock

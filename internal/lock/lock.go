@@ -83,7 +83,7 @@ func Acquire(locksBaseDir, safegitDir, ref, op string, timeout time.Duration) (*
 		stale, staleErr := IsStale(lp)
 		if staleErr == nil && stale {
 			// Capture stale holder's PID before removing the lock file
-			stalePid, _ := parsePID(lp)
+			stalePid, _ := ParsePID(lp)
 			os.Remove(lp)
 			_ = oplog.Append(safegitDir, oplog.Entry{
 				Op: "lock_recovered",
@@ -149,7 +149,7 @@ func (l *RefLock) Release() error {
 //   - On Linux, if the process started after the lock was created, the PID was
 //     reused by a new process and the lock is stale.
 func IsStale(path string) (bool, error) {
-	pid, err := parsePID(path)
+	pid, err := ParsePID(path)
 	if err != nil {
 		// Corrupt lock (e.g. zero-length from a crash mid-create) -- treat as stale
 		return true, nil
@@ -193,8 +193,8 @@ func ForceRelease(locksBaseDir, ref string) error {
 	return err
 }
 
-// parsePID reads the lock file and extracts the pid= value.
-func parsePID(lockPath string) (int, error) {
+// ParsePID reads the lock file and extracts the pid= value.
+func ParsePID(lockPath string) (int, error) {
 	f, err := os.Open(lockPath)
 	if err != nil {
 		return 0, err
