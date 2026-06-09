@@ -65,7 +65,6 @@ func (d *DirtyState) Refuse(operation string) string {
 
 	b.WriteString("\nSuggestion:\n")
 	b.WriteString("  safegit commit -m \"<msg>\" -- <files>\n")
-	b.WriteString("  Or pass --force to override (you may lose work).\n")
 
 	return b.String()
 }

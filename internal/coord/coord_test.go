@@ -101,11 +101,15 @@ func TestRefuseMessage(t *testing.T) {
 		"?? scratch.txt",
 		"Suggestion:",
 		"safegit commit",
-		"--force",
 	}
 	for _, want := range checks {
 		if !strings.Contains(msg, want) {
 			t.Errorf("Refuse message missing %q.\nGot:\n%s", want, msg)
 		}
+	}
+
+	// --force is no longer an option; verify it's not mentioned
+	if strings.Contains(msg, "--force") {
+		t.Errorf("Refuse message should not mention --force.\nGot:\n%s", msg)
 	}
 }

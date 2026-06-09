@@ -671,7 +671,7 @@ func TestConfigOverride(t *testing.T) {
 	}
 }
 
-func TestCoordinationBypassedOplog(t *testing.T) {
+func TestCoordinationGuardRejectsDirtyTree(t *testing.T) {
 	dir := newRepo(t)
 
 	// Dirty the working tree
@@ -685,20 +685,15 @@ func TestCoordinationBypassedOplog(t *testing.T) {
 	cmd.Dir = dir
 	cmd.CombinedOutput()
 
-	// Checkout with --force (should bypass coord guard and log it)
-	_, _, code := runSafegit(t, dir, "--force", "checkout", "other")
-	if code != 0 {
-		t.Fatalf("forced checkout failed (code %d)", code)
+	// Checkout without --force should be refused with exit code 5
+	_, stderr, code := runSafegit(t, dir, "checkout", "other")
+	if code != 5 {
+		t.Fatalf("expected exit code 5 for dirty tree, got %d", code)
 	}
 
-	// Read oplog and find coordination_bypassed entry
-	logPath := filepath.Join(dir, ".git", "safegit", "log")
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "coordination_bypassed") {
-		t.Error("oplog missing coordination_bypassed entry after forced checkout")
+	// Stderr should contain the refusal message
+	if !strings.Contains(stderr, "not clean") {
+		t.Errorf("expected stderr to contain 'not clean', got: %s", stderr)
 	}
 }
 

@@ -13,7 +13,7 @@ import (
 	"github.com/smm-h/safegit/internal/repo"
 )
 
-// coordGuard runs coord.Check and prints a refusal if dirty (unless force).
+// coordGuard runs coord.Check and prints a refusal if dirty.
 // Returns exit code 5 if dirty, 0 if clean, or 1 on error.
 func coordGuard(flags globalFlags, sgDir, operation string) int {
 	ctx := context.Background()
@@ -22,19 +22,9 @@ func coordGuard(flags globalFlags, sgDir, operation string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	if dirty != nil && !flags.force {
+	if dirty != nil {
 		fmt.Fprint(os.Stderr, dirty.Refuse(operation))
 		return 5
-	}
-	if dirty != nil {
-		// --force bypass: log that coordination guard was skipped
-		_ = oplog.Append(sgDir, oplog.Entry{
-			Op: "coordination_bypassed",
-			Extra: map[string]interface{}{
-				"operation": operation,
-				"modified":  len(dirty.ModifiedFiles),
-			},
-		})
 	}
 	return 0
 }
