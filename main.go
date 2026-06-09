@@ -38,7 +38,6 @@ type globalFlags struct {
 	quiet      bool
 	verbose    bool
 	dryRun     bool
-	force      bool
 	yes        bool
 	configPath string
 }
@@ -49,7 +48,6 @@ func main() {
 	app.GlobalFlag(strictcli.BoolFlag("quiet", "suppress non-essential output", strictcli.Short("q")))
 	app.GlobalFlag(strictcli.BoolFlag("verbose", "verbose output"))
 	app.GlobalFlag(strictcli.BoolFlag("dry-run", "preview changes without writing", strictcli.Short("n")))
-	app.GlobalFlag(strictcli.BoolFlag("force", "force operation", strictcli.Short("f")))
 	app.GlobalFlag(strictcli.BoolFlag("yes", "auto-confirm prompts", strictcli.Short("y")))
 	app.GlobalFlag(strictcli.StringFlag("config", "config file path", strictcli.Default("")))
 
@@ -309,7 +307,6 @@ func globalsToFlags(globals map[string]interface{}) globalFlags {
 		quiet:      globals["quiet"].(bool),
 		verbose:    globals["verbose"].(bool),
 		dryRun:     globals["dry_run"].(bool),
-		force:      globals["force"].(bool),
 		yes:        globals["yes"].(bool),
 		configPath: globals["config"].(string),
 	}
