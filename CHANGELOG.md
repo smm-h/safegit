@@ -2,16 +2,22 @@
 
 # Changelog
 
-## 0.16.0
+## 0.16.1
 
-Remove global --force flag, add --yes and --mangle, sync working tree after scrub, use --force-with-lease for pushes.
+Fix macOS symlink bug in submodule detection.
 
 <details>
 <summary>Context</summary>
 
-The global --force flag was overloaded across 10+ use sites with 5+ distinct meanings. This release replaces it with explicit per-purpose mechanisms: --yes for confirmation prompts, unconditional dirty-tree rejection, no coordination guard bypass, no hook skip, no gitignore override. Push now uses --force-with-lease (safe force push) instead of --force (destructive). Scrub operations now sync the working tree after rewriting history, so secrets no longer linger on disk. New --mangle flag for scrub match replaces matched content with crypto-random printable ASCII of the same length.
+DetectParent compared symlink-resolved paths from git with unresolved paths from os.Getwd(), causing filepath.Rel to produce incorrect relative paths on macOS where /var -> /private/var. This broke autobump and push-hook-cascade on macOS since v0.15.0.
 
 </details>
+
+### Fixes
+
+- **Fixed macOS symlink bug in submodule detection.** `DetectParent` now resolves symlinks on both `parentWorkTree` and `cwd`, fixing autobump and push-hook-cascade on macOS where `/var` is a symlink to `/private/var`.
+
+## 0.16.0
 
 ### Breaking
 
