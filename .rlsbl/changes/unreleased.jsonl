@@ -3,3 +3,4 @@
 {"commits":["84d5c4f31419bffae024561b6dda36317200443f"],"user_facing":true,"description":"**`unlock` now supports `--dry-run`.** Shows what would be released without actually removing the lock.","type":"feature"}
 {"commits":["fdcfb357592ac254556eb1042c0fcecff23d9177","efb2e02dd2b734872d5b43ad47f3bb70e1b60b22"],"user_facing":false}
 {"commits":["7399a978413b06b8abadf3f2a8049141431027a0","95c5d1c8208f55f1f1950668e8d95769091967e7","02a5c5aae5030904a0bb1bea5f5967f873d13333"],"user_facing":false}
+{"commits":["47190bde4c314e6425aa8e3895bf688488ddd876","8ebba272411242c3dd6387092dd4d8ec6b80ab05"],"user_facing":false}
