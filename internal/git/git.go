@@ -800,3 +800,44 @@ func CatFileBatchAllWithDir(ctx context.Context, gitDir string) (*ObjectIterator
 	}
 	return it, nil
 }
+
+// splitNonEmpty splits s by newlines and returns only non-empty lines.
+func splitNonEmpty(s string) []string {
+	var result []string
+	for _, line := range strings.Split(s, "\n") {
+		if line != "" {
+			result = append(result, line)
+		}
+	}
+	return result
+}
+
+// ForEachRef runs git for-each-ref with the given format and optional ref
+// prefixes (e.g. "refs/heads/", "refs/tags/"). Returns one line per ref.
+func ForEachRef(ctx context.Context, format string, prefixes ...string) ([]string, error) {
+	args := []string{"for-each-ref", "--format=" + format}
+	args = append(args, prefixes...)
+	stdout, _, err := Run(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	return splitNonEmpty(stdout), nil
+}
+
+// LsRemoteBulk runs git ls-remote against a remote with a pattern and returns
+// a map of refname to SHA. The output format of git ls-remote is
+// "<SHA>\t<refname>" per line; the map key is the refname.
+func LsRemoteBulk(ctx context.Context, remote, pattern string) (map[string]string, error) {
+	stdout, _, err := Run(ctx, "ls-remote", remote, pattern)
+	if err != nil {
+		return nil, fmt.Errorf("ls-remote %s %s: %w", remote, pattern, err)
+	}
+	result := make(map[string]string)
+	for _, line := range splitNonEmpty(stdout) {
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) == 2 {
+			result[parts[1]] = parts[0] // refname -> SHA
+		}
+	}
+	return result, nil
+}
