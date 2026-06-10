@@ -1,4 +1,4 @@
-// Package submodule discovers and inspects git submodules.
+// Package submodule enumerates initialized and deinitialized git submodules, detects parent repos, checks for nesting, and resolves paths through symlinks.
 //
 // This package intentionally does NOT import other internal/* packages to
 // avoid import cycles. Git commands use exec.Command directly -- this is

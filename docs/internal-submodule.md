@@ -1,6 +1,6 @@
 ---
 title: internal/submodule
-description: "Package submodule discovers and inspects git submodules."
+description: "Package submodule enumerates initialized and deinitialized git submodules, detects parent repos, checks for nesting, and resolves paths through symlinks."
 generated: true
 nav_group: "API Reference"
 nav_order: 12
