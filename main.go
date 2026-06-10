@@ -110,17 +110,17 @@ func main() {
 	app.Command("push", "push with pre-hooks and retry", func(kwargs map[string]interface{}) int {
 		gf := globalsToFlags(kwargs)
 		noPrePrePush := kwargs["no_pre_pre_push"].(bool)
-		forcePush := kwargs["force_push"].(bool)
+		forceWithLease := kwargs["force_with_lease"].(bool)
 		remote := "origin"
 		if v := kwargs["remote"]; v != nil {
 			remote = v.(string)
 		}
 		refspecs := kwargsStrSlice(kwargs["refspecs"])
-		return runPush(gf, noPrePrePush, forcePush, remote, refspecs)
+		return runPush(gf, noPrePrePush, forceWithLease, remote, refspecs)
 	},
 		strictcli.WithFlags(
 			strictcli.BoolFlag("no-pre-pre-push", "skip pre-pre-push hooks"),
-			strictcli.BoolFlag("force-push", "force push to remote"),
+			strictcli.BoolFlag("force-with-lease", "push with --force-with-lease (safe force push)"),
 		),
 		strictcli.WithArgs(
 			strictcli.NewArg("remote", "remote name", strictcli.ArgRequired(false)),

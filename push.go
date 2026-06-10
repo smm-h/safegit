@@ -29,7 +29,7 @@ type pushRefInfo struct {
 	RemoteSHA string
 }
 
-func runPush(flags globalFlags, noPrePrePush bool, forcePush bool, remote string, refspecs []string) int {
+func runPush(flags globalFlags, noPrePrePush bool, forceWithLease bool, remote string, refspecs []string) int {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		die(flags, "push",1, err.Error())
@@ -42,7 +42,7 @@ func runPush(flags globalFlags, noPrePrePush bool, forcePush bool, remote string
 		return 1
 	}
 
-	forceFlag := forcePush
+	forceFlag := forceWithLease
 
 	// Resolve the remote URL
 	ctx := context.Background()
