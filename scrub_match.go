@@ -764,6 +764,13 @@ func scrubMatchExecute(
 			fmt.Fprintf(os.Stderr, "warning: submodule %s post-rewrite cleanup: %v\n", sr.sub.RelativePath, err)
 		}
 
+		// Sync submodule worktree and index before leaving the submodule dir.
+		if subProtected, syncErr := git.SyncMainIndexWithWorktree(ctx, "HEAD"); syncErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to sync submodule worktree: %v\n", syncErr)
+		} else {
+			untrackProtectedPaths(ctx, subProtected)
+		}
+
 		// Oplog entry for submodule.
 		subRef, _ := git.HeadRef(ctx)
 		if subRef == "" {

@@ -2375,3 +2375,57 @@ func TestScrubMatchPartialFailure(t *testing.T) {
 		t.Errorf("git fsck failed in submodule after scrub: %v\n%s", err, out)
 	}
 }
+
+// TestScrubMatchSubmoduleWorktreeSync verifies that after scrub match rewrites
+// submodule history, the submodule's working tree and index are synced (on-disk
+// file contains the replacement, git status is clean).
+func TestScrubMatchSubmoduleWorktreeSync(t *testing.T) {
+	t.Parallel()
+	parentDir, _, subDir := newRepoWithSubmoduleSecret(t, "WORKTREE_SECRET_42", "secret.txt")
+
+	// Run scrub match from the parent
+	stdout, stderr, code := runSafegitEnv(t, parentDir, submoduleEnv,
+		"--yes", "scrub", "match",
+		"--pattern", "WORKTREE_SECRET_42",
+		"--replace", "REDACTED",
+		"--reason", "test worktree sync",
+		"--entire-history",
+	)
+	if code != 0 {
+		t.Fatalf("scrub match failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// Verify: on-disk file in the submodule contains the replacement, not the secret
+	diskContent, err := os.ReadFile(filepath.Join(subDir, "secret.txt"))
+	if err != nil {
+		t.Fatalf("reading secret.txt from submodule disk: %v", err)
+	}
+	if strings.Contains(string(diskContent), "WORKTREE_SECRET_42") {
+		t.Errorf("submodule on-disk secret.txt still contains secret: %q", string(diskContent))
+	}
+	if !strings.Contains(string(diskContent), "REDACTED") {
+		t.Errorf("submodule on-disk secret.txt should contain REDACTED, got: %q", string(diskContent))
+	}
+
+	// Verify: git status --porcelain is clean inside the submodule
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = subDir
+	statusOut, err := statusCmd.Output()
+	if err != nil {
+		t.Fatalf("git status in submodule: %v", err)
+	}
+	if strings.TrimSpace(string(statusOut)) != "" {
+		t.Errorf("submodule working tree is dirty after scrub: %s", string(statusOut))
+	}
+
+	// Verify: git status --porcelain is clean in the parent too
+	parentStatusCmd := exec.Command("git", "status", "--porcelain")
+	parentStatusCmd.Dir = parentDir
+	parentStatusOut, err := parentStatusCmd.Output()
+	if err != nil {
+		t.Fatalf("git status in parent: %v", err)
+	}
+	if strings.TrimSpace(string(parentStatusOut)) != "" {
+		t.Errorf("parent working tree is dirty after scrub: %s", string(parentStatusOut))
+	}
+}
