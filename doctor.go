@@ -86,20 +86,7 @@ func runDoctor(flags globalFlags, kwargs map[string]interface{}) {
 	if repo.IsInitialized(gitDir) {
 		checkStart = time.Now()
 		sharedDir := repo.SharedSafegitDir(ctx, gitDir)
-		locksDir := filepath.Join(sharedDir, "locks", "refs", "heads")
-		staleCount := 0
-		entries, err := os.ReadDir(locksDir)
-		if err == nil {
-			for _, e := range entries {
-				if !e.IsDir() && strings.HasSuffix(e.Name(), ".lock") {
-					lp := filepath.Join(locksDir, e.Name())
-					stale, sErr := lock.IsStale(lp)
-					if sErr == nil && stale {
-						staleCount++
-					}
-				}
-			}
-		}
+		staleCount := countStaleLocks(sharedDir)
 		if staleCount > 0 {
 			checks = append(checks, checkResult{
 				Name:   "stale_locks",
@@ -252,6 +239,10 @@ func doctorFix(ctx context.Context, flags globalFlags, gitDir string) {
 			hasLegacyQueue = true
 		}
 
+		// Count stale locks in the shared safegit dir (covers worktrees).
+		sharedDir := repo.SharedSafegitDir(ctx, gitDir)
+		staleLocks := countStaleLocks(sharedDir)
+
 		logSizeMB := float64(0)
 		logSize, _ := oplog.LogSize(sgDir)
 		if logSize > 0 {
@@ -267,6 +258,9 @@ func doctorFix(ctx context.Context, flags globalFlags, gitDir string) {
 			fmt.Printf("would remove %d orphan tmp dir(s)\n", len(orphanDirs))
 			if hasLegacyQueue {
 				fmt.Println("would remove legacy queue directory")
+			}
+			if staleLocks > 0 {
+				fmt.Printf("would remove %d stale lock(s)\n", staleLocks)
 			}
 			fmt.Printf("log size: %.1f MB (max: %d MB)", logSizeMB, maxMB)
 			if wouldRotate {
@@ -302,10 +296,17 @@ func doctorFix(ctx context.Context, flags globalFlags, gitDir string) {
 		fmt.Fprintf(os.Stderr, "warning: log rotation failed: %v\n", rotErr)
 	}
 
+	// Clean stale locks in the shared safegit dir (covers worktrees).
+	sharedDir := repo.SharedSafegitDir(ctx, gitDir)
+	staleCleaned := removeStaleLocks(sharedDir)
+
 	if !flags.quiet {
 		fmt.Printf("removed %d orphan tmp dir(s)\n", removed)
 		if queueRemoved {
 			fmt.Println("removed legacy queue directory")
+		}
+		if staleCleaned > 0 {
+			fmt.Printf("removed %d stale lock(s)\n", staleCleaned)
 		}
 		if rotated {
 			fmt.Println("log rotated (old log saved as log.1)")
