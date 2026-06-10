@@ -180,9 +180,11 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 	}
 
 	// Sync main index and working tree to match rewritten HEAD
-	if _, err := git.SyncMainIndexWithWorktree(ctx, "HEAD"); err != nil {
+	protectedPaths, err := git.SyncMainIndexWithWorktree(ctx, "HEAD")
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
 	}
+	untrackProtectedPaths(ctx, protectedPaths)
 
 	// Post-rewrite verification
 	fmt.Println("Verifying...")
@@ -468,9 +470,11 @@ func runScrubFileInSubmodule(
 	}
 
 	// Sync parent index and working tree to match rewritten HEAD.
-	if _, err := git.SyncMainIndexWithWorktree(ctx, "HEAD"); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to sync parent main index: %v\n", err)
+	parentProtectedPaths, syncErr := git.SyncMainIndexWithWorktree(ctx, "HEAD")
+	if syncErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to sync parent main index: %v\n", syncErr)
 	}
+	untrackProtectedPaths(ctx, parentProtectedPaths)
 
 	// Cleanup parent.
 	if err := cleanupAfterRewrite(ctx, flags, cmd, parentShaMap, sgDir); err != nil {
@@ -535,6 +539,24 @@ func runScrubFileInSubmodule(
 	fmt.Printf("\nTo update the remote, run: git push --force-with-lease\n")
 
 	return exitCode
+}
+
+// untrackProtectedPaths runs "git rm --cached" for each path that was
+// protected (tracked+gitignored) during SyncMainIndexWithWorktree, so future
+// read-tree calls cannot overwrite them. Reports the list to stdout.
+func untrackProtectedPaths(ctx context.Context, protectedPaths []string) {
+	if len(protectedPaths) == 0 {
+		return
+	}
+	for _, p := range protectedPaths {
+		if _, _, err := git.Run(ctx, "rm", "--cached", "--", p); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to untrack gitignored file %s: %v\n", p, err)
+		}
+	}
+	fmt.Printf("Preserved %d tracked+gitignored file(s) (untracked from index):\n", len(protectedPaths))
+	for _, p := range protectedPaths {
+		fmt.Printf("  %s\n", p)
+	}
 }
 
 // runScrubMatch is in scrub_match.go
