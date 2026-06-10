@@ -943,6 +943,85 @@ func TestDoctorCleansSubmoduleState(t *testing.T) {
 	}
 }
 
+// Phase 0.1: Doctor --fix --dry-run reports stale locks inside submodule
+// safegit directories without removing them.
+func TestDoctorDryRunReportsSubmodules(t *testing.T) {
+	t.Parallel()
+	parentDir, _ := newRepoWithSubmodule(t)
+	subDir := prepSubmoduleForCommit(t, parentDir)
+
+	// Initialize safegit in the parent repo by committing a file.
+	if err := os.WriteFile(filepath.Join(parentDir, "doctor_init.txt"), []byte("init\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runSafegit(t, parentDir, "commit", "-m", "init parent safegit", "--", "doctor_init.txt")
+	if code != 0 {
+		t.Fatalf("safegit commit in parent failed (code %d): %s", code, stderr)
+	}
+
+	// Run safegit commit inside the submodule to initialize its safegit dir.
+	if err := os.WriteFile(filepath.Join(subDir, "init_safegit.txt"), []byte("init\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code = runSafegit(t, subDir, "commit", "-m", "init safegit", "--", "init_safegit.txt")
+	if code != 0 {
+		t.Fatalf("safegit commit in submodule failed (code %d): %s", code, stderr)
+	}
+
+	// Resolve the submodule's git dir to find .git/modules/mysub/safegit/.
+	gitDirCmd := exec.Command("git", "rev-parse", "--git-dir")
+	gitDirCmd.Dir = subDir
+	gitDirOut, err := gitDirCmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse --git-dir in submodule: %v", err)
+	}
+	subGitDir := strings.TrimSpace(string(gitDirOut))
+	if !filepath.IsAbs(subGitDir) {
+		subGitDir = filepath.Join(subDir, subGitDir)
+	}
+	subSafegitDir := filepath.Join(subGitDir, "safegit")
+
+	// Verify the safegit dir exists (created by the commit above).
+	if _, err := os.Stat(subSafegitDir); os.IsNotExist(err) {
+		t.Fatalf("submodule safegit dir does not exist at %s", subSafegitDir)
+	}
+
+	// Create a stale lock file with a dead PID.
+	lockDir := filepath.Join(subSafegitDir, "locks", "refs", "heads")
+	if err := os.MkdirAll(lockDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	lockFile := filepath.Join(lockDir, "main.lock")
+	lockContent := "pid=99999\nts=2020-01-01T00:00:00Z\nop=commit\n"
+	if err := os.WriteFile(lockFile, []byte(lockContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the lock file exists before running doctor.
+	if _, err := os.Stat(lockFile); os.IsNotExist(err) {
+		t.Fatal("stale lock file not created")
+	}
+
+	// Run safegit doctor --fix --dry-run from the parent repo.
+	stdout, stderr, code := runSafegit(t, parentDir, "doctor", "--fix", "--dry-run", "--yes")
+	if code != 0 {
+		t.Fatalf("doctor --fix --dry-run failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// Verify: output mentions the submodule stale lock (dry-run report).
+	if !strings.Contains(stdout, "[mysub]") {
+		t.Errorf("doctor --dry-run output should mention [mysub], got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "would remove") && !strings.Contains(stdout, "stale lock") {
+		t.Errorf("doctor --dry-run output should mention stale lock removal, got: %s", stdout)
+	}
+
+	// Verify: the lock file still exists (not removed in dry-run).
+	if _, err := os.Stat(lockFile); os.IsNotExist(err) {
+		t.Error("stale lock file was removed during dry-run (should have been preserved)")
+	}
+}
+
 // Phase 0.13: Amending a commit in the parent preserves the submodule's
 // gitlink entry. The recorded submodule SHA must not change when only a
 // regular file is amended.
