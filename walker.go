@@ -8,6 +8,14 @@ import (
 	"github.com/smm-h/safegit/internal/git"
 )
 
+// TagRewrite records how a tag ref was updated during history rewriting.
+type TagRewrite struct {
+	Refname   string `json:"refname"`
+	OldSHA    string `json:"old_sha"`
+	NewSHA    string `json:"new_sha"`
+	Annotated bool   `json:"annotated"`
+}
+
 // CommitTransform describes how a commit should be rewritten. Zero/empty
 // fields mean "keep the original value."
 type CommitTransform struct {

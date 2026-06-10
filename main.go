@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,6 +41,7 @@ type globalFlags struct {
 	dryRun     bool
 	yes        bool
 	configPath string
+	json       bool
 }
 
 func main() {
@@ -50,6 +52,7 @@ func main() {
 	app.GlobalFlag(strictcli.BoolFlag("dry-run", "preview changes without writing", strictcli.Short("n")))
 	app.GlobalFlag(strictcli.BoolFlag("yes", "auto-confirm prompts", strictcli.Short("y")))
 	app.GlobalFlag(strictcli.StringFlag("config", "config file path", strictcli.Default("")))
+	app.GlobalFlag(strictcli.BoolFlag("json", "machine-readable JSON output"))
 
 	pt := func(name string, args []string, globals map[string]interface{}) int {
 		gf := globalsToFlags(globals)
@@ -307,13 +310,19 @@ func kwargsStrSlice(v interface{}) []string {
 // globalsToFlags converts the strictcli globals map to the globalFlags struct.
 // strictcli converts flag names like "dry-run" to map keys "dry_run".
 func globalsToFlags(globals map[string]interface{}) globalFlags {
-	return globalFlags{
+	gf := globalFlags{
 		quiet:      globals["quiet"].(bool),
 		verbose:    globals["verbose"].(bool),
 		dryRun:     globals["dry_run"].(bool),
 		yes:        globals["yes"].(bool),
 		configPath: globals["config"].(string),
+		json:       globals["json"].(bool),
 	}
+	if gf.json {
+		gf.quiet = true
+		gf.yes = true
+	}
+	return gf
 }
 
 func runVersion(flags globalFlags) {
@@ -365,6 +374,23 @@ func confirmOrAbort(flags globalFlags, format string, args ...interface{}) bool 
 	var answer string
 	fmt.Scanln(&answer)
 	return answer == "y" || answer == "Y"
+}
+
+// infof prints a formatted message unless quiet mode is active.
+func infof(flags globalFlags, format string, args ...interface{}) {
+	if !flags.quiet {
+		fmt.Printf(format, args...)
+	}
+}
+
+// emitJSON marshals v as indented JSON to stdout. Exits on marshal error.
+func emitJSON(v interface{}) {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: marshaling JSON: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(string(data))
 }
 
 // requireCleanTree dies if the working tree has uncommitted changes.
