@@ -2,16 +2,27 @@
 
 # Changelog
 
-## 0.17.0
+## 0.17.1
 
-Rename --force-push to --force-with-lease, remove --push from rewrite-author, fix doctor stale lock cleanup.
+Fix scrub data loss for tracked+gitignored files, fix doctor dry-run submodule reporting, add unlock --dry-run.
 
 <details>
 <summary>Context</summary>
 
-Loose ends from the v0.16.0 --force removal: the --force-push flag name was misleading (it triggers --force-with-lease), rewrite-author --push bypassed safegit's push pipeline, and doctor --fix didn't clean stale locks in the main repo. Also added integration tests for unlock (previously untested) and doctor stale lock cleanup.
+The v0.16.0 working-tree sync (read-tree --reset -u) could overwrite tracked+gitignored files (e.g., config files with runtime secrets that were committed by mistake then gitignored). SyncMainIndexWithWorktree now saves and restores their content, then untracks them. Also fixed doctor --fix --dry-run not reporting submodule state, and added --dry-run support to unlock.
 
 </details>
+
+### Features
+
+- **`unlock` now supports `--dry-run`.** Shows what would be released without actually removing the lock.
+
+### Fixes
+
+- **`doctor --fix --dry-run` now reports submodule state.** Previously the dry-run path returned early before the submodule loop, so submodule stale locks and orphan tmp dirs were never reported in dry-run mode.
+- **Scrub preserves tracked+gitignored files.** When a committed-then-gitignored file is scrubbed, the on-disk content is preserved and the file is automatically untracked. Prevents data loss for config files with runtime secrets.
+
+## 0.17.0
 
 ### Breaking
 
