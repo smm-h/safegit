@@ -1049,7 +1049,8 @@ func scrubMatchExecute(
 	}
 	infof(flags, "  Old HEAD: %s\n", oldHeadSHA[:12])
 	infof(flags, "  New HEAD: %s\n", newHeadSHA[:12])
-	infof(flags, "\nTo update the remote, run: git push --force-with-lease\n")
+	infof(flags, "\nTo update the remote:\n")
+	infof(flags, "  safegit push --both-branches-and-tags --force-with-lease\n")
 
 	return exitCode
 }

@@ -206,8 +206,7 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 	})
 
 	fmt.Println("\nTo update the remote:")
-	fmt.Println("  git push origin --all --force-with-lease")
-	fmt.Println("  git push origin --tags --force-with-lease")
+	fmt.Println("  safegit push --both-branches-and-tags --force-with-lease")
 
 	return 0
 }

@@ -15,6 +15,31 @@ import (
 	"github.com/smm-h/safegit/internal/submodule"
 )
 
+// ScrubFileResult is the JSON output for `scrub file` in execute mode.
+type ScrubFileResult struct {
+	Version          int               `json:"version"`
+	DryRun           bool              `json:"dry_run"`
+	File             string            `json:"file"`
+	Mode             string            `json:"mode"`
+	Rewrites         map[string]string `json:"rewrites"`
+	Tags             []TagRewrite      `json:"tags"`
+	CommitsRewritten int               `json:"commits_rewritten"`
+	OldHead          string            `json:"old_head"`
+	NewHead          string            `json:"new_head"`
+}
+
+// ScrubFileDryRunResult is the JSON output for `scrub file --dry-run`.
+type ScrubFileDryRunResult struct {
+	Version     int    `json:"version"`
+	DryRun      bool   `json:"dry_run"`
+	File        string `json:"file"`
+	Mode        string `json:"mode"`
+	From        string `json:"from"`
+	CommitCount int    `json:"commit_count"`
+	OldHead     string `json:"old_head"`
+	NewBlobSHA  string `json:"new_blob_sha,omitempty"`
+}
+
 func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 	const cmd = "scrub file"
 
@@ -134,6 +159,19 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 
 	// Dry-run check
 	if flags.dryRun {
+		if flags.json {
+			result := ScrubFileDryRunResult{
+				Version:     1,
+				DryRun:      true,
+				File:        filePath,
+				Mode:        mode,
+				From:        fromSHA,
+				CommitCount: commitCount,
+				OldHead:     oldHeadSHA,
+				NewBlobSHA:  newBlobSHA,
+			}
+			emitJSON(result)
+		}
 		infof(flags, "Dry run: no changes made.\n")
 		return 0
 	}
@@ -175,7 +213,7 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 	// skips tagger matching entirely and only remaps target commit SHAs,
 	// which is exactly what scrub needs.
 	infof(flags, "Updating refs...\n")
-	_, err = updateRefs(ctx, shaMap, "", "", "", "", flags.verbose)
+	tagRewrites, err := updateRefs(ctx, shaMap, "", "", "", "", flags.verbose)
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("updating refs: %v", err))
 	}
@@ -248,12 +286,39 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 		}
 	}
 
+	// JSON output
+	if flags.json {
+		rewrites := make(map[string]string)
+		for old, new_ := range shaMap {
+			if old != new_ {
+				rewrites[old] = new_
+			}
+		}
+		if tagRewrites == nil {
+			tagRewrites = []TagRewrite{}
+		}
+		result := ScrubFileResult{
+			Version:          1,
+			DryRun:           false,
+			File:             filePath,
+			Mode:             mode,
+			Rewrites:         rewrites,
+			Tags:             tagRewrites,
+			CommitsRewritten: rewrittenCount,
+			OldHead:          oldHeadSHA,
+			NewHead:          newHeadSHA,
+		}
+		emitJSON(result)
+		return exitCode
+	}
+
 	// Summary
 	infof(flags, "\nScrub complete:\n")
 	infof(flags, "  %d commits rewritten\n", rewrittenCount)
 	infof(flags, "  Old HEAD: %s\n", oldHeadSHA[:12])
 	infof(flags, "  New HEAD: %s\n", newHeadSHA[:12])
-	infof(flags, "\nTo update the remote, run: git push --force-with-lease\n")
+	infof(flags, "\nTo update the remote:\n")
+	infof(flags, "  safegit push --both-branches-and-tags --force-with-lease\n")
 
 	return exitCode
 }
@@ -356,6 +421,19 @@ func runScrubFileInSubmodule(
 	}
 
 	if flags.dryRun {
+		if flags.json {
+			result := ScrubFileDryRunResult{
+				Version:     1,
+				DryRun:      true,
+				File:        fullPath,
+				Mode:        mode,
+				From:        from,
+				CommitCount: subCommitCount,
+				OldHead:     "", // not yet resolved in submodule dry-run
+				NewBlobSHA:  newBlobSHA,
+			}
+			emitJSON(result)
+		}
 		infof(flags, "Dry run: no changes made.\n")
 		os.Chdir(parentDir)
 		return 0
@@ -385,7 +463,7 @@ func runScrubFileInSubmodule(
 
 	// Update submodule refs.
 	infof(flags, "Updating refs in submodule [%s]...\n", sub.RelativePath)
-	_, err = updateRefs(ctx, subShaMap, "", "", "", "", flags.verbose)
+	subTagRewrites, err := updateRefs(ctx, subShaMap, "", "", "", "", flags.verbose)
 	if err != nil {
 		os.Chdir(parentDir)
 		die(flags, cmd, 1, fmt.Sprintf("submodule: updating refs: %v", err))
@@ -474,7 +552,7 @@ func runScrubFileInSubmodule(
 
 	// Update parent refs.
 	infof(flags, "Updating parent refs...\n")
-	_, err = updateRefs(ctx, parentShaMap, "", "", "", "", flags.verbose)
+	parentTagRewrites, err := updateRefs(ctx, parentShaMap, "", "", "", "", flags.verbose)
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("updating parent refs: %v", err))
 	}
@@ -540,13 +618,41 @@ func runScrubFileInSubmodule(
 		os.Chdir(parentDir)
 	}
 
+	// JSON output
+	if flags.json {
+		rewrites := make(map[string]string)
+		for old, new_ := range parentShaMap {
+			if old != new_ {
+				rewrites[old] = new_
+			}
+		}
+		allTagRewrites := append(subTagRewrites, parentTagRewrites...)
+		if allTagRewrites == nil {
+			allTagRewrites = []TagRewrite{}
+		}
+		result := ScrubFileResult{
+			Version:          1,
+			DryRun:           false,
+			File:             fullPath,
+			Mode:             mode,
+			Rewrites:         rewrites,
+			Tags:             allTagRewrites,
+			CommitsRewritten: parentRewrittenCount + subRewrittenCount,
+			OldHead:          oldHeadSHA,
+			NewHead:          newHeadSHA,
+		}
+		emitJSON(result)
+		return exitCode
+	}
+
 	// Summary.
 	infof(flags, "\nScrub complete:\n")
 	infof(flags, "  %d submodule commits rewritten\n", subRewrittenCount)
 	infof(flags, "  %d parent commits rewritten (gitlink updates)\n", parentRewrittenCount)
 	infof(flags, "  Old HEAD: %s\n", oldHeadSHA[:12])
 	infof(flags, "  New HEAD: %s\n", newHeadSHA[:12])
-	infof(flags, "\nTo update the remote, run: git push --force-with-lease\n")
+	infof(flags, "\nTo update the remote:\n")
+	infof(flags, "  safegit push --both-branches-and-tags --force-with-lease\n")
 
 	return exitCode
 }

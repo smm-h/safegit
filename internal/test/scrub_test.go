@@ -1270,3 +1270,136 @@ func TestScrubFilePreservesGitignored(t *testing.T) {
 		}
 	}
 }
+
+// TestScrubFileJSON runs scrub file with --json and verifies the JSON output
+// contains expected fields and values.
+func TestScrubFileJSON(t *testing.T) {
+	dir := newRepo(t)
+
+	// Create commits with secret content.
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "super_secret_v1\n", "add secret v1")
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "super_secret_v2\n", "update secret v2")
+
+	shas := revListReverse(t, dir)
+	initialSHA := shas[0]
+
+	// Write replacement and commit so tree is clean for scrub.
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "REDACTED\n", "commit replacement")
+
+	stdout, stderr, code := runSafegitEnv(t, dir, scrubEnv,
+		"--yes", "--json", "scrub", "file",
+		"--from", initialSHA,
+		"--reason", "test json output",
+		"secret.txt",
+	)
+	if code != 0 {
+		t.Fatalf("scrub file --json failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	var result struct {
+		Version          int               `json:"version"`
+		DryRun           bool              `json:"dry_run"`
+		File             string            `json:"file"`
+		Mode             string            `json:"mode"`
+		Rewrites         map[string]string `json:"rewrites"`
+		Tags             []interface{}     `json:"tags"`
+		CommitsRewritten int               `json:"commits_rewritten"`
+		OldHead          string            `json:"old_head"`
+		NewHead          string            `json:"new_head"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v\nstdout: %s", err, stdout)
+	}
+
+	if result.Version != 1 {
+		t.Errorf("version: got %d, want 1", result.Version)
+	}
+	if result.DryRun {
+		t.Error("dry_run should be false")
+	}
+	if result.File != "secret.txt" {
+		t.Errorf("file: got %q, want %q", result.File, "secret.txt")
+	}
+	if result.Mode != "replace" {
+		t.Errorf("mode: got %q, want %q", result.Mode, "replace")
+	}
+	if len(result.Rewrites) == 0 {
+		t.Error("rewrites map should be non-empty")
+	}
+	for old, new_ := range result.Rewrites {
+		if old == new_ {
+			t.Errorf("rewrites entry has old == new: %s", old)
+		}
+	}
+	if result.CommitsRewritten == 0 {
+		t.Error("commits_rewritten should be > 0")
+	}
+	if result.OldHead == "" {
+		t.Error("old_head should not be empty")
+	}
+	if result.NewHead == "" {
+		t.Error("new_head should not be empty")
+	}
+	if result.OldHead == result.NewHead {
+		t.Errorf("old_head should differ from new_head: %s", result.OldHead)
+	}
+}
+
+// TestScrubFileJSONDryRun runs scrub file with --json --dry-run and verifies
+// the JSON output contains expected fields without modifying history.
+func TestScrubFileJSONDryRun(t *testing.T) {
+	dir := newRepo(t)
+
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "super_secret_v1\n", "add secret v1")
+
+	shas := revListReverse(t, dir)
+	initialSHA := shas[0]
+
+	// Write replacement and commit so tree is clean for scrub.
+	commitFileEnv(t, dir, scrubEnv, "secret.txt", "REDACTED\n", "commit replacement")
+
+	headBefore := revParseHEAD(t, dir)
+
+	stdout, stderr, code := runSafegitEnv(t, dir, scrubEnv,
+		"--yes", "--json", "--dry-run", "scrub", "file",
+		"--from", initialSHA,
+		"--reason", "test json dry run",
+		"secret.txt",
+	)
+	if code != 0 {
+		t.Fatalf("scrub file --json --dry-run failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	var result struct {
+		Version     int    `json:"version"`
+		DryRun      bool   `json:"dry_run"`
+		File        string `json:"file"`
+		Mode        string `json:"mode"`
+		From        string `json:"from"`
+		CommitCount int    `json:"commit_count"`
+		OldHead     string `json:"old_head"`
+		NewBlobSHA  string `json:"new_blob_sha"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v\nstdout: %s", err, stdout)
+	}
+
+	if result.Version != 1 {
+		t.Errorf("version: got %d, want 1", result.Version)
+	}
+	if !result.DryRun {
+		t.Error("dry_run should be true")
+	}
+	if result.File != "secret.txt" {
+		t.Errorf("file: got %q, want %q", result.File, "secret.txt")
+	}
+	if result.CommitCount == 0 {
+		t.Error("commit_count should be > 0")
+	}
+
+	// HEAD should be unchanged (dry-run).
+	headAfter := revParseHEAD(t, dir)
+	if headAfter != headBefore {
+		t.Errorf("HEAD changed during dry run: %s -> %s", headBefore[:12], headAfter[:12])
+	}
+}
