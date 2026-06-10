@@ -2,16 +2,28 @@
 
 # Changelog
 
-## 0.17.2
+## 0.18.0
 
-Sync submodule working trees after scrub history rewrites.
+Add global --json flag, scrub JSON output, explicit push mode flags.
 
 <details>
 <summary>Context</summary>
 
-v0.17.1 added working-tree sync for the parent repo but missed submodule child repos. Submodule files on disk could still contain pre-scrub secrets.
+Push now requires an explicit mode flag (--only-head, --only-branches, --only-tags, --both-branches-and-tags) instead of implicit current-branch default and refspec positional args. Scrub match and scrub file support --json for machine-readable output (commit SHA mapping, tag rewrites). This unblocks rlsbl release scrub (upstream consumer). Scrub commands now respect --quiet. All post-rewrite suggestions route through safegit push.
 
 </details>
+
+### Breaking
+
+- **Push now requires explicit mode: `--only-head`, `--only-branches`, `--only-tags`, or `--both-branches-and-tags`.** Replaces the implicit current-branch default and refspec positional args. Each mode enumerates refs explicitly rather than passing `--all`/`--tags` to git.
+
+### Features
+
+- **Scrub commands respect `--quiet`.** All informational output is suppressed when `--quiet` is passed.
+- **`scrub match --json` emits machine-readable output.** JSON includes old-to-new commit SHA mapping, tag rewrites, and counters. Dry-run mode emits scan results. Blocked `rlsbl release scrub` (upstream consumer).
+- **`scrub file --json` emits machine-readable output.** Same JSON schema as scrub match, including dry-run mode.
+
+## 0.17.2
 
 ### Fixes
 
