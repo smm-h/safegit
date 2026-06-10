@@ -32,8 +32,6 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 	if v := kwargs["new_email"]; v != nil {
 		newEmail = v.(string)
 	}
-	push := kwargs["push"].(bool)
-
 	// At least one pair must be provided (CoRequired ensures pairs, but both
 	// pairs could be absent).
 	if oldName == "" && oldEmail == "" {
@@ -206,26 +204,10 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 		},
 	})
 
-	// Push confirmation (skipped with --yes)
-	if push && !confirmOrAbort(flags, "Force-push ALL branches and tags to origin?") {
-		fmt.Println("Push skipped.")
-		push = false
-	}
+	fmt.Println("\nTo update the remote:")
+	fmt.Println("  git push origin --all --force-with-lease")
+	fmt.Println("  git push origin --tags --force-with-lease")
 
-	// Push if requested
-	if push {
-		if _, _, err := git.Run(ctx, "remote", "get-url", "origin"); err != nil {
-			die(flags, cmd, 1, "no 'origin' remote configured; add one with git remote add origin <url>")
-		}
-		fmt.Println("Force-pushing all branches and tags...")
-		if _, _, err := git.Run(ctx, "push", "origin", "--all", "--force-with-lease"); err != nil {
-			die(flags, cmd, 1, fmt.Sprintf("pushing branches: %v", err))
-		}
-		if _, _, err := git.Run(ctx, "push", "origin", "--tags", "--force-with-lease"); err != nil {
-			die(flags, cmd, 1, fmt.Sprintf("pushing tags: %v", err))
-		}
-		fmt.Println("Push complete.")
-	}
 	return 0
 }
 

@@ -217,7 +217,6 @@ func main() {
 			strictcli.StringFlag("new-name", "replacement name", strictcli.Default(nil)),
 			strictcli.StringFlag("old-email", "current author/committer email to match", strictcli.Default(nil)),
 			strictcli.StringFlag("new-email", "replacement email", strictcli.Default(nil)),
-			strictcli.BoolFlag("push", "force-push after rewriting"),
 		),
 		strictcli.WithDependencies(
 			strictcli.CoRequired{Flags: []string{"old-name", "new-name"}},
