@@ -268,52 +268,52 @@ func doctorFix(ctx context.Context, flags globalFlags, gitDir string) {
 			}
 			fmt.Println()
 		}
-		return
-	}
-
-	// Actual cleanup.
-	removed, err := index.GarbageCollect(sgDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Clean up legacy queue directory (removed in v0.2).
-	queueDir := filepath.Join(sgDir, "queue")
-	queueRemoved := false
-	if info, err := os.Stat(queueDir); err == nil && info.IsDir() {
-		os.RemoveAll(queueDir)
-		queueRemoved = true
-	}
-
-	// Log rotation.
-	maxMB := 100
-	if cfg != nil && cfg.Log.MaxSizeMB > 0 {
-		maxMB = cfg.Log.MaxSizeMB
-	}
-	rotated, rotErr := oplog.Rotate(sgDir, maxMB)
-	if rotErr != nil && !flags.quiet {
-		fmt.Fprintf(os.Stderr, "warning: log rotation failed: %v\n", rotErr)
-	}
-
-	// Clean stale locks in the shared safegit dir (covers worktrees).
-	sharedDir := repo.SharedSafegitDir(ctx, gitDir)
-	staleCleaned := removeStaleLocks(sharedDir)
-
-	if !flags.quiet {
-		fmt.Printf("removed %d orphan tmp dir(s)\n", removed)
-		if queueRemoved {
-			fmt.Println("removed legacy queue directory")
+	} else {
+		// Actual cleanup.
+		removed, err := index.GarbageCollect(sgDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
 		}
-		if staleCleaned > 0 {
-			fmt.Printf("removed %d stale lock(s)\n", staleCleaned)
+
+		// Clean up legacy queue directory (removed in v0.2).
+		queueDir := filepath.Join(sgDir, "queue")
+		queueRemoved := false
+		if info, err := os.Stat(queueDir); err == nil && info.IsDir() {
+			os.RemoveAll(queueDir)
+			queueRemoved = true
 		}
-		if rotated {
-			fmt.Println("log rotated (old log saved as log.1)")
+
+		// Log rotation.
+		maxMB := 100
+		if cfg != nil && cfg.Log.MaxSizeMB > 0 {
+			maxMB = cfg.Log.MaxSizeMB
+		}
+		rotated, rotErr := oplog.Rotate(sgDir, maxMB)
+		if rotErr != nil && !flags.quiet {
+			fmt.Fprintf(os.Stderr, "warning: log rotation failed: %v\n", rotErr)
+		}
+
+		// Clean stale locks in the shared safegit dir (covers worktrees).
+		sharedDir := repo.SharedSafegitDir(ctx, gitDir)
+		staleCleaned := removeStaleLocks(sharedDir)
+
+		if !flags.quiet {
+			fmt.Printf("removed %d orphan tmp dir(s)\n", removed)
+			if queueRemoved {
+				fmt.Println("removed legacy queue directory")
+			}
+			if staleCleaned > 0 {
+				fmt.Printf("removed %d stale lock(s)\n", staleCleaned)
+			}
+			if rotated {
+				fmt.Println("log rotated (old log saved as log.1)")
+			}
 		}
 	}
 
-	// Submodule safegit directory cleanup.
+	// Submodule safegit directory cleanup (runs in both dry-run and normal mode;
+	// doctorFixSubmodule handles dry-run internally).
 	submodules, enumErr := submodule.Enumerate(ctx, gitDir)
 	if enumErr != nil && !flags.quiet {
 		fmt.Fprintf(os.Stderr, "warning: enumerating submodules: %v\n", enumErr)
