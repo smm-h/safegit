@@ -42,6 +42,13 @@ func runUnlock(flags globalFlags, ref string) int {
 		return 1
 	}
 
+	if flags.dryRun {
+		if !flags.quiet {
+			fmt.Printf("would release lock on %s\n", refShortName(ref))
+		}
+		return 0
+	}
+
 	// Release the lock
 	if err := lock.ForceRelease(sharedDir, ref); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

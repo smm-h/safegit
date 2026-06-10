@@ -83,6 +83,43 @@ func TestUnlockLiveProcessRefused(t *testing.T) {
 	}
 }
 
+// TestUnlockDryRun verifies that `safegit --dry-run unlock` reports what it
+// would do but does not actually release the lock.
+func TestUnlockDryRun(t *testing.T) {
+	dir := newRepo(t)
+
+	gitDir := filepath.Join(dir, ".git")
+	lockDir := filepath.Join(gitDir, "safegit", "locks", "refs", "heads")
+	if err := os.MkdirAll(lockDir, 0755); err != nil {
+		t.Fatalf("creating lock dir: %v", err)
+	}
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		t.Fatalf("os.Hostname: %v", err)
+	}
+
+	// Plant a stale lock file with a PID that doesn't exist.
+	lockFile := filepath.Join(lockDir, "main.lock")
+	content := fmt.Sprintf("pid=999999999\nts=2026-01-01T00:00:00Z\nop=commit\nhost=%s\n", hostname)
+	if err := os.WriteFile(lockFile, []byte(content), 0644); err != nil {
+		t.Fatalf("writing lock file: %v", err)
+	}
+
+	stdout, stderr, code := runSafegit(t, dir, "--dry-run", "unlock", "main")
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "would release") {
+		t.Errorf("expected stdout to contain 'would release', got %q", stdout)
+	}
+
+	// Lock file should still exist (not removed in dry-run).
+	if _, err := os.Stat(lockFile); err != nil {
+		t.Errorf("lock file was removed during dry-run: %v", err)
+	}
+}
+
 // TestUnlockNonexistentLock verifies that `safegit unlock` fails when no lock
 // exists for the given ref.
 func TestUnlockNonexistentLock(t *testing.T) {
