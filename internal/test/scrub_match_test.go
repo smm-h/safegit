@@ -1,6 +1,7 @@
 package test
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -988,5 +989,128 @@ func TestScrubMatchPreservesGitignored(t *testing.T) {
 	combined := stdout + stderr
 	if !strings.Contains(combined, "Preserved") && !strings.Contains(combined, "gitignored") {
 		t.Errorf("output should mention gitignore preservation, got:\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+}
+
+// TestScrubMatchJSON runs scrub match with --json and verifies the JSON output
+// contains expected fields and values.
+func TestScrubMatchJSON(t *testing.T) {
+	dir := newRepo(t)
+
+	// Create files with a secret pattern across multiple commits.
+	commitFileEnv(t, dir, scrubMatchEnv, "file1.txt", "data SECRET_JSON here\n", "add file1")
+	commitFileEnv(t, dir, scrubMatchEnv, "file2.txt", "also SECRET_JSON inside\n", "add file2")
+	commitFileEnv(t, dir, scrubMatchEnv, "file1.txt", "updated SECRET_JSON v2\n", "update file1")
+
+	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
+		"--yes", "--json", "scrub", "match",
+		"--pattern", "SECRET_JSON",
+		"--replace", "REDACTED",
+		"--reason", "test json output",
+		"--entire-history",
+	)
+	if code != 0 {
+		t.Fatalf("scrub match --json failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	var result struct {
+		Version          int               `json:"version"`
+		DryRun           bool              `json:"dry_run"`
+		Rewrites         map[string]string `json:"rewrites"`
+		Tags             []interface{}     `json:"tags"`
+		CommitsRewritten int               `json:"commits_rewritten"`
+		BlobsReplaced    int               `json:"blobs_replaced"`
+		MessagesModified int               `json:"messages_modified"`
+		TagsRewritten    int               `json:"tags_rewritten"`
+		OldHead          string            `json:"old_head"`
+		NewHead          string            `json:"new_head"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v\nstdout: %s", err, stdout)
+	}
+
+	if result.Version != 1 {
+		t.Errorf("version: got %d, want 1", result.Version)
+	}
+	if result.DryRun {
+		t.Error("dry_run should be false")
+	}
+	if len(result.Rewrites) == 0 {
+		t.Error("rewrites map should be non-empty")
+	}
+	for old, new_ := range result.Rewrites {
+		if old == new_ {
+			t.Errorf("rewrites entry has old == new: %s", old)
+		}
+	}
+	if result.CommitsRewritten == 0 {
+		t.Error("commits_rewritten should be > 0")
+	}
+	if result.OldHead == "" {
+		t.Error("old_head should not be empty")
+	}
+	if result.NewHead == "" {
+		t.Error("new_head should not be empty")
+	}
+	if result.OldHead == result.NewHead {
+		t.Errorf("old_head should differ from new_head: %s", result.OldHead)
+	}
+}
+
+// TestScrubMatchJSONDryRun runs scrub match with --json --dry-run and verifies
+// the JSON output contains match statistics without modifying history.
+func TestScrubMatchJSONDryRun(t *testing.T) {
+	dir := newRepo(t)
+
+	commitFileEnv(t, dir, scrubMatchEnv, "file1.txt", "data SECRET_DRYJSON here\n", "add file1")
+	commitFileEnv(t, dir, scrubMatchEnv, "file2.txt", "also SECRET_DRYJSON inside\n", "add file2")
+
+	headBefore := revParseHEAD(t, dir)
+
+	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
+		"--yes", "--json", "--dry-run", "scrub", "match",
+		"--pattern", "SECRET_DRYJSON",
+		"--replace", "REDACTED",
+		"--reason", "test json dry run",
+		"--entire-history",
+	)
+	if code != 0 {
+		t.Fatalf("scrub match --json --dry-run failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	var result struct {
+		Version          int    `json:"version"`
+		DryRun           bool   `json:"dry_run"`
+		Pattern          string `json:"pattern"`
+		ObjectsScanned   int    `json:"objects_scanned"`
+		BinarySkipped    int    `json:"binary_skipped"`
+		TotalMatches     int    `json:"total_matches"`
+		BlobMatches      int    `json:"blob_matches"`
+		CommitMatches    int    `json:"commit_matches"`
+		TagMatches       int    `json:"tag_matches"`
+		FileMatches      int    `json:"file_matches"`
+		EstimatedCommits int    `json:"estimated_commits"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v\nstdout: %s", err, stdout)
+	}
+
+	if result.Version != 1 {
+		t.Errorf("version: got %d, want 1", result.Version)
+	}
+	if !result.DryRun {
+		t.Error("dry_run should be true")
+	}
+	if result.TotalMatches == 0 {
+		t.Error("total_matches should be > 0")
+	}
+	if result.ObjectsScanned == 0 {
+		t.Error("objects_scanned should be > 0")
+	}
+
+	// HEAD should be unchanged (dry-run).
+	headAfter := revParseHEAD(t, dir)
+	if headAfter != headBefore {
+		t.Errorf("HEAD changed during dry run: %s -> %s", headBefore[:12], headAfter[:12])
 	}
 }
