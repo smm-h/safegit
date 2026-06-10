@@ -806,7 +806,7 @@ func scrubMatchExecute(
 	tagsRewritten := rewriteTagAnnotations(ctx, flags, cmd, compiledPattern, replaceBytes, mangleMode, shaMap)
 
 	// Sync main index and working tree to match rewritten HEAD
-	if err := git.SyncMainIndexWithWorktree(ctx, "HEAD"); err != nil {
+	if _, err := git.SyncMainIndexWithWorktree(ctx, "HEAD"); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
 	}
 

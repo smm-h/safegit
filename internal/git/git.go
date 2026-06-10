@@ -200,6 +200,24 @@ func ListSkipWorktreeFiles(ctx context.Context) ([]string, error) {
 	return files, nil
 }
 
+// ListTrackedIgnoredFiles returns the paths of all files that are tracked in
+// the index but ignored by .gitignore rules. These are files that were once
+// committed and later gitignored -- read-tree --reset -u would overwrite them,
+// destroying local modifications (e.g., config files with secrets).
+func ListTrackedIgnoredFiles(ctx context.Context) ([]string, error) {
+	out, _, err := Run(ctx, "ls-files", "-i", "-c", "-z", "--exclude-standard")
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, entry := range strings.Split(out, "\x00") {
+		if entry != "" {
+			files = append(files, entry)
+		}
+	}
+	return files, nil
+}
+
 // syncMainIndexInner updates the main .git/index to match the given treeish.
 // When updateWorktree is true, it also checks out files into the working tree
 // (using --reset -u), which is needed after history rewrites like scrub.
@@ -244,9 +262,81 @@ func SyncMainIndex(ctx context.Context, treeish string) error {
 // to match the given treeish. Uses --reset -u, so the working tree must be
 // clean before calling. Needed after history rewrites (scrub) where committed
 // blobs have changed and the working tree must reflect the new content.
-// Skip-worktree flags are preserved across the read-tree rebuild.
-func SyncMainIndexWithWorktree(ctx context.Context, treeish string) error {
-	return syncMainIndexInner(ctx, treeish, true)
+//
+// Tracked+gitignored files (committed then later gitignored, e.g., config
+// files with secrets) are protected: skip-worktree is set before read-tree
+// so --reset -u does not overwrite them. Pre-existing skip-worktree flags
+// are also preserved.
+//
+// Returns the list of protected tracked+gitignored paths (empty if none).
+func SyncMainIndexWithWorktree(ctx context.Context, treeish string) ([]string, error) {
+	// 1. Save existing skip-worktree files.
+	origSkip, err := ListSkipWorktreeFiles(ctx)
+	if err != nil {
+		// Non-fatal: proceed without preservation.
+		origSkip = nil
+	}
+	origSkipSet := make(map[string]struct{}, len(origSkip))
+	for _, f := range origSkip {
+		origSkipSet[f] = struct{}{}
+	}
+
+	// 2. Collect tracked+gitignored paths.
+	trackedIgnored, err := ListTrackedIgnoredFiles(ctx)
+	if err != nil {
+		// Non-fatal: fall through to fast path (no protection).
+		trackedIgnored = nil
+	}
+
+	// 3. Fast path: no tracked+gitignored files.
+	if len(trackedIgnored) == 0 {
+		_, _, err = Run(ctx, "read-tree", "--reset", "-u", treeish)
+		if err != nil {
+			return nil, err
+		}
+		// Restore pre-existing skip-worktree flags.
+		for _, f := range origSkip {
+			if _, _, rerr := Run(ctx, "update-index", "--skip-worktree", f); rerr != nil {
+				fmt.Fprintf(os.Stderr, "safegit: warning: failed to restore skip-worktree on %s: %v\n", f, rerr)
+			}
+		}
+		return nil, nil
+	}
+
+	// 4. Slow path: protect tracked+gitignored files via skip-worktree.
+	for _, f := range trackedIgnored {
+		if _, ok := origSkipSet[f]; ok {
+			continue // already has skip-worktree, no need to set again
+		}
+		if _, _, serr := Run(ctx, "update-index", "--skip-worktree", f); serr != nil {
+			fmt.Fprintf(os.Stderr, "safegit: warning: failed to set skip-worktree on %s: %v\n", f, serr)
+		}
+	}
+
+	// Run read-tree --reset -u (skip-worktree files are not touched).
+	_, _, err = Run(ctx, "read-tree", "--reset", "-u", treeish)
+	if err != nil {
+		return nil, err
+	}
+
+	// Remove skip-worktree flags we added (not pre-existing ones).
+	for _, f := range trackedIgnored {
+		if _, ok := origSkipSet[f]; ok {
+			continue // was already skip-worktree before, leave it
+		}
+		if _, _, rerr := Run(ctx, "update-index", "--no-skip-worktree", f); rerr != nil {
+			fmt.Fprintf(os.Stderr, "safegit: warning: failed to clear skip-worktree on %s: %v\n", f, rerr)
+		}
+	}
+
+	// Defensively restore pre-existing skip-worktree flags.
+	for _, f := range origSkip {
+		if _, _, rerr := Run(ctx, "update-index", "--skip-worktree", f); rerr != nil {
+			fmt.Fprintf(os.Stderr, "safegit: warning: failed to restore skip-worktree on %s: %v\n", f, rerr)
+		}
+	}
+
+	return trackedIgnored, nil
 }
 
 // RunPassthrough executes a git command with stdin/stdout/stderr wired to
