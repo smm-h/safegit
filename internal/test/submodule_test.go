@@ -1080,7 +1080,7 @@ func TestPushHookCascadeFromParent(t *testing.T) {
 
 	// Create a bare remote for the submodule to push to
 	bareRemote := filepath.Join(t.TempDir(), "sub-bare")
-	cmd := exec.Command("git", "init", "--bare", bareRemote)
+	cmd := exec.Command("git", "init", "--bare", "--initial-branch=main", bareRemote)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init --bare: %v\n%s", err, out)
 	}
@@ -1141,7 +1141,7 @@ func TestPushHookCascadeRejectsOnParentHookFailure(t *testing.T) {
 
 	// Create a bare remote for the submodule to push to
 	bareRemote := filepath.Join(t.TempDir(), "sub-bare")
-	cmd := exec.Command("git", "init", "--bare", bareRemote)
+	cmd := exec.Command("git", "init", "--bare", "--initial-branch=main", bareRemote)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init --bare: %v\n%s", err, out)
 	}

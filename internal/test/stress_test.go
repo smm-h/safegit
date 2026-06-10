@@ -224,7 +224,7 @@ func TestHookTimeout(t *testing.T) {
 
 	// Set up a bare remote so push has something to target
 	remoteDir := t.TempDir()
-	cmd := exec.Command("git", "init", "--bare", remoteDir)
+	cmd := exec.Command("git", "init", "--bare", "--initial-branch=main", remoteDir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init --bare: %v\n%s", err, out)
 	}
@@ -299,9 +299,9 @@ func TestConcurrentPush(t *testing.T) {
 	}
 	dir := newRepo(t)
 
-	// Create bare remote
+	// Create bare remote (--initial-branch=main ensures HEAD resolves after push)
 	remoteDir := t.TempDir()
-	cmd := exec.Command("git", "init", "--bare", remoteDir)
+	cmd := exec.Command("git", "init", "--bare", "--initial-branch=main", remoteDir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init --bare: %v\n%s", err, out)
 	}
@@ -359,8 +359,8 @@ func TestConcurrentPush(t *testing.T) {
 		}
 	}
 
-	// Verify remote has both commits (file_a.txt and file_b.txt in HEAD tree)
-	cmd = exec.Command("git", "ls-tree", "-r", "--name-only", "HEAD")
+	// Verify remote has both commits (file_a.txt and file_b.txt in refs/heads/main)
+	cmd = exec.Command("git", "ls-tree", "-r", "--name-only", "refs/heads/main")
 	cmd.Dir = remoteDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -369,7 +369,7 @@ func TestConcurrentPush(t *testing.T) {
 	tree := string(out)
 	for _, f := range []string{"file_a.txt", "file_b.txt"} {
 		if !strings.Contains(tree, f) {
-			t.Errorf("remote missing %s in HEAD tree", f)
+			t.Errorf("remote missing %s in refs/heads/main tree", f)
 		}
 	}
 }
@@ -384,7 +384,7 @@ func TestConcurrentDifferentBranchPush(t *testing.T) {
 
 	// Create bare remote and add as origin
 	remoteDir := t.TempDir()
-	cmd := exec.Command("git", "init", "--bare", remoteDir)
+	cmd := exec.Command("git", "init", "--bare", "--initial-branch=main", remoteDir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init --bare: %v\n%s", err, out)
 	}

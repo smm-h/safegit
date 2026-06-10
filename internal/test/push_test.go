@@ -15,7 +15,7 @@ func newRepoWithRemote(t *testing.T) (string, string) {
 	dir := newRepo(t)
 
 	remoteDir := t.TempDir()
-	cmd := exec.Command("git", "init", "--bare", remoteDir)
+	cmd := exec.Command("git", "init", "--bare", "--initial-branch=main", remoteDir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init --bare: %v\n%s", err, out)
 	}
@@ -100,15 +100,17 @@ func TestPushOnlyHead(t *testing.T) {
 		t.Errorf("remote missing branch 'main'; got branches: %v", branches)
 	}
 
-	// Verify the file is in remote HEAD
-	cmd := exec.Command("git", "ls-tree", "-r", "--name-only", "HEAD")
+	// Verify the file is in the pushed branch on the remote.
+	// Use explicit ref instead of HEAD to avoid CI failures where
+	// the bare remote's default branch name differs from "main".
+	cmd := exec.Command("git", "ls-tree", "-r", "--name-only", "refs/heads/main")
 	cmd.Dir = remoteDir
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("git ls-tree on remote: %v", err)
 	}
 	if !strings.Contains(string(out), "file1.txt") {
-		t.Error("remote HEAD missing file1.txt")
+		t.Error("remote refs/heads/main missing file1.txt")
 	}
 }
 
