@@ -2,16 +2,22 @@
 
 # Changelog
 
-## 0.18.0
+## 0.18.1
 
-Add global --json flag, scrub JSON output, explicit push mode flags.
+Fix push test CI failure on ubuntu-latest.
 
 <details>
 <summary>Context</summary>
 
-Push now requires an explicit mode flag (--only-head, --only-branches, --only-tags, --both-branches-and-tags) instead of implicit current-branch default and refspec positional args. Scrub match and scrub file support --json for machine-readable output (commit SHA mapping, tag rewrites). This unblocks rlsbl release scrub (upstream consumer). Scrub commands now respect --quiet. All post-rewrite suggestions route through safegit push.
+Bare remotes in tests used system default branch (master on CI) while local repos used main. Fixed by setting --initial-branch=main on all bare inits.
 
 </details>
+
+### Fixes
+
+- **Fixed CI test failure for push commands.** Tests now use explicit branch names for bare remote verification, fixing failures on systems where the default branch is not `main`.
+
+## 0.18.0
 
 ### Breaking
 
