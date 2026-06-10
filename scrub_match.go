@@ -20,6 +20,36 @@ import (
 	"github.com/smm-h/safegit/internal/submodule"
 )
 
+// ScrubMatchResult is the JSON output for `scrub match` in execute mode.
+type ScrubMatchResult struct {
+	Version          int               `json:"version"`
+	DryRun           bool              `json:"dry_run"`
+	Rewrites         map[string]string `json:"rewrites"`
+	Tags             []TagRewrite      `json:"tags"`
+	CommitsRewritten int               `json:"commits_rewritten"`
+	BlobsReplaced    int               `json:"blobs_replaced"`
+	MessagesModified int               `json:"messages_modified"`
+	TagsRewritten    int               `json:"tags_rewritten"`
+	OldHead          string            `json:"old_head"`
+	NewHead          string            `json:"new_head"`
+}
+
+// ScrubMatchDryRunResult is the JSON output for `scrub match --dry-run`.
+type ScrubMatchDryRunResult struct {
+	Version          int    `json:"version"`
+	DryRun           bool   `json:"dry_run"`
+	Pattern          string `json:"pattern"`
+	Scope            string `json:"scope,omitempty"`
+	ObjectsScanned   int    `json:"objects_scanned"`
+	BinarySkipped    int    `json:"binary_skipped"`
+	TotalMatches     int    `json:"total_matches"`
+	BlobMatches      int    `json:"blob_matches"`
+	CommitMatches    int    `json:"commit_matches"`
+	TagMatches       int    `json:"tag_matches"`
+	FileMatches      int    `json:"file_matches"`
+	EstimatedCommits int    `json:"estimated_commits,omitempty"`
+}
+
 func runScrubMatch(flags globalFlags, kwargs map[string]interface{}) int {
 	const cmd = "scrub match"
 
@@ -104,7 +134,7 @@ func runScrubMatch(flags globalFlags, kwargs map[string]interface{}) int {
 
 	// Dry-run mode
 	if flags.dryRun {
-		return scrubMatchDryRun(ctx, flags, cmd, compiledPattern, scope, gitDir)
+		return scrubMatchDryRun(ctx, flags, cmd, compiledPattern, scope, gitDir, pattern, fromSHA, entireHistory)
 	}
 
 	// Execution mode
@@ -114,7 +144,7 @@ func runScrubMatch(flags globalFlags, kwargs map[string]interface{}) int {
 // scrubMatchDryRun scans all objects and non-object files, prints categorized
 // output, and returns 0. When scope is non-nil, only blob matches whose path
 // matches the glob are shown.
-func scrubMatchDryRun(ctx context.Context, flags globalFlags, cmd string, compiledPattern *regexp.Regexp, scope *string, gitDir string) int {
+func scrubMatchDryRun(ctx context.Context, flags globalFlags, cmd string, compiledPattern *regexp.Regexp, scope *string, gitDir string, pattern string, fromSHA string, entireHistory bool) int {
 	infof(flags, "Scanning all objects...\n")
 	results, err := scan.ScanObjects(ctx, compiledPattern)
 	if err != nil {
@@ -282,6 +312,44 @@ func scrubMatchDryRun(ctx context.Context, flags globalFlags, cmd string, compil
 				infof(flags, "    tag %s (line %d): %s\n", shortSHA(m.SHA), m.Line, m.Context)
 			}
 		}
+	}
+
+	if flags.json {
+		// Estimate commit count for the rewrite range.
+		estimatedCommits := 0
+		if entireHistory {
+			out, _, err := git.Run(ctx, "rev-list", "--count", "HEAD")
+			if err == nil {
+				fmt.Sscanf(strings.TrimSpace(out), "%d", &estimatedCommits)
+			}
+		} else if fromSHA != "" {
+			out, _, err := git.Run(ctx, "rev-list", "--count", fromSHA+"..HEAD")
+			if err == nil {
+				count := 0
+				fmt.Sscanf(strings.TrimSpace(out), "%d", &count)
+				estimatedCommits = count + 1 // inclusive of fromSHA
+			}
+		}
+		scopeStr := ""
+		if scope != nil {
+			scopeStr = *scope
+		}
+		result := ScrubMatchDryRunResult{
+			Version:          1,
+			DryRun:           true,
+			Pattern:          pattern,
+			Scope:            scopeStr,
+			ObjectsScanned:   results.Scanned,
+			BinarySkipped:    results.Skipped,
+			TotalMatches:     totalMatches,
+			BlobMatches:      len(blobMatches),
+			CommitMatches:    len(commitMatches),
+			TagMatches:       len(tagMatches),
+			FileMatches:      len(nonObjectMatches),
+			EstimatedCommits: estimatedCommits,
+		}
+		emitJSON(result)
+		return 0
 	}
 
 	infof(flags, "\nSummary: %d blob matches, %d message matches, %d tag matches, %d file matches\n",
@@ -814,8 +882,7 @@ func scrubMatchExecute(
 
 	// Tag annotation rewriting (second pass for annotation text)
 	annotationTagRewrites, tagsRewritten := rewriteTagAnnotations(ctx, flags, cmd, compiledPattern, replaceBytes, mangleMode, shaMap)
-	_ = refTagRewrites
-	_ = annotationTagRewrites
+	allTagRewrites := append(refTagRewrites, annotationTagRewrites...)
 
 	// Sync main index and working tree to match rewritten HEAD
 	protectedPaths, syncErr := git.SyncMainIndexWithWorktree(ctx, "HEAD")
@@ -932,6 +999,36 @@ func scrubMatchExecute(
 		infof(flags, "Verification passed: no matches found in object stores.\n")
 	} else {
 		fmt.Fprintln(os.Stderr, "Run 'git reflog expire --expire=now --all && git gc --prune=now' to force cleanup.")
+	}
+
+	// JSON output
+	if flags.json {
+		rewrites := make(map[string]string)
+		for old, new_ := range shaMap {
+			if old != new_ {
+				rewrites[old] = new_
+			}
+		}
+		// Combine tag rewrites from submodules too.
+		combinedTagRewrites := make([]TagRewrite, 0, len(allTagRewrites))
+		combinedTagRewrites = append(combinedTagRewrites, allTagRewrites...)
+		result := ScrubMatchResult{
+			Version:          1,
+			DryRun:           false,
+			Rewrites:         rewrites,
+			Tags:             combinedTagRewrites,
+			CommitsRewritten: rewrittenCount,
+			BlobsReplaced:    len(blobMap),
+			MessagesModified: messagesModified,
+			TagsRewritten:    tagsRewritten,
+			OldHead:          oldHeadSHA,
+			NewHead:          newHeadSHA,
+		}
+		if result.Tags == nil {
+			result.Tags = []TagRewrite{}
+		}
+		emitJSON(result)
+		return exitCode
 	}
 
 	// Summary
