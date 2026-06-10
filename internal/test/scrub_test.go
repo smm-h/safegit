@@ -1202,3 +1202,71 @@ func TestScrubLightweightTag(t *testing.T) {
 		t.Errorf("tagged commit secret.txt = %q, want %q", content, "SCRUBBED\n")
 	}
 }
+
+// TestScrubFilePreservesGitignored verifies that when a tracked file is
+// gitignored and then scrub file rewrites its blob, the on-disk copy is
+// preserved and the file is untracked from the index afterward.
+func TestScrubFilePreservesGitignored(t *testing.T) {
+	dir := newRepo(t)
+
+	// Commit config.env with secret content
+	commitFileEnv(t, dir, scrubEnv, "config.env", "SECRET=production_key\n", "add config with secret")
+
+	// Gitignore config.env and commit
+	commitFileEnv(t, dir, scrubEnv, ".gitignore", "config.env\n", "add gitignore")
+
+	shas := revListReverse(t, dir)
+	initialSHA := shas[0] // seed commit
+
+	// Write the safe replacement on disk and commit (scrub requires clean tree)
+	commitFileEnv(t, dir, scrubEnv, "config.env", "SECRET=safe_value\n", "commit replacement")
+
+	// Run scrub file -- rewrites all historical commits' config.env with on-disk content
+	stdout, stderr, code := runSafegitEnv(t, dir, scrubEnv,
+		"--yes", "scrub", "file",
+		"--from", initialSHA,
+		"--reason", "test gitignore preservation",
+		"config.env",
+	)
+	if code != 0 {
+		t.Fatalf("scrub file failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// On-disk config.env must still have the replacement content (not overwritten)
+	diskContent, err := os.ReadFile(filepath.Join(dir, "config.env"))
+	if err != nil {
+		t.Fatalf("reading config.env from disk: %v", err)
+	}
+	if string(diskContent) != "SECRET=safe_value\n" {
+		t.Errorf("on-disk config.env was overwritten: got %q, want %q", string(diskContent), "SECRET=safe_value\n")
+	}
+
+	// config.env should be untracked (git ls-files returns nothing)
+	lsCmd := exec.Command("git", "ls-files", "config.env")
+	lsCmd.Dir = dir
+	lsOut, err := lsCmd.Output()
+	if err != nil {
+		t.Fatalf("git ls-files config.env: %v", err)
+	}
+	if strings.TrimSpace(string(lsOut)) != "" {
+		t.Errorf("config.env should be untracked, but git ls-files returned: %q", string(lsOut))
+	}
+
+	// Stdout or stderr should mention preservation
+	combined := stdout + stderr
+	if !strings.Contains(combined, "Preserved") && !strings.Contains(combined, "gitignored") {
+		t.Errorf("output should mention gitignore preservation, got:\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+
+	// Verify historical commits have the scrubbed content
+	newSHAs := revListReverse(t, dir)
+	for i := 1; i < len(newSHAs); i++ {
+		content, ok := gitShow(t, dir, newSHAs[i], "config.env")
+		if !ok {
+			continue // may not exist in all commits
+		}
+		if content != "SECRET=safe_value\n" {
+			t.Errorf("commit %d (%s): config.env = %q, want %q", i, newSHAs[i][:12], content, "SECRET=safe_value\n")
+		}
+	}
+}
