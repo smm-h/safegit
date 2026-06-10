@@ -606,3 +606,77 @@ func TestCheckoutRefusedDirty(t *testing.T) {
 		t.Errorf("HEAD moved to %s despite refusal", strings.TrimSpace(string(headOut)))
 	}
 }
+
+// TestDoctorFixCleansMainRepoStaleLocks verifies that `doctor --fix` removes
+// stale lock files from the main repo's safegit directory (not just submodules).
+func TestDoctorFixCleansMainRepoStaleLocks(t *testing.T) {
+	t.Parallel()
+	dir := newRepo(t)
+
+	// newRepo runs `safegit config set` which auto-initializes .git/safegit/.
+	// Plant a stale lock file with a PID that cannot exist.
+	lockDir := filepath.Join(dir, ".git", "safegit", "locks", "refs", "heads")
+	os.MkdirAll(lockDir, 0755)
+	lockFile := filepath.Join(lockDir, "main.lock")
+	hostname, _ := os.Hostname()
+	lockContent := fmt.Sprintf("pid=999999999\nts=%s\nop=commit\nhost=%s\n",
+		time.Now().Add(-1*time.Hour).UTC().Format(time.RFC3339Nano), hostname)
+	if err := os.WriteFile(lockFile, []byte(lockContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the lock file exists before running doctor.
+	if _, err := os.Stat(lockFile); os.IsNotExist(err) {
+		t.Fatal("stale lock file not created")
+	}
+
+	// Run doctor --fix --yes.
+	stdout, stderr, code := runSafegit(t, dir, "doctor", "--fix", "--yes")
+	if code != 0 {
+		t.Fatalf("doctor --fix failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// The lock file should be gone.
+	if _, err := os.Stat(lockFile); !os.IsNotExist(err) {
+		t.Errorf("stale lock file still exists at %s", lockFile)
+	}
+
+	// Output should mention stale lock cleanup.
+	if !strings.Contains(stdout, "stale lock") {
+		t.Errorf("doctor --fix output should mention stale lock cleanup, got: %s", stdout)
+	}
+}
+
+// TestDoctorDiagnosesMainRepoStaleLocks verifies that `doctor` (without --fix)
+// reports stale locks in the main repo's safegit directory.
+func TestDoctorDiagnosesMainRepoStaleLocks(t *testing.T) {
+	t.Parallel()
+	dir := newRepo(t)
+
+	// Plant a stale lock file.
+	lockDir := filepath.Join(dir, ".git", "safegit", "locks", "refs", "heads")
+	os.MkdirAll(lockDir, 0755)
+	lockFile := filepath.Join(lockDir, "main.lock")
+	hostname, _ := os.Hostname()
+	lockContent := fmt.Sprintf("pid=999999999\nts=%s\nop=commit\nhost=%s\n",
+		time.Now().Add(-1*time.Hour).UTC().Format(time.RFC3339Nano), hostname)
+	if err := os.WriteFile(lockFile, []byte(lockContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run doctor --diagnose (no --fix).
+	stdout, _, code := runSafegit(t, dir, "doctor", "--diagnose")
+	if code != 0 {
+		t.Fatalf("doctor --diagnose failed (code %d)", code)
+	}
+
+	// Output should report stale lock(s).
+	if !strings.Contains(stdout, "stale lock") {
+		t.Errorf("doctor output should report stale lock(s), got: %s", stdout)
+	}
+
+	// The lock file should still exist (doctor without --fix doesn't remove).
+	if _, err := os.Stat(lockFile); os.IsNotExist(err) {
+		t.Errorf("lock file was removed by doctor without --fix")
+	}
+}
