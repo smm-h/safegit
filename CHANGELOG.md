@@ -2,16 +2,28 @@
 
 # Changelog
 
-## 0.16.1
+## 0.17.0
 
-Fix macOS symlink bug in submodule detection.
+Rename --force-push to --force-with-lease, remove --push from rewrite-author, fix doctor stale lock cleanup.
 
 <details>
 <summary>Context</summary>
 
-DetectParent compared symlink-resolved paths from git with unresolved paths from os.Getwd(), causing filepath.Rel to produce incorrect relative paths on macOS where /var -> /private/var. This broke autobump and push-hook-cascade on macOS since v0.15.0.
+Loose ends from the v0.16.0 --force removal: the --force-push flag name was misleading (it triggers --force-with-lease), rewrite-author --push bypassed safegit's push pipeline, and doctor --fix didn't clean stale locks in the main repo. Also added integration tests for unlock (previously untested) and doctor stale lock cleanup.
 
 </details>
+
+### Breaking
+
+- **Renamed `--force-push` to `--force-with-lease` on `push`.** The flag name now matches what it actually does.
+- **Removed `--push` flag from `rewrite-author`.** After rewriting, safegit now prints the git commands to push manually instead of pushing directly.
+
+### Fixes
+
+- **Removed stash suggestion from dirty-tree error.** `requireCleanTree` no longer suggests `git stash` as a workaround.
+- **`doctor --fix` now cleans stale locks in the main repo.** Previously only cleaned submodule stale locks. The diagnostic check also now scans the full lock tree recursively instead of just `refs/heads/`.
+
+## 0.16.1
 
 ### Fixes
 
