@@ -228,13 +228,13 @@ func runDoctor(flags globalFlags, kwargs map[string]interface{}) {
 
 	// --fix: run garbage collection and cleanup (formerly `safegit gc`).
 	if fix && repo.IsInitialized(gitDir) {
-		doctorFix(flags, gitDir)
+		doctorFix(ctx, flags, gitDir)
 	}
 }
 
 // doctorFix performs cleanup: orphan tmp dirs, legacy queue dir, and oplog
 // rotation. With --dry-run it only reports what would be done.
-func doctorFix(flags globalFlags, gitDir string) {
+func doctorFix(ctx context.Context, flags globalFlags, gitDir string) {
 	sgDir := repo.SafegitDir(gitDir)
 	cfg, _ := loadConfig(flags, gitDir)
 
@@ -313,7 +313,6 @@ func doctorFix(flags globalFlags, gitDir string) {
 	}
 
 	// Submodule safegit directory cleanup.
-	ctx := context.Background()
 	submodules, enumErr := submodule.Enumerate(ctx, gitDir)
 	if enumErr != nil && !flags.quiet {
 		fmt.Fprintf(os.Stderr, "warning: enumerating submodules: %v\n", enumErr)
