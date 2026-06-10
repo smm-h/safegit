@@ -750,12 +750,14 @@ func scrubMatchExecute(
 			die(flags, cmd, 1, fmt.Sprintf("chdir to submodule %s for ref update: %v", sr.sub.RelativePath, err))
 		}
 
-		if err := updateRefs(ctx, sr.shaMap, "", "", "", "", flags.verbose); err != nil {
+		subRefTagRewrites, err := updateRefs(ctx, sr.shaMap, "", "", "", "", flags.verbose)
+		if err != nil {
 			os.Chdir(parentDir)
 			die(flags, cmd, 1, fmt.Sprintf("submodule %s: updating refs: %v", sr.sub.RelativePath, err))
 		}
 
-		subTagsRewritten := rewriteTagAnnotations(ctx, flags, cmd, compiledPattern, replaceBytes, mangleMode, sr.shaMap)
+		subAnnotTagRewrites, subTagsRewritten := rewriteTagAnnotations(ctx, flags, cmd, compiledPattern, replaceBytes, mangleMode, sr.shaMap)
+		_, _ = subRefTagRewrites, subAnnotTagRewrites
 		if subTagsRewritten > 0 && flags.verbose {
 			fmt.Fprintf(os.Stderr, "  [%s] %d tag annotations rewritten\n", sr.sub.RelativePath, subTagsRewritten)
 		}
@@ -805,12 +807,15 @@ func scrubMatchExecute(
 
 	// Update parent refs.
 	infof(flags, "Updating refs...\n")
-	if err := updateRefs(ctx, shaMap, "", "", "", "", flags.verbose); err != nil {
+	refTagRewrites, err := updateRefs(ctx, shaMap, "", "", "", "", flags.verbose)
+	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("updating refs: %v", err))
 	}
 
 	// Tag annotation rewriting (second pass for annotation text)
-	tagsRewritten := rewriteTagAnnotations(ctx, flags, cmd, compiledPattern, replaceBytes, mangleMode, shaMap)
+	annotationTagRewrites, tagsRewritten := rewriteTagAnnotations(ctx, flags, cmd, compiledPattern, replaceBytes, mangleMode, shaMap)
+	_ = refTagRewrites
+	_ = annotationTagRewrites
 
 	// Sync main index and working tree to match rewritten HEAD
 	protectedPaths, syncErr := git.SyncMainIndexWithWorktree(ctx, "HEAD")
@@ -1039,15 +1044,16 @@ func buildScopedBlobSetWithDir(ctx context.Context, scope, gitDir, workTree stri
 // rewriteTagAnnotations does a second pass over annotated tags after updateRefs,
 // checking each tag's annotation body for the pattern and rewriting if matched.
 // Returns the count of tags whose annotations were rewritten.
-func rewriteTagAnnotations(ctx context.Context, flags globalFlags, cmd string, compiledPattern *regexp.Regexp, replaceBytes []byte, mangleMode bool, shaMap map[string]string) int {
+func rewriteTagAnnotations(ctx context.Context, flags globalFlags, cmd string, compiledPattern *regexp.Regexp, replaceBytes []byte, mangleMode bool, shaMap map[string]string) ([]TagRewrite, int) {
 	out, _, err := git.Run(ctx, "for-each-ref", "--format=%(refname) %(objecttype) %(objectname)", "refs/tags/")
 	if err != nil {
 		if flags.verbose {
 			fmt.Fprintf(os.Stderr, "warning: failed to list tags for annotation rewriting: %v\n", err)
 		}
-		return 0
+		return nil, 0
 	}
 
+	var tagRewrites []TagRewrite
 	tagsRewritten := 0
 	lines := splitNonEmpty(out)
 	for _, line := range lines {
@@ -1109,13 +1115,14 @@ func rewriteTagAnnotations(ctx context.Context, flags globalFlags, cmd string, c
 			die(flags, cmd, 1, fmt.Sprintf("updating tag ref %s after annotation rewrite: %v", refname, err))
 		}
 
+		tagRewrites = append(tagRewrites, TagRewrite{Refname: refname, OldSHA: objectname, NewSHA: newTagSHA, Annotated: true})
 		tagsRewritten++
 		if flags.verbose {
 			fmt.Fprintf(os.Stderr, "  tag annotation %s: %s -> %s\n", refname, shortSHA(objectname), shortSHA(newTagSHA))
 		}
 	}
 
-	return tagsRewritten
+	return tagRewrites, tagsRewritten
 }
 
 // shortSHA returns the first 8 characters of a SHA.

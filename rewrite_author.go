@@ -145,7 +145,8 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 	}
 
 	fmt.Println("Updating refs...")
-	if err := updateRefs(ctx, shaMap, oldName, newName, oldEmail, newEmail, flags.verbose); err != nil {
+	_, err = updateRefs(ctx, shaMap, oldName, newName, oldEmail, newEmail, flags.verbose)
+	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("updating refs: %v", err))
 	}
 
@@ -646,12 +647,13 @@ func rewriteCommits(ctx context.Context, oldName, newName, oldEmail, newEmail st
 // updateRefs updates all branch and tag refs to point to rewritten commits.
 // For annotated tags, the tag object itself is rewritten if its target commit
 // changed or its tagger name matches oldName. Stash refs are skipped.
-func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName, oldEmail, newEmail string, verbose bool) error {
+func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName, oldEmail, newEmail string, verbose bool) ([]TagRewrite, error) {
 	out, _, err := git.Run(ctx, "for-each-ref", "--format=%(refname) %(objecttype) %(objectname)", "refs/heads/", "refs/tags/", "refs/remotes/")
 	if err != nil {
-		return fmt.Errorf("listing refs: %w", err)
+		return nil, fmt.Errorf("listing refs: %w", err)
 	}
 
+	var tagRewrites []TagRewrite
 	lines := splitNonEmpty(out)
 	for _, line := range lines {
 		parts := strings.SplitN(line, " ", 3)
@@ -679,7 +681,10 @@ func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName,
 				continue
 			}
 			if err := git.UpdateRef(ctx, refname, newSHA, objectname); err != nil {
-				return fmt.Errorf("updating ref %s: %w", refname, err)
+				return tagRewrites, fmt.Errorf("updating ref %s: %w", refname, err)
+			}
+			if strings.HasPrefix(refname, "refs/tags/") {
+				tagRewrites = append(tagRewrites, TagRewrite{Refname: refname, OldSHA: objectname, NewSHA: newSHA, Annotated: false})
 			}
 			if verbose {
 				fmt.Fprintf(os.Stderr, "  %-20s %s -> %s\n", refname, objectname[:12], newSHA[:12])
@@ -690,14 +695,15 @@ func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName,
 			// tagger name matches.
 			newTagSHA, err := rewriteAnnotatedTag(ctx, objectname, shaMap, oldName, newName, oldEmail, newEmail)
 			if err != nil {
-				return fmt.Errorf("rewriting annotated tag %s: %w", refname, err)
+				return tagRewrites, fmt.Errorf("rewriting annotated tag %s: %w", refname, err)
 			}
 			if newTagSHA == objectname {
 				continue
 			}
 			if err := git.UpdateRef(ctx, refname, newTagSHA, objectname); err != nil {
-				return fmt.Errorf("updating annotated tag ref %s: %w", refname, err)
+				return tagRewrites, fmt.Errorf("updating annotated tag ref %s: %w", refname, err)
 			}
+			tagRewrites = append(tagRewrites, TagRewrite{Refname: refname, OldSHA: objectname, NewSHA: newTagSHA, Annotated: true})
 			if verbose {
 				fmt.Fprintf(os.Stderr, "  %-20s %s -> %s\n", refname, objectname[:12], newTagSHA[:12])
 			}
@@ -710,11 +716,11 @@ func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName,
 		// HEAD is detached.
 		headSHA, err := git.RevParse(ctx, "HEAD")
 		if err != nil {
-			return fmt.Errorf("reading detached HEAD: %w", err)
+			return tagRewrites, fmt.Errorf("reading detached HEAD: %w", err)
 		}
 		if newSHA, ok := shaMap[headSHA]; ok && newSHA != headSHA {
 			if err := git.UpdateRef(ctx, "HEAD", newSHA, headSHA); err != nil {
-				return fmt.Errorf("updating detached HEAD: %w", err)
+				return tagRewrites, fmt.Errorf("updating detached HEAD: %w", err)
 			}
 			if verbose {
 				fmt.Fprintf(os.Stderr, "  %-20s %s -> %s\n", "HEAD (detached)", headSHA[:12], newSHA[:12])
@@ -722,7 +728,7 @@ func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName,
 		}
 	}
 
-	return nil
+	return tagRewrites, nil
 }
 
 // rewriteAnnotatedTag rewrites an annotated tag object if its target commit

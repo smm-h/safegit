@@ -175,7 +175,8 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 	// skips tagger matching entirely and only remaps target commit SHAs,
 	// which is exactly what scrub needs.
 	infof(flags, "Updating refs...\n")
-	if err := updateRefs(ctx, shaMap, "", "", "", "", flags.verbose); err != nil {
+	_, err = updateRefs(ctx, shaMap, "", "", "", "", flags.verbose)
+	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("updating refs: %v", err))
 	}
 
@@ -384,7 +385,8 @@ func runScrubFileInSubmodule(
 
 	// Update submodule refs.
 	infof(flags, "Updating refs in submodule [%s]...\n", sub.RelativePath)
-	if err := updateRefs(ctx, subShaMap, "", "", "", "", flags.verbose); err != nil {
+	_, err = updateRefs(ctx, subShaMap, "", "", "", "", flags.verbose)
+	if err != nil {
 		os.Chdir(parentDir)
 		die(flags, cmd, 1, fmt.Sprintf("submodule: updating refs: %v", err))
 	}
@@ -472,7 +474,8 @@ func runScrubFileInSubmodule(
 
 	// Update parent refs.
 	infof(flags, "Updating parent refs...\n")
-	if err := updateRefs(ctx, parentShaMap, "", "", "", "", flags.verbose); err != nil {
+	_, err = updateRefs(ctx, parentShaMap, "", "", "", "", flags.verbose)
+	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("updating parent refs: %v", err))
 	}
 
