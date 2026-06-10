@@ -118,16 +118,37 @@ func main() {
 		if v := kwargs["remote"]; v != nil {
 			remote = v.(string)
 		}
-		refspecs := kwargsStrSlice(kwargs["refspecs"])
-		return runPush(gf, noPrePrePush, forceWithLease, remote, refspecs)
+		onlyHead := kwargs["only_head"].(bool)
+		onlyBranches := kwargs["only_branches"].(bool)
+		onlyTags := kwargs["only_tags"].(bool)
+		bothBranchesAndTags := kwargs["both_branches_and_tags"].(bool)
+		var mode pushMode
+		switch {
+		case onlyHead:
+			mode = pushModeHead
+		case onlyBranches:
+			mode = pushModeBranches
+		case onlyTags:
+			mode = pushModeTags
+		case bothBranchesAndTags:
+			mode = pushModeBoth
+		}
+		return runPush(gf, noPrePrePush, forceWithLease, remote, mode)
 	},
 		strictcli.WithFlags(
 			strictcli.BoolFlag("no-pre-pre-push", "skip pre-pre-push hooks"),
 			strictcli.BoolFlag("force-with-lease", "push with --force-with-lease (safe force push)"),
 		),
+		strictcli.WithMutex(strictcli.MutexGroup{
+			Flags: []strictcli.Flag{
+				strictcli.BoolFlag("only-head", "push only the current branch"),
+				strictcli.BoolFlag("only-branches", "push all branches"),
+				strictcli.BoolFlag("only-tags", "push all tags"),
+				strictcli.BoolFlag("both-branches-and-tags", "push all branches and all tags"),
+			},
+		}),
 		strictcli.WithArgs(
 			strictcli.NewArg("remote", "remote name", strictcli.ArgRequired(false)),
-			strictcli.NewArg("refspecs", "refs to push", strictcli.ArgRequired(false), strictcli.Variadic()),
 		),
 	)
 	app.Command("pull", "fetch and merge (default --ff-only)", func(kwargs map[string]interface{}) int {

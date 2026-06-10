@@ -235,7 +235,7 @@ func TestHookTimeout(t *testing.T) {
 	}
 
 	// Push should abort with hook timeout (exit code 21)
-	_, _, code := runSafegit(t, dir, "push", "origin", "main")
+	_, _, code := runSafegit(t, dir, "push", "--only-head", "origin")
 	if code != 21 {
 		t.Errorf("expected exit code 21 (hook timeout), got %d", code)
 	}
@@ -333,7 +333,7 @@ func TestConcurrentPush(t *testing.T) {
 	codes := make([]int, 2)
 	stderrs := make([]string, 2)
 	parallel(2, func(i int) {
-		_, se, c := runSafegit(t, dir, "push", "origin", "main")
+		_, se, c := runSafegit(t, dir, "push", "--only-head", "origin")
 		codes[i] = c
 		stderrs[i] = se
 	})
@@ -353,7 +353,7 @@ func TestConcurrentPush(t *testing.T) {
 
 	// If only one succeeded, push again to land the second
 	if successes == 1 {
-		_, _, code = runSafegit(t, dir, "push", "origin", "main")
+		_, _, code = runSafegit(t, dir, "push", "--only-head", "origin")
 		if code != 0 {
 			t.Fatalf("retry push failed (code %d)", code)
 		}
@@ -420,21 +420,26 @@ func TestConcurrentDifferentBranchPush(t *testing.T) {
 		t.Fatalf("branch_b commit failed (code %d): %s", code, stderr)
 	}
 
-	// Push both branches concurrently
+	// Push both branches concurrently (both agents push all branches)
 	branches := []string{"branch_a", "branch_b"}
 	codes := make([]int, 2)
 	stderrs := make([]string, 2)
 	parallel(2, func(i int) {
-		_, se, c := runSafegit(t, dir, "push", "origin", branches[i])
+		_, se, c := runSafegit(t, dir, "push", "--only-branches", "origin")
 		codes[i] = c
 		stderrs[i] = se
 	})
 
-	// Both should succeed (different refs, no contention)
-	for i, br := range branches {
-		if codes[i] != 0 {
-			t.Errorf("push %s failed (code %d): %s", br, codes[i], stderrs[i])
+	// At least one must succeed; the other may fail with ref contention
+	successes := 0
+	for i := 0; i < 2; i++ {
+		if codes[i] == 0 {
+			successes++
 		}
+	}
+	if successes == 0 {
+		t.Fatalf("both pushes failed: [0] code=%d stderr=%s [1] code=%d stderr=%s",
+			codes[0], stderrs[0], codes[1], stderrs[1])
 	}
 
 	// Verify remote has both branches

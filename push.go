@@ -21,6 +21,19 @@ const (
 	exitPushGitFailed   = 40
 )
 
+// pushMode selects which refs to push.
+type pushMode int
+
+const (
+	pushModeHead     pushMode = iota // push only the current branch
+	pushModeBranches                 // push all branches
+	pushModeTags                     // push all tags
+	pushModeBoth                     // push all branches and all tags
+)
+
+// nullSHA is the zero SHA used when a ref does not exist on the remote.
+const nullSHA = "0000000000000000000000000000000000000000"
+
 // pushRefInfo describes a single ref being pushed.
 type pushRefInfo struct {
 	LocalRef  string
@@ -29,7 +42,7 @@ type pushRefInfo struct {
 	RemoteSHA string
 }
 
-func runPush(flags globalFlags, noPrePrePush bool, forceWithLease bool, remote string, refspecs []string) int {
+func runPush(flags globalFlags, noPrePrePush bool, forceWithLease bool, remote string, mode pushMode) int {
 	gitDir := mustGitDir(flags)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		die(flags, "push",1, err.Error())
@@ -53,9 +66,9 @@ func runPush(flags globalFlags, noPrePrePush bool, forceWithLease bool, remote s
 	}
 
 	// Resolve refs to push
-	refs, err := resolveRefsForPush(ctx, remote, refspecs)
+	refs, err := resolveRefsForPush(ctx, remote, mode)
 	if err != nil {
-		die(flags, "push",1, fmt.Sprintf("resolving refs: %v", err))
+		die(flags, "push", 1, fmt.Sprintf("resolving refs: %v", err))
 		return 1
 	}
 
@@ -137,6 +150,11 @@ func runPush(flags globalFlags, noPrePrePush bool, forceWithLease bool, remote s
 		retryAttempts = 3
 	}
 
+	// Build explicit refspecs from resolved refs
+	refspecs := make([]string, len(refs))
+	for i, r := range refs {
+		refspecs[i] = r.LocalRef + ":" + r.RemoteRef
+	}
 	pushArgs := buildGitPushArgs(remote, refspecs, forceFlag)
 	var pushErr error
 	for attempt := 1; attempt <= retryAttempts; attempt++ {
@@ -204,25 +222,35 @@ func resolveRemoteURL(ctx context.Context, remote string) (string, error) {
 	return strings.TrimSpace(stdout), nil
 }
 
-// resolveRefsForPush determines what refs will be pushed.
-// If refspecs are provided, resolves them. Otherwise, uses current branch's tracking.
-func resolveRefsForPush(ctx context.Context, remote string, refspecs []string) ([]pushRefInfo, error) {
-	if len(refspecs) > 0 {
-		var refs []pushRefInfo
-		for _, spec := range refspecs {
-			ref, err := resolveRefspec(ctx, remote, spec)
-			if err != nil {
-				return nil, err
-			}
-			refs = append(refs, ref)
+// resolveRefsForPush determines what refs will be pushed based on the selected mode.
+func resolveRefsForPush(ctx context.Context, remote string, mode pushMode) ([]pushRefInfo, error) {
+	switch mode {
+	case pushModeHead:
+		return resolveHeadRef(ctx, remote)
+	case pushModeBranches:
+		return resolveBranchRefs(ctx, remote)
+	case pushModeTags:
+		return resolveTagRefs(ctx, remote)
+	case pushModeBoth:
+		branches, err := resolveBranchRefs(ctx, remote)
+		if err != nil {
+			return nil, err
 		}
-		return refs, nil
+		tags, err := resolveTagRefs(ctx, remote)
+		if err != nil {
+			return nil, err
+		}
+		return append(branches, tags...), nil
+	default:
+		return nil, fmt.Errorf("unknown push mode")
 	}
+}
 
-	// No refspecs -- push current branch
+// resolveHeadRef resolves the current branch for --only-head mode.
+func resolveHeadRef(ctx context.Context, remote string) ([]pushRefInfo, error) {
 	headRef, err := git.HeadRef(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("cannot determine current branch (detached HEAD?)")
+		return nil, fmt.Errorf("cannot push: HEAD is detached; check out a branch first")
 	}
 
 	localSHA, err := git.RevParse(ctx, headRef)
@@ -230,79 +258,82 @@ func resolveRefsForPush(ctx context.Context, remote string, refspecs []string) (
 		return nil, fmt.Errorf("resolving %s: %w", headRef, err)
 	}
 
-	// Get remote SHA (might not exist yet)
-	remoteSHA := "0000000000000000000000000000000000000000"
-	remoteRef := headRef // push to same-named remote branch
-	stdout, _, err := git.Run(ctx, "ls-remote", remote, remoteRef)
-	if err == nil && stdout != "" {
-		parts := strings.Fields(stdout)
-		if len(parts) >= 1 {
-			remoteSHA = parts[0]
-		}
-	}
+	remoteSHA := getRemoteSHA(ctx, remote, headRef)
 
 	return []pushRefInfo{{
 		LocalRef:  headRef,
 		LocalSHA:  localSHA,
-		RemoteRef: remoteRef,
+		RemoteRef: headRef,
 		RemoteSHA: remoteSHA,
 	}}, nil
 }
 
-// resolveRefspec resolves a single refspec like "main" or "main:main" or "HEAD:refs/heads/feature".
-func resolveRefspec(ctx context.Context, remote, spec string) (pushRefInfo, error) {
-	localPart := spec
-	remotePart := spec
-
-	if idx := strings.Index(spec, ":"); idx > 0 {
-		localPart = spec[:idx]
-		remotePart = spec[idx+1:]
-	}
-
-	// Resolve local ref to full form and SHA
-	localRef := localPart
-	if !strings.HasPrefix(localRef, "refs/") {
-		// Try refs/heads/ first
-		if sha, err := git.RevParse(ctx, "refs/heads/"+localRef); err == nil {
-			return pushRefInfo{
-				LocalRef:  "refs/heads/" + localRef,
-				LocalSHA:  sha,
-				RemoteRef: ensureFullRef(remotePart),
-				RemoteSHA: getRemoteSHA(ctx, remote, ensureFullRef(remotePart)),
-			}, nil
-		}
-		// Fall back to raw rev-parse
-		sha, err := git.RevParse(ctx, localRef)
-		if err != nil {
-			return pushRefInfo{}, fmt.Errorf("cannot resolve local ref %q", localPart)
-		}
-		localRef = "refs/heads/" + localRef
-		return pushRefInfo{
-			LocalRef:  localRef,
-			LocalSHA:  sha,
-			RemoteRef: ensureFullRef(remotePart),
-			RemoteSHA: getRemoteSHA(ctx, remote, ensureFullRef(remotePart)),
-		}, nil
-	}
-
-	sha, err := git.RevParse(ctx, localRef)
+// resolveBranchRefs enumerates all local branches for --only-branches mode.
+func resolveBranchRefs(ctx context.Context, remote string) ([]pushRefInfo, error) {
+	lines, err := git.ForEachRef(ctx, "%(refname) %(objectname)", "refs/heads/")
 	if err != nil {
-		return pushRefInfo{}, fmt.Errorf("cannot resolve local ref %q", localPart)
+		return nil, fmt.Errorf("listing local branches: %w", err)
 	}
 
-	return pushRefInfo{
-		LocalRef:  localRef,
-		LocalSHA:  sha,
-		RemoteRef: ensureFullRef(remotePart),
-		RemoteSHA: getRemoteSHA(ctx, remote, ensureFullRef(remotePart)),
-	}, nil
+	remoteMap, err := git.LsRemoteBulk(ctx, remote, "refs/heads/*")
+	if err != nil {
+		return nil, fmt.Errorf("listing remote branches: %w", err)
+	}
+
+	var refs []pushRefInfo
+	for _, line := range lines {
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		refName := parts[0]
+		localSHA := parts[1]
+		remoteSHA := nullSHA
+		if sha, ok := remoteMap[refName]; ok {
+			remoteSHA = sha
+		}
+		refs = append(refs, pushRefInfo{
+			LocalRef:  refName,
+			LocalSHA:  localSHA,
+			RemoteRef: refName,
+			RemoteSHA: remoteSHA,
+		})
+	}
+	return refs, nil
 }
 
-func ensureFullRef(ref string) string {
-	if strings.HasPrefix(ref, "refs/") {
-		return ref
+// resolveTagRefs enumerates all local tags for --only-tags mode.
+func resolveTagRefs(ctx context.Context, remote string) ([]pushRefInfo, error) {
+	lines, err := git.ForEachRef(ctx, "%(refname) %(objectname)", "refs/tags/")
+	if err != nil {
+		return nil, fmt.Errorf("listing local tags: %w", err)
 	}
-	return "refs/heads/" + ref
+
+	remoteMap, err := git.LsRemoteBulk(ctx, remote, "refs/tags/*")
+	if err != nil {
+		return nil, fmt.Errorf("listing remote tags: %w", err)
+	}
+
+	var refs []pushRefInfo
+	for _, line := range lines {
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		refName := parts[0]
+		localSHA := parts[1]
+		remoteSHA := nullSHA
+		if sha, ok := remoteMap[refName]; ok {
+			remoteSHA = sha
+		}
+		refs = append(refs, pushRefInfo{
+			LocalRef:  refName,
+			LocalSHA:  localSHA,
+			RemoteRef: refName,
+			RemoteSHA: remoteSHA,
+		})
+	}
+	return refs, nil
 }
 
 func getRemoteSHA(ctx context.Context, remote, ref string) string {

@@ -1122,7 +1122,7 @@ func TestPushHookCascadeFromParent(t *testing.T) {
 	}
 
 	// Push from the submodule using safegit
-	_, stderr, code = runSafegit(t, subDir, "push", "origin", "main")
+	_, stderr, code = runSafegit(t, subDir, "push", "--only-head", "origin")
 	if code != 0 {
 		t.Fatalf("safegit push failed (code %d): %s", code, stderr)
 	}
@@ -1191,7 +1191,7 @@ func TestPushHookCascadeRejectsOnParentHookFailure(t *testing.T) {
 
 	// Push from the submodule using safegit -- should fail
 	// Exit code 20 = hook failure (exitPushHookFailed in push.go)
-	_, stderr, code = runSafegit(t, subDir, "push", "origin", "main")
+	_, stderr, code = runSafegit(t, subDir, "push", "--only-head", "origin")
 	if code != 20 {
 		t.Errorf("expected exit code 20 (hook failure), got %d; stderr: %s", code, stderr)
 	}
