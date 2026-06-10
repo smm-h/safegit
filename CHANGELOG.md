@@ -2,16 +2,22 @@
 
 # Changelog
 
-## 0.17.1
+## 0.17.2
 
-Fix scrub data loss for tracked+gitignored files, fix doctor dry-run submodule reporting, add unlock --dry-run.
+Sync submodule working trees after scrub history rewrites.
 
 <details>
 <summary>Context</summary>
 
-The v0.16.0 working-tree sync (read-tree --reset -u) could overwrite tracked+gitignored files (e.g., config files with runtime secrets that were committed by mistake then gitignored). SyncMainIndexWithWorktree now saves and restores their content, then untracks them. Also fixed doctor --fix --dry-run not reporting submodule state, and added --dry-run support to unlock.
+v0.17.1 added working-tree sync for the parent repo but missed submodule child repos. Submodule files on disk could still contain pre-scrub secrets.
 
 </details>
+
+### Fixes
+
+- **Scrub now syncs submodule working trees after rewriting history.** Previously only the parent repo's working tree was updated; submodule files on disk could still contain pre-scrub content.
+
+## 0.17.1
 
 ### Features
 
