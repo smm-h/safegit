@@ -927,3 +927,66 @@ func TestScrubMatchMangleNonDeterministic(t *testing.T) {
 		t.Errorf("two mangle runs produced identical output (should be non-deterministic): %q", results[0])
 	}
 }
+
+// TestScrubMatchPreservesGitignored verifies that when a tracked file is
+// gitignored and then scrub match rewrites its blob, the on-disk copy is
+// preserved (not overwritten by read-tree) and the file is untracked from
+// the index afterward.
+func TestScrubMatchPreservesGitignored(t *testing.T) {
+	dir := newRepo(t)
+
+	// Commit config.env with a secret
+	commitFileEnv(t, dir, scrubMatchEnv, "config.env", "SECRET=abc123\n", "add config.env")
+
+	// Gitignore config.env and commit
+	commitFileEnv(t, dir, scrubMatchEnv, ".gitignore", "config.env\n", "add gitignore")
+
+	// Verify tree is clean
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = dir
+	statusOut, err := statusCmd.Output()
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
+	if strings.TrimSpace(string(statusOut)) != "" {
+		t.Fatalf("working tree not clean before scrub: %s", string(statusOut))
+	}
+
+	// Run scrub match to replace the secret
+	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
+		"--yes", "scrub", "match",
+		"--pattern", "abc123",
+		"--replace", "REDACTED",
+		"--reason", "test gitignore preservation",
+		"--entire-history",
+	)
+	if code != 0 {
+		t.Fatalf("scrub match failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	// On-disk config.env must still have the ORIGINAL content (not scrubbed)
+	diskContent, err := os.ReadFile(filepath.Join(dir, "config.env"))
+	if err != nil {
+		t.Fatalf("reading config.env from disk: %v", err)
+	}
+	if string(diskContent) != "SECRET=abc123\n" {
+		t.Errorf("on-disk config.env was overwritten: got %q, want %q", string(diskContent), "SECRET=abc123\n")
+	}
+
+	// config.env should be untracked (git ls-files returns nothing)
+	lsCmd := exec.Command("git", "ls-files", "config.env")
+	lsCmd.Dir = dir
+	lsOut, err := lsCmd.Output()
+	if err != nil {
+		t.Fatalf("git ls-files config.env: %v", err)
+	}
+	if strings.TrimSpace(string(lsOut)) != "" {
+		t.Errorf("config.env should be untracked, but git ls-files returned: %q", string(lsOut))
+	}
+
+	// Stdout or stderr should mention preservation
+	combined := stdout + stderr
+	if !strings.Contains(combined, "Preserved") && !strings.Contains(combined, "gitignored") {
+		t.Errorf("output should mention gitignore preservation, got:\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+}
