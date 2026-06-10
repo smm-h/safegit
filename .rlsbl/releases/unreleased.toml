@@ -1,0 +1,8 @@
+# Version bump type: patch, minor, or major
+bump = "patch"
+# Short description of this release (required)
+description = "Fix push test CI failure on ubuntu-latest."
+# Optional context explaining why these changes were made
+context = "Bare remotes in tests used system default branch (master on CI) while local repos used main. Fixed by setting --initial-branch=main on all bare inits."
+include = ["go", "docker"]
+exclude = []
