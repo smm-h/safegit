@@ -65,7 +65,7 @@ using CAS. If the ref moved between read and write, Phase B retries from the
 new tip (re-parenting the commit) with random jitter to avoid thundering-herd
 stampedes under heavy concurrency.
 
-See [design.md](design.md) for the full architecture specification.
+See [docs/architecture.md](docs/architecture.md) for the full architecture specification.
 
 ## Configuration
 
