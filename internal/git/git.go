@@ -303,33 +303,46 @@ func SyncMainIndexWithWorktree(ctx context.Context, treeish string) ([]string, e
 		return nil, nil
 	}
 
-	// 4. Slow path: protect tracked+gitignored files via skip-worktree.
+	// 4. Slow path: save on-disk content of tracked+gitignored files.
+	// git read-tree --reset -u does not respect skip-worktree when the
+	// index blob differs from the tree blob, so skip-worktree alone is
+	// insufficient. We save content before read-tree and restore after.
+	type savedFile struct {
+		path    string
+		content []byte
+		mode    os.FileMode
+	}
+	var saved []savedFile
 	for _, f := range trackedIgnored {
-		if _, ok := origSkipSet[f]; ok {
-			continue // already has skip-worktree, no need to set again
+		info, serr := os.Lstat(f)
+		if serr != nil {
+			continue // file doesn't exist on disk, nothing to save
 		}
-		if _, _, serr := Run(ctx, "update-index", "--skip-worktree", f); serr != nil {
-			fmt.Fprintf(os.Stderr, "safegit: warning: failed to set skip-worktree on %s: %v\n", f, serr)
+		if !info.Mode().IsRegular() {
+			continue // skip symlinks, directories, etc.
 		}
+		content, rerr := os.ReadFile(f)
+		if rerr != nil {
+			fmt.Fprintf(os.Stderr, "safegit: warning: failed to save %s before read-tree: %v\n", f, rerr)
+			continue
+		}
+		saved = append(saved, savedFile{path: f, content: content, mode: info.Mode().Perm()})
 	}
 
-	// Run read-tree --reset -u (skip-worktree files are not touched).
+	// Run read-tree --reset -u.
 	_, _, err = Run(ctx, "read-tree", "--reset", "-u", treeish)
 	if err != nil {
 		return nil, err
 	}
 
-	// Remove skip-worktree flags we added (not pre-existing ones).
-	for _, f := range trackedIgnored {
-		if _, ok := origSkipSet[f]; ok {
-			continue // was already skip-worktree before, leave it
-		}
-		if _, _, rerr := Run(ctx, "update-index", "--no-skip-worktree", f); rerr != nil {
-			fmt.Fprintf(os.Stderr, "safegit: warning: failed to clear skip-worktree on %s: %v\n", f, rerr)
+	// Restore on-disk content of tracked+gitignored files.
+	for _, sf := range saved {
+		if werr := os.WriteFile(sf.path, sf.content, sf.mode); werr != nil {
+			fmt.Fprintf(os.Stderr, "safegit: warning: failed to restore %s after read-tree: %v\n", sf.path, werr)
 		}
 	}
 
-	// Defensively restore pre-existing skip-worktree flags.
+	// Restore pre-existing skip-worktree flags.
 	for _, f := range origSkip {
 		if _, _, rerr := Run(ctx, "update-index", "--skip-worktree", f); rerr != nil {
 			fmt.Fprintf(os.Stderr, "safegit: warning: failed to restore skip-worktree on %s: %v\n", f, rerr)
