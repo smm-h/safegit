@@ -375,7 +375,7 @@ func requireCleanTree(ctx context.Context, flags globalFlags, cmd string) {
 		die(flags, cmd, 1, fmt.Sprintf("checking working tree: %v", err))
 	}
 	if strings.TrimSpace(statusOut) != "" {
-		die(flags, cmd, 1, "working tree is dirty; commit or stash changes before proceeding")
+		die(flags, cmd, 1, "working tree is dirty; commit changes before proceeding")
 	}
 }
 
