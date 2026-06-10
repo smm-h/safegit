@@ -115,7 +115,7 @@ func runScrubMatch(flags globalFlags, kwargs map[string]interface{}) int {
 // output, and returns 0. When scope is non-nil, only blob matches whose path
 // matches the glob are shown.
 func scrubMatchDryRun(ctx context.Context, flags globalFlags, cmd string, compiledPattern *regexp.Regexp, scope *string, gitDir string) int {
-	fmt.Println("Scanning all objects...")
+	infof(flags, "Scanning all objects...\n")
 	results, err := scan.ScanObjects(ctx, compiledPattern)
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("scanning objects: %v", err))
@@ -192,53 +192,53 @@ func scrubMatchDryRun(ctx context.Context, flags globalFlags, cmd string, compil
 		}
 	}
 
-	fmt.Printf("Found %d matches in %d objects:\n", totalMatches, len(uniqueObjects)+len(nonObjectMatches))
+	infof(flags, "Found %d matches in %d objects:\n", totalMatches, len(uniqueObjects)+len(nonObjectMatches))
 
 	// Print parent repo header only if submodules have matches too.
 	hasSubMatches := len(subResults) > 0
 	if hasSubMatches {
-		fmt.Printf("\nParent repo:\n")
+		infof(flags, "\nParent repo:\n")
 	}
 
 	if len(blobMatches) > 0 {
-		fmt.Printf("\nBlobs:\n")
+		infof(flags, "\nBlobs:\n")
 		for _, m := range blobMatches {
 			if m.Path != "" && m.CommitSHA != "" {
-				fmt.Printf("  %s in commit %s (line %d): %s\n", m.Path, shortSHA(m.CommitSHA), m.Line, m.Context)
+				infof(flags, "  %s in commit %s (line %d): %s\n", m.Path, shortSHA(m.CommitSHA), m.Line, m.Context)
 			} else if m.Path != "" {
-				fmt.Printf("  %s (unreachable, line %d): %s\n", m.Path, m.Line, m.Context)
+				infof(flags, "  %s (unreachable, line %d): %s\n", m.Path, m.Line, m.Context)
 			} else if m.Reachable {
-				fmt.Printf("  blob %s (line %d): %s\n", shortSHA(m.SHA), m.Line, m.Context)
+				infof(flags, "  blob %s (line %d): %s\n", shortSHA(m.SHA), m.Line, m.Context)
 			} else {
-				fmt.Printf("  blob %s (unreachable, line %d): %s\n", shortSHA(m.SHA), m.Line, m.Context)
+				infof(flags, "  blob %s (unreachable, line %d): %s\n", shortSHA(m.SHA), m.Line, m.Context)
 			}
 		}
 	}
 
 	if len(commitMatches) > 0 {
-		fmt.Printf("\nCommit messages:\n")
+		infof(flags, "\nCommit messages:\n")
 		for _, m := range commitMatches {
-			fmt.Printf("  commit %s (line %d): %s\n", shortSHA(m.SHA), m.Line, m.Context)
+			infof(flags, "  commit %s (line %d): %s\n", shortSHA(m.SHA), m.Line, m.Context)
 		}
 	}
 
 	if len(tagMatches) > 0 {
-		fmt.Printf("\nTag annotations:\n")
+		infof(flags, "\nTag annotations:\n")
 		for _, m := range tagMatches {
-			fmt.Printf("  tag %s (line %d): %s\n", shortSHA(m.SHA), m.Line, m.Context)
+			infof(flags, "  tag %s (line %d): %s\n", shortSHA(m.SHA), m.Line, m.Context)
 		}
 	}
 
 	if len(nonObjectMatches) > 0 {
-		fmt.Printf("\nNon-object files:\n")
+		infof(flags, "\nNon-object files:\n")
 		for _, m := range nonObjectMatches {
-			fmt.Printf("  %s (line %d): %s\n", m.Path, m.Line, m.Context)
+			infof(flags, "  %s (line %d): %s\n", m.Path, m.Line, m.Context)
 		}
 	}
 
 	// Print submodule results grouped by submodule.
 	for _, sr := range subResults {
-		fmt.Printf("\n[%s]:\n", sr.sub.RelativePath)
+		infof(flags, "\n[%s]:\n", sr.sub.RelativePath)
 		var subBlobs, subCommits, subTags []scan.Match
 		for _, m := range sr.results.Matches {
 			switch m.ObjectType {
@@ -259,35 +259,35 @@ func scrubMatchDryRun(ctx context.Context, flags globalFlags, cmd string, compil
 			}
 		}
 		if len(subBlobs) > 0 {
-			fmt.Printf("  Blobs:\n")
+			infof(flags, "  Blobs:\n")
 			for _, m := range subBlobs {
 				if m.Path != "" && m.CommitSHA != "" {
-					fmt.Printf("    %s in commit %s (line %d): %s\n", m.Path, shortSHA(m.CommitSHA), m.Line, m.Context)
+					infof(flags, "    %s in commit %s (line %d): %s\n", m.Path, shortSHA(m.CommitSHA), m.Line, m.Context)
 				} else if m.Path != "" {
-					fmt.Printf("    %s (unreachable, line %d): %s\n", m.Path, m.Line, m.Context)
+					infof(flags, "    %s (unreachable, line %d): %s\n", m.Path, m.Line, m.Context)
 				} else {
-					fmt.Printf("    blob %s (line %d): %s\n", shortSHA(m.SHA), m.Line, m.Context)
+					infof(flags, "    blob %s (line %d): %s\n", shortSHA(m.SHA), m.Line, m.Context)
 				}
 			}
 		}
 		if len(subCommits) > 0 {
-			fmt.Printf("  Commit messages:\n")
+			infof(flags, "  Commit messages:\n")
 			for _, m := range subCommits {
-				fmt.Printf("    commit %s (line %d): %s\n", shortSHA(m.SHA), m.Line, m.Context)
+				infof(flags, "    commit %s (line %d): %s\n", shortSHA(m.SHA), m.Line, m.Context)
 			}
 		}
 		if len(subTags) > 0 {
-			fmt.Printf("  Tag annotations:\n")
+			infof(flags, "  Tag annotations:\n")
 			for _, m := range subTags {
-				fmt.Printf("    tag %s (line %d): %s\n", shortSHA(m.SHA), m.Line, m.Context)
+				infof(flags, "    tag %s (line %d): %s\n", shortSHA(m.SHA), m.Line, m.Context)
 			}
 		}
 	}
 
-	fmt.Printf("\nSummary: %d blob matches, %d message matches, %d tag matches, %d file matches\n",
+	infof(flags, "\nSummary: %d blob matches, %d message matches, %d tag matches, %d file matches\n",
 		len(blobMatches), len(commitMatches), len(tagMatches), len(nonObjectMatches))
 	if results.Skipped > 0 {
-		fmt.Printf("Binary blobs skipped: %d\n", results.Skipped)
+		infof(flags, "Binary blobs skipped: %d\n", results.Skipped)
 	}
 
 	return 0
@@ -347,7 +347,7 @@ func scrubMatchExecute(
 	sgDir string,
 ) int {
 	// Scan to find all matches
-	fmt.Println("Scanning objects...")
+	infof(flags, "Scanning objects...\n")
 	results, err := scan.ScanObjects(ctx, compiledPattern)
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("scanning objects: %v", err))
@@ -385,7 +385,7 @@ func scrubMatchExecute(
 			}
 		}
 		if !anySubMatches {
-			fmt.Println("No matches found. Nothing to rewrite.")
+			infof(flags, "No matches found. Nothing to rewrite.\n")
 			return 0
 		}
 	}
@@ -490,22 +490,22 @@ func scrubMatchExecute(
 	}
 	if blobMatchCount == 0 && commitMatchCount == 0 && tagMatchCount == 0 &&
 		totalSubBlobCount == 0 && totalSubCommitCount == 0 && totalSubTagCount == 0 {
-		fmt.Println("No matches found within scope. Nothing to rewrite.")
+		infof(flags, "No matches found within scope. Nothing to rewrite.\n")
 		return 0
 	}
 
 	totalBlobs := blobMatchCount + totalSubBlobCount
 	totalCommits := commitMatchCount + totalSubCommitCount
 	totalTags := tagMatchCount + totalSubTagCount
-	fmt.Printf("Found %d matches (%d in blobs, %d in commit messages, %d in tag annotations)\n",
+	infof(flags, "Found %d matches (%d in blobs, %d in commit messages, %d in tag annotations)\n",
 		totalBlobs+totalCommits+totalTags, totalBlobs, totalCommits, totalTags)
 	if len(subScans) > 0 {
-		fmt.Printf("  Submodules with matches: %d\n", len(subScans))
+		infof(flags, "  Submodules with matches: %d\n", len(subScans))
 	}
 
 	// Confirmation prompt (skipped with --yes)
 	if !confirmOrAbort(flags, "This will rewrite history to replace pattern matches. This cannot be undone. Proceed?") {
-		fmt.Println("Aborted.")
+		infof(flags, "Aborted.\n")
 		return 0
 	}
 
@@ -527,7 +527,7 @@ func scrubMatchExecute(
 	// 4.5-4.6: Process each submodule.
 	var subScrubResults []submoduleScrubResult
 	for _, si := range subScans {
-		fmt.Printf("Scrubbing submodule [%s]...\n", si.sub.RelativePath)
+		infof(flags, "Scrubbing submodule [%s]...\n", si.sub.RelativePath)
 
 		// Chdir into submodule working tree so git commands target it.
 		if err := os.Chdir(si.sub.WorkTreePath); err != nil {
@@ -628,7 +628,7 @@ func scrubMatchExecute(
 			messagesModified: subMessagesModified,
 		})
 
-		fmt.Printf("  [%s] %d commits rewritten, %d blobs replaced\n",
+		infof(flags, "  [%s] %d commits rewritten, %d blobs replaced\n",
 			si.sub.RelativePath, subRewrittenCount, len(subBlobMap))
 	}
 
@@ -656,7 +656,7 @@ func scrubMatchExecute(
 	}
 
 	// Parent repo: build blob replacement map.
-	fmt.Println("Building blob replacement map...")
+	infof(flags, "Building blob replacement map...\n")
 	blobMap := make(map[string]string, len(uniqueBlobSHAs))
 	for blobSHA := range uniqueBlobSHAs {
 		content, err := git.CatFileBlob(ctx, blobSHA)
@@ -702,7 +702,7 @@ func scrubMatchExecute(
 	}
 
 	commitCount := len(shas)
-	fmt.Printf("Rewriting %d commits...\n", commitCount)
+	infof(flags, "Rewriting %d commits...\n", commitCount)
 
 	// Track how many commit messages were modified.
 	messagesModified := 0
@@ -745,7 +745,7 @@ func scrubMatchExecute(
 	// Submodules first, then parent.
 
 	for _, sr := range subScrubResults {
-		fmt.Printf("Updating refs for submodule [%s]...\n", sr.sub.RelativePath)
+		infof(flags, "Updating refs for submodule [%s]...\n", sr.sub.RelativePath)
 		if err := os.Chdir(sr.sub.WorkTreePath); err != nil {
 			die(flags, cmd, 1, fmt.Sprintf("chdir to submodule %s for ref update: %v", sr.sub.RelativePath, err))
 		}
@@ -768,7 +768,7 @@ func scrubMatchExecute(
 		if subProtected, syncErr := git.SyncMainIndexWithWorktree(ctx, "HEAD"); syncErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to sync submodule worktree: %v\n", syncErr)
 		} else {
-			untrackProtectedPaths(ctx, subProtected)
+			untrackProtectedPaths(ctx, flags, subProtected)
 		}
 
 		// Oplog entry for submodule.
@@ -804,7 +804,7 @@ func scrubMatchExecute(
 	}
 
 	// Update parent refs.
-	fmt.Println("Updating refs...")
+	infof(flags, "Updating refs...\n")
 	if err := updateRefs(ctx, shaMap, "", "", "", "", flags.verbose); err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("updating refs: %v", err))
 	}
@@ -817,7 +817,7 @@ func scrubMatchExecute(
 	if syncErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", syncErr)
 	}
-	untrackProtectedPaths(ctx, protectedPaths)
+	untrackProtectedPaths(ctx, flags, protectedPaths)
 
 	// Resolve new HEAD
 	newHeadSHA, err := git.RevParse(ctx, "HEAD")
@@ -860,7 +860,7 @@ func scrubMatchExecute(
 	}
 
 	// Phase 3 (4.8): Verification -- re-scan all object stores.
-	fmt.Println("Verifying secret removal...")
+	infof(flags, "Verifying secret removal...\n")
 	exitCode := 0
 	verifyErr := verifySecretRemovedScoped(ctx, compiledPattern, scope)
 	if verifyErr != nil {
@@ -924,17 +924,17 @@ func scrubMatchExecute(
 	}
 
 	if exitCode == 0 {
-		fmt.Println("Verification passed: no matches found in object stores.")
+		infof(flags, "Verification passed: no matches found in object stores.\n")
 	} else {
 		fmt.Fprintln(os.Stderr, "Run 'git reflog expire --expire=now --all && git gc --prune=now' to force cleanup.")
 	}
 
 	// Summary
-	fmt.Printf("\nScrub complete:\n")
-	fmt.Printf("  %d commits rewritten\n", rewrittenCount)
-	fmt.Printf("  %d blobs replaced\n", len(blobMap))
-	fmt.Printf("  %d commit messages modified\n", messagesModified)
-	fmt.Printf("  %d tag annotations rewritten\n", tagsRewritten)
+	infof(flags, "\nScrub complete:\n")
+	infof(flags, "  %d commits rewritten\n", rewrittenCount)
+	infof(flags, "  %d blobs replaced\n", len(blobMap))
+	infof(flags, "  %d commit messages modified\n", messagesModified)
+	infof(flags, "  %d tag annotations rewritten\n", tagsRewritten)
 	if len(subScrubResults) > 0 {
 		totalSubRewritten := 0
 		totalSubBlobs := 0
@@ -942,12 +942,12 @@ func scrubMatchExecute(
 			totalSubRewritten += sr.rewrittenCount
 			totalSubBlobs += len(sr.blobMap)
 		}
-		fmt.Printf("  %d submodule commits rewritten\n", totalSubRewritten)
-		fmt.Printf("  %d submodule blobs replaced\n", totalSubBlobs)
+		infof(flags, "  %d submodule commits rewritten\n", totalSubRewritten)
+		infof(flags, "  %d submodule blobs replaced\n", totalSubBlobs)
 	}
-	fmt.Printf("  Old HEAD: %s\n", oldHeadSHA[:12])
-	fmt.Printf("  New HEAD: %s\n", newHeadSHA[:12])
-	fmt.Printf("\nTo update the remote, run: git push --force-with-lease\n")
+	infof(flags, "  Old HEAD: %s\n", oldHeadSHA[:12])
+	infof(flags, "  New HEAD: %s\n", newHeadSHA[:12])
+	infof(flags, "\nTo update the remote, run: git push --force-with-lease\n")
 
 	return exitCode
 }

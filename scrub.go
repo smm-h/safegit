@@ -119,22 +119,22 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 	commitCount := exclusiveCount + 1 // inclusive of fromSHA
 
 	// Summary
-	fmt.Printf("Scrub summary:\n")
-	fmt.Printf("  File:    %s\n", filePath)
-	fmt.Printf("  Mode:    %s\n", mode)
-	fmt.Printf("  From:    %s\n", fromSHA[:12])
-	fmt.Printf("  Commits: %d\n", commitCount)
-	fmt.Printf("  Reason:  %s\n", reason)
+	infof(flags, "Scrub summary:\n")
+	infof(flags, "  File:    %s\n", filePath)
+	infof(flags, "  Mode:    %s\n", mode)
+	infof(flags, "  From:    %s\n", fromSHA[:12])
+	infof(flags, "  Commits: %d\n", commitCount)
+	infof(flags, "  Reason:  %s\n", reason)
 
 	// Confirmation prompt (skipped with --yes)
 	if !confirmOrAbort(flags, "This will rewrite %d commits. This cannot be undone. Proceed?", commitCount) {
-		fmt.Println("Aborted.")
+		infof(flags, "Aborted.\n")
 		return 0
 	}
 
 	// Dry-run check
 	if flags.dryRun {
-		fmt.Println("Dry run: no changes made.")
+		infof(flags, "Dry run: no changes made.\n")
 		return 0
 	}
 
@@ -174,7 +174,7 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 	// params. When all four author strings are empty, rewriteAnnotatedTag
 	// skips tagger matching entirely and only remaps target commit SHAs,
 	// which is exactly what scrub needs.
-	fmt.Println("Updating refs...")
+	infof(flags, "Updating refs...\n")
 	if err := updateRefs(ctx, shaMap, "", "", "", "", flags.verbose); err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("updating refs: %v", err))
 	}
@@ -184,10 +184,10 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to sync main index: %v\n", err)
 	}
-	untrackProtectedPaths(ctx, protectedPaths)
+	untrackProtectedPaths(ctx, flags, protectedPaths)
 
 	// Post-rewrite verification
-	fmt.Println("Verifying...")
+	infof(flags, "Verifying...\n")
 	verifyFailures, verifyChecks := verifyScrub(ctx, shaMap, filePath, flags.verbose)
 	if len(verifyFailures) > 0 {
 		fmt.Fprintf(os.Stderr, "Verification warnings (%d failures):\n", len(verifyFailures))
@@ -195,7 +195,7 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 			fmt.Fprintf(os.Stderr, "  WARN: %s\n", f)
 		}
 	} else {
-		fmt.Printf("Verification passed: %d checks across %d rewritten commits\n", verifyChecks, rewrittenCount)
+		infof(flags, "Verification passed: %d checks across %d rewritten commits\n", verifyChecks, rewrittenCount)
 	}
 
 	// Resolve new HEAD
@@ -232,7 +232,7 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 	// Post-cleanup verification: check that old blob SHAs were pruned
 	exitCode := 0
 	if len(oldBlobSHAs) > 0 {
-		fmt.Println("Verifying old blobs removed...")
+		infof(flags, "Verifying old blobs removed...\n")
 		oldBlobList := make([]string, 0, len(oldBlobSHAs))
 		for sha := range oldBlobSHAs {
 			oldBlobList = append(oldBlobList, sha)
@@ -243,16 +243,16 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 			fmt.Fprintln(os.Stderr, "Run 'git reflog expire --expire=now --all && git gc --prune=now' to force cleanup.")
 			exitCode = 1
 		} else {
-			fmt.Println("Verification passed: all old blobs removed from object store.")
+			infof(flags, "Verification passed: all old blobs removed from object store.\n")
 		}
 	}
 
 	// Summary
-	fmt.Printf("\nScrub complete:\n")
-	fmt.Printf("  %d commits rewritten\n", rewrittenCount)
-	fmt.Printf("  Old HEAD: %s\n", oldHeadSHA[:12])
-	fmt.Printf("  New HEAD: %s\n", newHeadSHA[:12])
-	fmt.Printf("\nTo update the remote, run: git push --force-with-lease\n")
+	infof(flags, "\nScrub complete:\n")
+	infof(flags, "  %d commits rewritten\n", rewrittenCount)
+	infof(flags, "  Old HEAD: %s\n", oldHeadSHA[:12])
+	infof(flags, "  New HEAD: %s\n", newHeadSHA[:12])
+	infof(flags, "\nTo update the remote, run: git push --force-with-lease\n")
 
 	return exitCode
 }
@@ -273,7 +273,7 @@ func runScrubFileInSubmodule(
 	gitDir string,
 	sgDir string,
 ) int {
-	fmt.Printf("File %q is inside submodule [%s], scrubbing as %q within submodule.\n",
+	infof(flags, "File %q is inside submodule [%s], scrubbing as %q within submodule.\n",
 		fullPath, sub.RelativePath, subFilePath)
 
 	// Ensure safegit is initialized for the submodule.
@@ -341,21 +341,21 @@ func runScrubFileInSubmodule(
 	subCommitCount := len(subSHAs)
 
 	// Summary
-	fmt.Printf("Scrub summary:\n")
-	fmt.Printf("  File:       %s (in submodule %s)\n", subFilePath, sub.RelativePath)
-	fmt.Printf("  Mode:       %s\n", mode)
-	fmt.Printf("  Sub commits: %d\n", subCommitCount)
-	fmt.Printf("  Reason:     %s\n", reason)
+	infof(flags, "Scrub summary:\n")
+	infof(flags, "  File:       %s (in submodule %s)\n", subFilePath, sub.RelativePath)
+	infof(flags, "  Mode:       %s\n", mode)
+	infof(flags, "  Sub commits: %d\n", subCommitCount)
+	infof(flags, "  Reason:     %s\n", reason)
 
 	// Confirmation prompt (skipped with --yes)
 	if !confirmOrAbort(flags, "This will rewrite submodule + parent history. This cannot be undone. Proceed?") {
-		fmt.Println("Aborted.")
+		infof(flags, "Aborted.\n")
 		os.Chdir(parentDir)
 		return 0
 	}
 
 	if flags.dryRun {
-		fmt.Println("Dry run: no changes made.")
+		infof(flags, "Dry run: no changes made.\n")
 		os.Chdir(parentDir)
 		return 0
 	}
@@ -383,7 +383,7 @@ func runScrubFileInSubmodule(
 	}
 
 	// Update submodule refs.
-	fmt.Printf("Updating refs in submodule [%s]...\n", sub.RelativePath)
+	infof(flags, "Updating refs in submodule [%s]...\n", sub.RelativePath)
 	if err := updateRefs(ctx, subShaMap, "", "", "", "", flags.verbose); err != nil {
 		os.Chdir(parentDir)
 		die(flags, cmd, 1, fmt.Sprintf("submodule: updating refs: %v", err))
@@ -398,7 +398,7 @@ func runScrubFileInSubmodule(
 	if subProtected, syncErr := git.SyncMainIndexWithWorktree(ctx, "HEAD"); syncErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to sync submodule worktree: %v\n", syncErr)
 	} else {
-		untrackProtectedPaths(ctx, subProtected)
+		untrackProtectedPaths(ctx, flags, subProtected)
 	}
 
 	// Log submodule oplog.
@@ -418,7 +418,7 @@ func runScrubFileInSubmodule(
 		},
 	})
 
-	fmt.Printf("  [%s] %d commits rewritten\n", sub.RelativePath, subRewrittenCount)
+	infof(flags, "  [%s] %d commits rewritten\n", sub.RelativePath, subRewrittenCount)
 
 	// Chdir back to parent.
 	if err := os.Chdir(parentDir); err != nil {
@@ -434,7 +434,7 @@ func runScrubFileInSubmodule(
 	}
 
 	if len(gitlinkMap) == 0 {
-		fmt.Println("No submodule commits were rewritten; parent history unchanged.")
+		infof(flags, "No submodule commits were rewritten; parent history unchanged.\n")
 		return 0
 	}
 
@@ -452,7 +452,7 @@ func runScrubFileInSubmodule(
 	}
 	parentSHAs := splitNonEmpty(out)
 
-	fmt.Printf("Rewriting %d parent commits (gitlink updates)...\n", len(parentSHAs))
+	infof(flags, "Rewriting %d parent commits (gitlink updates)...\n", len(parentSHAs))
 
 	// Walk parent, only updating gitlinks (no blob changes, no message changes).
 	parentShaMap, parentRewrittenCount, err := walkAndRewrite(ctx, parentSHAs, func(ctx context.Context, sha string, info git.CommitInfo, remappedParents []string) (CommitTransform, error) {
@@ -471,7 +471,7 @@ func runScrubFileInSubmodule(
 	}
 
 	// Update parent refs.
-	fmt.Println("Updating parent refs...")
+	infof(flags, "Updating parent refs...\n")
 	if err := updateRefs(ctx, parentShaMap, "", "", "", "", flags.verbose); err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("updating parent refs: %v", err))
 	}
@@ -481,7 +481,7 @@ func runScrubFileInSubmodule(
 	if syncErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to sync parent main index: %v\n", syncErr)
 	}
-	untrackProtectedPaths(ctx, parentProtectedPaths)
+	untrackProtectedPaths(ctx, flags, parentProtectedPaths)
 
 	// Cleanup parent.
 	if err := cleanupAfterRewrite(ctx, flags, cmd, parentShaMap, sgDir); err != nil {
@@ -517,7 +517,7 @@ func runScrubFileInSubmodule(
 	exitCode := 0
 	if len(oldSubBlobSHAs) > 0 {
 		os.Chdir(sub.WorkTreePath)
-		fmt.Println("Verifying old blobs unreachable in submodule...")
+		infof(flags, "Verifying old blobs unreachable in submodule...\n")
 		oldBlobList := make([]string, 0, len(oldSubBlobSHAs))
 		for sha := range oldSubBlobSHAs {
 			oldBlobList = append(oldBlobList, sha)
@@ -531,19 +531,19 @@ func runScrubFileInSubmodule(
 				}
 			}
 			if exitCode == 0 {
-				fmt.Println("Verification passed: old blobs unreachable in submodule.")
+				infof(flags, "Verification passed: old blobs unreachable in submodule.\n")
 			}
 		}
 		os.Chdir(parentDir)
 	}
 
 	// Summary.
-	fmt.Printf("\nScrub complete:\n")
-	fmt.Printf("  %d submodule commits rewritten\n", subRewrittenCount)
-	fmt.Printf("  %d parent commits rewritten (gitlink updates)\n", parentRewrittenCount)
-	fmt.Printf("  Old HEAD: %s\n", oldHeadSHA[:12])
-	fmt.Printf("  New HEAD: %s\n", newHeadSHA[:12])
-	fmt.Printf("\nTo update the remote, run: git push --force-with-lease\n")
+	infof(flags, "\nScrub complete:\n")
+	infof(flags, "  %d submodule commits rewritten\n", subRewrittenCount)
+	infof(flags, "  %d parent commits rewritten (gitlink updates)\n", parentRewrittenCount)
+	infof(flags, "  Old HEAD: %s\n", oldHeadSHA[:12])
+	infof(flags, "  New HEAD: %s\n", newHeadSHA[:12])
+	infof(flags, "\nTo update the remote, run: git push --force-with-lease\n")
 
 	return exitCode
 }
@@ -551,7 +551,7 @@ func runScrubFileInSubmodule(
 // untrackProtectedPaths runs "git rm --cached" for each path that was
 // protected (tracked+gitignored) during SyncMainIndexWithWorktree, so future
 // read-tree calls cannot overwrite them. Reports the list to stdout.
-func untrackProtectedPaths(ctx context.Context, protectedPaths []string) {
+func untrackProtectedPaths(ctx context.Context, flags globalFlags, protectedPaths []string) {
 	if len(protectedPaths) == 0 {
 		return
 	}
@@ -560,9 +560,9 @@ func untrackProtectedPaths(ctx context.Context, protectedPaths []string) {
 			fmt.Fprintf(os.Stderr, "warning: failed to untrack gitignored file %s: %v\n", p, err)
 		}
 	}
-	fmt.Printf("Preserved %d tracked+gitignored file(s) (untracked from index):\n", len(protectedPaths))
+	infof(flags, "Preserved %d tracked+gitignored file(s) (untracked from index):\n", len(protectedPaths))
 	for _, p := range protectedPaths {
-		fmt.Printf("  %s\n", p)
+		infof(flags, "  %s\n", p)
 	}
 }
 
