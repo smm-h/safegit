@@ -2,16 +2,26 @@
 
 # Changelog
 
-## 0.18.2
+## 0.18.3
 
-Add rewrite-author --json, range-scoped dry-run scanning, JSON error safety net, splitNonEmpty consolidation.
+Fix rewrite-author --quiet, add ScopeFilter to dry-run JSON, submodule-aware range scanning infrastructure.
 
 <details>
 <summary>Context</summary>
 
-Range-scoped dry-run uses git rev-list --objects to scan only range-reachable objects instead of the entire store. rewrite-author now supports --json for both execute and dry-run modes. die() emits JSON error objects when --json is active, and mustGitDir routes through die() for coverage. splitNonEmpty consolidated from two implementations into a single exported git.SplitNonEmpty.
+Loose ends from v0.18.2: rewrite-author summary had unconverted fmt.Printf calls, dry-run JSON lost the --scope glob value, and ScanObjectsInRangeWithDir was added for future submodule range-scoping.
 
 </details>
+
+### Features
+
+- **Submodule-aware range-scoped scanning.** Added `ScanObjectsInRangeWithDir` and `CatFileBatchSHAsWithDir` for future submodule range-scoped dry-run support.
+
+### Fixes
+
+- **`rewrite-author` respects `--quiet`.** Summary output is suppressed when `--quiet` is passed.
+
+## 0.18.2
 
 ### Features
 
