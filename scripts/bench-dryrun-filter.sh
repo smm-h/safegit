@@ -34,8 +34,8 @@ record() {
 # Helper: measure wall-clock time of a command, capture stdout to a file
 # Usage: elapsed=$(measure_time cmd args...)
 # Stdout of cmd goes to $BENCH_STDOUT
-BENCH_STDOUT=$(mktemp /home/m/Projects/safegit/.bench-stdout-XXXXXX)
-BENCH_TMPDIR=$(mktemp -d /home/m/Projects/safegit/.bench-tmp-XXXXXX)
+BENCH_STDOUT=$(mktemp "$REPO_DIR/.bench-stdout-XXXXXX")
+BENCH_TMPDIR=$(mktemp -d "$REPO_DIR/.bench-tmp-XXXXXX")
 cleanup() {
     saferm delete -f --description "bench cleanup: temp stdout file" "$BENCH_STDOUT" 2>/dev/null || true
     saferm delete -rf --description "bench cleanup: temp working dir" "$BENCH_TMPDIR" 2>/dev/null || true
