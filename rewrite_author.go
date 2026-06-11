@@ -264,15 +264,15 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 	}
 
 	if parentOnly == 1 {
-		fmt.Printf("Rewrote %d commits (%d had name changes, %d was inherited (ancestors changed))\n",
+		infof(flags, "Rewrote %d commits (%d had name changes, %d was inherited (ancestors changed))\n",
 			total, nameChanged, parentOnly)
 	} else {
-		fmt.Printf("Rewrote %d commits (%d had name changes, %d were inherited (ancestors changed))\n",
+		infof(flags, "Rewrote %d commits (%d had name changes, %d were inherited (ancestors changed))\n",
 			total, nameChanged, parentOnly)
 	}
 
-	fmt.Println("\nTo update the remote:")
-	fmt.Println("  safegit push --both-branches-and-tags --force-with-lease")
+	infof(flags, "\nTo update the remote:\n")
+	infof(flags, "  safegit push --both-branches-and-tags --force-with-lease\n")
 
 	return 0
 }

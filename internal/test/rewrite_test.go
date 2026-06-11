@@ -960,6 +960,29 @@ func TestRewriteAuthorJSON(t *testing.T) {
 	}
 }
 
+func TestRewriteAuthorQuiet(t *testing.T) {
+	dir := newRepo(t)
+	makeCommits(t, dir, "oldname", "old@test.com", 3, "quiet")
+
+	stdout, stderr, code := runSafegit(t, dir, "--quiet", "--yes", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	if code != 0 {
+		t.Fatalf("rewrite-author --quiet failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	if stdout != "" {
+		t.Errorf("expected empty stdout with --quiet, got: %q", stdout)
+	}
+
+	// Verify the rewrite actually happened by checking git log author names.
+	names := getAuthorNames(t, dir)
+	if containsName(names, "oldname") {
+		t.Errorf("author name 'oldname' still present after quiet rewrite: %v", names)
+	}
+	if !containsName(names, "newname") {
+		t.Errorf("author name 'newname' not present after quiet rewrite: %v", names)
+	}
+}
+
 func TestRewriteAuthorJSONDryRun(t *testing.T) {
 	dir := newRepo(t)
 	makeCommits(t, dir, "oldname", "old@test.com", 5, "jsondry")
