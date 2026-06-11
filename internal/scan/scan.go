@@ -253,6 +253,100 @@ func ScanObjectsWithDir(ctx context.Context, pattern *regexp.Regexp, gitDir, wor
 	return results, nil
 }
 
+// ScanObjectsInRangeWithDir scans objects in a specific git directory, either
+// across the entire history or scoped to a commit range. When entireHistory is
+// true it delegates to ScanObjectsWithDir (full store scan). When entireHistory
+// is false and fromSHA is set, it enumerates objects in fromSHA..HEAD via
+// rev-list targeting the given git dir and feeds them to cat-file --batch.
+// submodulePath is set on each returned Match to identify the source repo.
+func ScanObjectsInRangeWithDir(ctx context.Context, pattern *regexp.Regexp, gitDir, workTree, submodulePath string, fromSHA string, entireHistory bool) (*ScanResults, error) {
+	if entireHistory {
+		return ScanObjectsWithDir(ctx, pattern, gitDir, workTree, submodulePath)
+	}
+
+	// Enumerate objects reachable from the range using the submodule's git dir.
+	stdout, _, err := git.RunWithGitDir(ctx, gitDir, workTree, "rev-list", "--objects", fromSHA+"..HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("rev-list --objects %s..HEAD (dir): %w", fromSHA, err)
+	}
+
+	// Parse SHAs from rev-list output. Each line is "<sha>" or "<sha> <path>".
+	var shas []string
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		sha := line
+		if idx := strings.IndexByte(line, ' '); idx > 0 {
+			sha = line[:idx]
+		}
+		shas = append(shas, sha)
+	}
+
+	// Empty range (from == HEAD in the submodule): return empty results.
+	if len(shas) == 0 {
+		return &ScanResults{}, nil
+	}
+
+	iter, err := git.CatFileBatchSHAsWithDir(ctx, gitDir, shas)
+	if err != nil {
+		return nil, fmt.Errorf("cat-file batch (dir range): %w", err)
+	}
+	defer iter.Close()
+
+	results := &ScanResults{}
+
+	for {
+		entry, err := iter.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("iterate range objects (dir): %w", err)
+		}
+
+		results.Scanned++
+
+		switch entry.Type {
+		case "blob":
+			if isBinary(entry.Content) {
+				results.Skipped++
+				continue
+			}
+			matches := findMatches(entry.SHA, "blob", entry.Content, pattern, true)
+			for i := range matches {
+				matches[i].SubmodulePath = submodulePath
+			}
+			results.Matches = append(results.Matches, matches...)
+
+		case "commit":
+			body := extractBody(entry.Content)
+			if len(body) == 0 {
+				continue
+			}
+			matches := findMatches(entry.SHA, "commit", body, pattern, true)
+			for i := range matches {
+				matches[i].SubmodulePath = submodulePath
+			}
+			results.Matches = append(results.Matches, matches...)
+
+		case "tag":
+			body := extractBody(entry.Content)
+			if len(body) == 0 {
+				continue
+			}
+			matches := findMatches(entry.SHA, "tag", body, pattern, true)
+			for i := range matches {
+				matches[i].SubmodulePath = submodulePath
+			}
+			results.Matches = append(results.Matches, matches...)
+		}
+	}
+
+	return results, nil
+}
+
 // buildReachableSet runs git rev-list --all --objects and collects every
 // SHA into a set.
 func buildReachableSet(ctx context.Context) (map[string]bool, error) {

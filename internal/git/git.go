@@ -830,6 +830,34 @@ func CatFileBatchAllWithDir(ctx context.Context, gitDir string) (*ObjectIterator
 	return it, nil
 }
 
+// CatFileBatchSHAsWithDir starts a git cat-file --batch subprocess targeting a
+// specific git directory, reading only the specified SHAs. Sets GIT_DIR so git
+// resolves objects from the target repo rather than the cwd repo. The caller
+// must call Close() when done.
+func CatFileBatchSHAsWithDir(ctx context.Context, gitDir string, shas []string) (*ObjectIterator, error) {
+	input := []byte(strings.Join(shas, "\n") + "\n")
+
+	cmd := exec.CommandContext(ctx, "git", "--no-optional-locks", "cat-file", "--batch")
+	cmd.Env = append(os.Environ(), "GIT_DIR="+gitDir)
+	cmd.Dir = gitDir
+	cmd.Stdin = bytes.NewReader(input)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("cat-file --batch (dir): stdout pipe: %w", err)
+	}
+	it := &ObjectIterator{
+		cmd:    cmd,
+		stdout: bufio.NewReaderSize(stdout, 256*1024),
+	}
+	cmd.Stderr = &it.stderr
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("cat-file --batch (dir): start: %w", err)
+	}
+	return it, nil
+}
+
 // SplitNonEmpty splits s by newlines and returns only non-empty lines.
 func SplitNonEmpty(s string) []string {
 	s = strings.TrimSpace(s)

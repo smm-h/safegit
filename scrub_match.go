@@ -177,7 +177,7 @@ func scrubMatchDryRun(ctx context.Context, flags globalFlags, cmd string, compil
 			if !sub.Initialized {
 				continue
 			}
-			subScan, err := scan.ScanObjectsWithDir(ctx, compiledPattern, sub.GitDir, sub.WorkTreePath, sub.RelativePath)
+			subScan, err := scan.ScanObjectsInRangeWithDir(ctx, compiledPattern, sub.GitDir, sub.WorkTreePath, sub.RelativePath, "" /* fromSHA */, true /* entireHistory */)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "warning: scanning submodule %s: %v\n", sub.RelativePath, err)
 				continue
