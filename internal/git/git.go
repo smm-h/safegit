@@ -686,6 +686,35 @@ func CatFileBatchAll(ctx context.Context) (*ObjectIterator, error) {
 	return it, nil
 }
 
+// CatFileBatchSHAs starts a git cat-file --batch subprocess that reads only
+// the specified SHAs, and returns an ObjectIterator for streaming the results.
+// Unlike CatFileBatchAll (which enumerates all objects), this feeds specific
+// SHAs via stdin using bytes.NewReader to avoid pipe deadlock: if output
+// exceeds the OS pipe buffer (~64KB), git blocks on stdout write while the
+// caller is still writing to stdin. With bytes.NewReader, git reads stdin
+// from memory at its own pace. The caller must call Close() when done.
+func CatFileBatchSHAs(ctx context.Context, shas []string) (*ObjectIterator, error) {
+	input := []byte(strings.Join(shas, "\n") + "\n")
+
+	cmd := exec.CommandContext(ctx, "git", "--no-optional-locks", "cat-file", "--batch")
+	cmd.Stdin = bytes.NewReader(input)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("cat-file --batch: stdout pipe: %w", err)
+	}
+	it := &ObjectIterator{
+		cmd:    cmd,
+		stdout: bufio.NewReaderSize(stdout, 256*1024),
+	}
+	cmd.Stderr = &it.stderr
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("cat-file --batch: start: %w", err)
+	}
+	return it, nil
+}
+
 // Next reads the next non-tree object from the stream. Trees are silently
 // skipped. Returns io.EOF when the stream ends.
 func (it *ObjectIterator) Next() (*ObjectEntry, error) {
@@ -801,10 +830,15 @@ func CatFileBatchAllWithDir(ctx context.Context, gitDir string) (*ObjectIterator
 	return it, nil
 }
 
-// splitNonEmpty splits s by newlines and returns only non-empty lines.
-func splitNonEmpty(s string) []string {
-	var result []string
-	for _, line := range strings.Split(s, "\n") {
+// SplitNonEmpty splits s by newlines and returns only non-empty lines.
+func SplitNonEmpty(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	lines := strings.Split(s, "\n")
+	result := make([]string, 0, len(lines))
+	for _, line := range lines {
 		if line != "" {
 			result = append(result, line)
 		}
@@ -821,7 +855,7 @@ func ForEachRef(ctx context.Context, format string, prefixes ...string) ([]strin
 	if err != nil {
 		return nil, err
 	}
-	return splitNonEmpty(stdout), nil
+	return SplitNonEmpty(stdout), nil
 }
 
 // LsRemoteBulk runs git ls-remote against a remote with a pattern and returns
@@ -833,7 +867,7 @@ func LsRemoteBulk(ctx context.Context, remote, pattern string) (map[string]strin
 		return nil, fmt.Errorf("ls-remote %s %s: %w", remote, pattern, err)
 	}
 	result := make(map[string]string)
-	for _, line := range splitNonEmpty(stdout) {
+	for _, line := range SplitNonEmpty(stdout) {
 		parts := strings.SplitN(line, "\t", 2)
 		if len(parts) == 2 {
 			result[parts[1]] = parts[0] // refname -> SHA
