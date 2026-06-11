@@ -40,6 +40,7 @@ type ScrubMatchDryRunResult struct {
 	DryRun           bool   `json:"dry_run"`
 	Pattern          string `json:"pattern"`
 	Scope            string `json:"scope,omitempty"`
+	ScopeFilter      string `json:"scope_filter,omitempty"`
 	ObjectsScanned   int    `json:"objects_scanned"`
 	BinarySkipped    int    `json:"binary_skipped"`
 	TotalMatches     int    `json:"total_matches"`
@@ -334,11 +335,16 @@ func scrubMatchDryRun(ctx context.Context, flags globalFlags, cmd string, compil
 		if fromSHA != "" {
 			scopeStr = "range"
 		}
+		scopeFilter := ""
+		if scope != nil {
+			scopeFilter = *scope
+		}
 		result := ScrubMatchDryRunResult{
 			Version:          1,
 			DryRun:           true,
 			Pattern:          pattern,
 			Scope:            scopeStr,
+			ScopeFilter:      scopeFilter,
 			ObjectsScanned:   results.Scanned,
 			BinarySkipped:    results.Skipped,
 			TotalMatches:     totalMatches,
