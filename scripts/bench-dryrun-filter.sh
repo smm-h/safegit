@@ -5,7 +5,7 @@
 #
 set -euo pipefail
 
-REPO_DIR="/home/m/Projects/safegit"
+REPO_DIR="$(git rev-parse --show-toplevel)"
 cd "$REPO_DIR"
 
 # Determine the "from" commit: 50 commits back from HEAD
