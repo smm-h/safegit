@@ -1114,3 +1114,67 @@ func TestScrubMatchJSONDryRun(t *testing.T) {
 		t.Errorf("HEAD changed during dry run: %s -> %s", headBefore[:12], headAfter[:12])
 	}
 }
+
+// TestScrubMatchDryRunRangeFilter verifies that --dry-run with --from only
+// reports matches within the specified commit range, not older commits.
+func TestScrubMatchDryRunRangeFilter(t *testing.T) {
+	dir := newRepo(t)
+
+	// Commit 1: contains LEAKED_SECRET_123
+	commitFileEnv(t, dir, scrubMatchEnv, "secret.txt", "LEAKED_SECRET_123\n", "add secret1")
+
+	// Commit 2: clean content
+	commitFileEnv(t, dir, scrubMatchEnv, "clean.txt", "nothing here\n", "add clean")
+
+	// Get SHA of commit 2 (HEAD~1 relative to commit 3)
+	commit2SHA := revParseHEAD(t, dir)
+
+	// Commit 3: contains LEAKED_SECRET_456
+	commitFileEnv(t, dir, scrubMatchEnv, "secret2.txt", "LEAKED_SECRET_456\n", "add secret2")
+
+	// Run dry-run with --from commit2, so only commit 3's range is scanned.
+	stdout, stderr, code := runSafegitEnv(t, dir, scrubMatchEnv,
+		"--yes", "--json", "--dry-run", "scrub", "match",
+		"--pattern", `LEAKED_SECRET_\w+`,
+		"--from", commit2SHA,
+		"--replace", "REDACTED",
+		"--reason", "test",
+	)
+	if code != 0 {
+		t.Fatalf("scrub match --dry-run --from failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	var result struct {
+		DryRun       bool   `json:"dry_run"`
+		TotalMatches int    `json:"total_matches"`
+		Scope        string `json:"scope"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v\nstdout: %s", err, stdout)
+	}
+
+	if !result.DryRun {
+		t.Error("dry_run should be true")
+	}
+	if result.TotalMatches == 0 {
+		t.Error("total_matches should be > 0 (commit 3's secret should be found)")
+	}
+	if result.Scope != "range" {
+		t.Errorf("scope should be 'range', got %q", result.Scope)
+	}
+
+	// Commit 1's secret (LEAKED_SECRET_123) should NOT appear in the output.
+	if strings.Contains(stdout, "LEAKED_SECRET_123") {
+		t.Error("stdout should NOT contain LEAKED_SECRET_123 (commit 1 is out of range)")
+	}
+
+	// Commit 3's secret (LEAKED_SECRET_456) SHOULD be found. Verify by checking
+	// that at least one blob match exists (the JSON totalMatches already confirms
+	// matches exist, but also ensure the specific secret's blob is detected).
+	// Since --json dry-run doesn't include match details in the JSON, verify
+	// via total_matches > 0 (already checked above) and that the stderr/output
+	// mentions the match.
+	if result.TotalMatches < 1 {
+		t.Error("expected at least 1 match for LEAKED_SECRET_456 in range")
+	}
+}

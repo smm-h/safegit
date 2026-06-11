@@ -100,6 +100,90 @@ func ScanObjects(ctx context.Context, pattern *regexp.Regexp) (*ScanResults, err
 	return results, nil
 }
 
+// ScanObjectsInRange scans only objects reachable from a commit range. When
+// entireHistory is true, it delegates to ScanObjects (full store scan). When
+// fromSHA is set, it enumerates objects in the range fromSHA..HEAD via rev-list
+// and feeds them to cat-file --batch. Everything from rev-list is reachable by
+// construction, so no reachable-set computation is needed.
+func ScanObjectsInRange(ctx context.Context, pattern *regexp.Regexp, fromSHA string, entireHistory bool) (*ScanResults, error) {
+	if entireHistory {
+		return ScanObjects(ctx, pattern)
+	}
+
+	// Enumerate objects reachable from the range.
+	stdout, _, err := git.Run(ctx, "rev-list", "--objects", fromSHA+"..HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("rev-list --objects %s..HEAD: %w", fromSHA, err)
+	}
+
+	// Parse SHAs from rev-list output. Each line is "<sha>" or "<sha> <path>".
+	var shas []string
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		sha := line
+		if idx := strings.IndexByte(line, ' '); idx > 0 {
+			sha = line[:idx]
+		}
+		shas = append(shas, sha)
+	}
+
+	// Empty range (from == HEAD): return empty results.
+	if len(shas) == 0 {
+		return &ScanResults{}, nil
+	}
+
+	iter, err := git.CatFileBatchSHAs(ctx, shas)
+	if err != nil {
+		return nil, fmt.Errorf("cat-file batch (range): %w", err)
+	}
+	defer iter.Close()
+
+	results := &ScanResults{}
+
+	for {
+		entry, err := iter.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, fmt.Errorf("iterate range objects: %w", err)
+		}
+
+		results.Scanned++
+
+		switch entry.Type {
+		case "blob":
+			if isBinary(entry.Content) {
+				results.Skipped++
+				continue
+			}
+			matches := findMatches(entry.SHA, "blob", entry.Content, pattern, true)
+			results.Matches = append(results.Matches, matches...)
+
+		case "commit":
+			body := extractBody(entry.Content)
+			if len(body) == 0 {
+				continue
+			}
+			matches := findMatches(entry.SHA, "commit", body, pattern, true)
+			results.Matches = append(results.Matches, matches...)
+
+		case "tag":
+			body := extractBody(entry.Content)
+			if len(body) == 0 {
+				continue
+			}
+			matches := findMatches(entry.SHA, "tag", body, pattern, true)
+			results.Matches = append(results.Matches, matches...)
+		}
+	}
+
+	return results, nil
+}
+
 // ScanObjectsWithDir iterates every object in a specific git directory's object
 // store and searches for pattern matches. submodulePath is set on each returned
 // Match to identify which repo the match comes from (empty for parent repo).

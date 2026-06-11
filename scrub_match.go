@@ -146,7 +146,7 @@ func runScrubMatch(flags globalFlags, kwargs map[string]interface{}) int {
 // matches the glob are shown.
 func scrubMatchDryRun(ctx context.Context, flags globalFlags, cmd string, compiledPattern *regexp.Regexp, scope *string, gitDir string, pattern string, fromSHA string, entireHistory bool) int {
 	infof(flags, "Scanning all objects...\n")
-	results, err := scan.ScanObjects(ctx, compiledPattern)
+	results, err := scan.ScanObjectsInRange(ctx, compiledPattern, fromSHA, entireHistory)
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("scanning objects: %v", err))
 	}
@@ -330,9 +330,9 @@ func scrubMatchDryRun(ctx context.Context, flags globalFlags, cmd string, compil
 				estimatedCommits = count + 1 // inclusive of fromSHA
 			}
 		}
-		scopeStr := ""
-		if scope != nil {
-			scopeStr = *scope
+		scopeStr := "entire_history"
+		if fromSHA != "" {
+			scopeStr = "range"
 		}
 		result := ScrubMatchDryRunResult{
 			Version:          1,
