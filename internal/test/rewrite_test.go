@@ -1,6 +1,7 @@
 package test
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -887,5 +888,123 @@ func TestRewriteAuthorHelpFlag(t *testing.T) {
 	combined := stdout + stderr
 	if !strings.Contains(combined, "rewrite author/committer across history") {
 		t.Errorf("help output should contain command description, got: %s", combined)
+	}
+}
+
+func TestRewriteAuthorJSON(t *testing.T) {
+	dir := newRepo(t)
+	makeCommits(t, dir, "oldname", "old@test.com", 5, "json")
+
+	stdout, stderr, code := runSafegit(t, dir, "--json", "--yes", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	if code != 0 {
+		t.Fatalf("rewrite-author --json failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	var result struct {
+		Version          int               `json:"version"`
+		DryRun           bool              `json:"dry_run"`
+		Rewrites         map[string]string `json:"rewrites"`
+		Tags             []interface{}     `json:"tags"`
+		CommitsRewritten int               `json:"commits_rewritten"`
+		NameChanged      int               `json:"name_changed"`
+		ParentOnly       int               `json:"parent_only"`
+		OldHead          string            `json:"old_head"`
+		NewHead          string            `json:"new_head"`
+		OldName          string            `json:"old_name"`
+		NewName          string            `json:"new_name"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v\nstdout: %s", err, stdout)
+	}
+
+	if result.Version != 1 {
+		t.Errorf("version: got %d, want 1", result.Version)
+	}
+	if result.DryRun {
+		t.Error("dry_run should be false")
+	}
+	if len(result.Rewrites) == 0 {
+		t.Error("rewrites map should be non-empty")
+	}
+	for old, new_ := range result.Rewrites {
+		if old == new_ {
+			t.Errorf("rewrites entry has old == new: %s", old)
+		}
+	}
+	if result.CommitsRewritten == 0 {
+		t.Error("commits_rewritten should be > 0")
+	}
+	if result.NameChanged == 0 {
+		t.Error("name_changed should be > 0")
+	}
+	if result.OldHead == "" {
+		t.Error("old_head should not be empty")
+	}
+	if result.NewHead == "" {
+		t.Error("new_head should not be empty")
+	}
+	if result.OldHead == result.NewHead {
+		t.Errorf("old_head should differ from new_head: %s", result.OldHead)
+	}
+	if result.OldName != "oldname" {
+		t.Errorf("old_name: got %q, want %q", result.OldName, "oldname")
+	}
+	if result.NewName != "newname" {
+		t.Errorf("new_name: got %q, want %q", result.NewName, "newname")
+	}
+
+	// Verify no oldname in author names (rewrite actually happened)
+	names := getAuthorNames(t, dir)
+	if containsName(names, "oldname") {
+		t.Errorf("author name 'oldname' still present after rewrite: %v", names)
+	}
+}
+
+func TestRewriteAuthorJSONDryRun(t *testing.T) {
+	dir := newRepo(t)
+	makeCommits(t, dir, "oldname", "old@test.com", 5, "jsondry")
+
+	headBefore := revParseHEAD(t, dir)
+
+	stdout, stderr, code := runSafegit(t, dir, "--json", "--dry-run", "--yes", "rewrite-author", "--old-name", "oldname", "--new-name", "newname")
+	if code != 0 {
+		t.Fatalf("rewrite-author --json --dry-run failed (code %d): stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	var result struct {
+		Version        int    `json:"version"`
+		DryRun         bool   `json:"dry_run"`
+		CommitsToCheck int    `json:"commits_to_check"`
+		CommitsMatched int    `json:"commits_matched"`
+		OldName        string `json:"old_name"`
+		NewName        string `json:"new_name"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v\nstdout: %s", err, stdout)
+	}
+
+	if result.Version != 1 {
+		t.Errorf("version: got %d, want 1", result.Version)
+	}
+	if !result.DryRun {
+		t.Error("dry_run should be true")
+	}
+	if result.CommitsToCheck == 0 {
+		t.Error("commits_to_check should be > 0")
+	}
+	if result.CommitsMatched == 0 {
+		t.Error("commits_matched should be > 0")
+	}
+	if result.OldName != "oldname" {
+		t.Errorf("old_name: got %q, want %q", result.OldName, "oldname")
+	}
+	if result.NewName != "newname" {
+		t.Errorf("new_name: got %q, want %q", result.NewName, "newname")
+	}
+
+	// HEAD should be unchanged (dry-run)
+	headAfter := revParseHEAD(t, dir)
+	if headAfter != headBefore {
+		t.Errorf("HEAD changed during dry run: %s -> %s", headBefore[:12], headAfter[:12])
 	}
 }

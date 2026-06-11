@@ -91,6 +91,25 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 			}
 		}
 
+		if flags.json {
+			result := RewriteAuthorDryRunResult{
+				Version:        1,
+				DryRun:         true,
+				CommitsToCheck: len(shas),
+				CommitsMatched: len(affected),
+			}
+			if oldName != "" {
+				result.OldName = oldName
+				result.NewName = newName
+			}
+			if oldEmail != "" {
+				result.OldEmail = oldEmail
+				result.NewEmail = newEmail
+			}
+			emitJSON(result)
+			return 0
+		}
+
 		var rewriteDesc string
 		switch {
 		case oldName != "" && oldEmail != "":
@@ -131,32 +150,44 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 		}
 	}
 
+	// Capture old HEAD before rewrite
+	oldHeadSHA, err := git.RevParse(ctx, "HEAD")
+	if err != nil {
+		die(flags, cmd, 1, fmt.Sprintf("resolving HEAD: %v", err))
+	}
+
 	// Actual rewrite
-	fmt.Println("Capturing pre-rewrite snapshot...")
+	infof(flags, "Capturing pre-rewrite snapshot...\n")
 	before, err := captureSnapshot(ctx)
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("capturing pre-rewrite snapshot: %v", err))
 	}
 
-	fmt.Println("Rewriting commits...")
+	infof(flags, "Rewriting commits...\n")
 	shaMap, nameChanged, err := rewriteCommits(ctx, oldName, newName, oldEmail, newEmail, flags.verbose)
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("rewriting commits: %v", err))
 	}
 
-	fmt.Println("Updating refs...")
-	_, err = updateRefs(ctx, shaMap, oldName, newName, oldEmail, newEmail, flags.verbose)
+	infof(flags, "Updating refs...\n")
+	tagRewrites, err := updateRefs(ctx, shaMap, oldName, newName, oldEmail, newEmail, flags.verbose)
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("updating refs: %v", err))
 	}
 
-	fmt.Println("Capturing post-rewrite snapshot...")
+	// Capture new HEAD after rewrite
+	newHeadSHA, err := git.RevParse(ctx, "HEAD")
+	if err != nil {
+		die(flags, cmd, 1, fmt.Sprintf("resolving new HEAD: %v", err))
+	}
+
+	infof(flags, "Capturing post-rewrite snapshot...\n")
 	after, err := captureSnapshot(ctx)
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("capturing post-rewrite snapshot: %v", err))
 	}
 
-	fmt.Println("Verifying...")
+	infof(flags, "Verifying...\n")
 	failures := compareSnapshots(before, after, oldName, newName, oldEmail)
 
 	// Also verify working tree is clean after rewrite
@@ -175,7 +206,7 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 	}
 
 	// Count checks: compareSnapshots runs 12 categories + tag-to-message per tag + working tree = 13 base checks
-	fmt.Println("Verification passed: all checks OK")
+	infof(flags, "Verification passed: all checks OK\n")
 
 	// Summary
 	identity := 0
@@ -186,13 +217,6 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 	}
 	total := len(shaMap)
 	parentOnly := total - nameChanged - identity
-	if parentOnly == 1 {
-		fmt.Printf("Rewrote %d commits (%d had name changes, %d was inherited (ancestors changed))\n",
-			total, nameChanged, parentOnly)
-	} else {
-		fmt.Printf("Rewrote %d commits (%d had name changes, %d were inherited (ancestors changed))\n",
-			total, nameChanged, parentOnly)
-	}
 
 	// Oplog entry
 	_ = oplog.Append(sgDir, oplog.Entry{
@@ -205,10 +229,81 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 		},
 	})
 
+	// JSON output
+	if flags.json {
+		rewrites := make(map[string]string)
+		for old, new_ := range shaMap {
+			if old != new_ {
+				rewrites[old] = new_
+			}
+		}
+		if tagRewrites == nil {
+			tagRewrites = []TagRewrite{}
+		}
+		result := RewriteAuthorResult{
+			Version:          1,
+			DryRun:           false,
+			Rewrites:         rewrites,
+			Tags:             tagRewrites,
+			CommitsRewritten: total,
+			NameChanged:      nameChanged,
+			ParentOnly:       parentOnly,
+			OldHead:          oldHeadSHA,
+			NewHead:          newHeadSHA,
+		}
+		if oldName != "" {
+			result.OldName = oldName
+			result.NewName = newName
+		}
+		if oldEmail != "" {
+			result.OldEmail = oldEmail
+			result.NewEmail = newEmail
+		}
+		emitJSON(result)
+		return 0
+	}
+
+	if parentOnly == 1 {
+		fmt.Printf("Rewrote %d commits (%d had name changes, %d was inherited (ancestors changed))\n",
+			total, nameChanged, parentOnly)
+	} else {
+		fmt.Printf("Rewrote %d commits (%d had name changes, %d were inherited (ancestors changed))\n",
+			total, nameChanged, parentOnly)
+	}
+
 	fmt.Println("\nTo update the remote:")
 	fmt.Println("  safegit push --both-branches-and-tags --force-with-lease")
 
 	return 0
+}
+
+// RewriteAuthorResult is the JSON output for `rewrite-author` in execute mode.
+type RewriteAuthorResult struct {
+	Version          int               `json:"version"`
+	DryRun           bool              `json:"dry_run"`
+	Rewrites         map[string]string `json:"rewrites"`
+	Tags             []TagRewrite      `json:"tags"`
+	CommitsRewritten int               `json:"commits_rewritten"`
+	NameChanged      int               `json:"name_changed"`
+	ParentOnly       int               `json:"parent_only"`
+	OldHead          string            `json:"old_head"`
+	NewHead          string            `json:"new_head"`
+	OldName          string            `json:"old_name,omitempty"`
+	NewName          string            `json:"new_name,omitempty"`
+	OldEmail         string            `json:"old_email,omitempty"`
+	NewEmail         string            `json:"new_email,omitempty"`
+}
+
+// RewriteAuthorDryRunResult is the JSON output for `rewrite-author --dry-run`.
+type RewriteAuthorDryRunResult struct {
+	Version        int    `json:"version"`
+	DryRun         bool   `json:"dry_run"`
+	CommitsToCheck int    `json:"commits_to_check"`
+	CommitsMatched int    `json:"commits_matched"`
+	OldName        string `json:"old_name,omitempty"`
+	NewName        string `json:"new_name,omitempty"`
+	OldEmail       string `json:"old_email,omitempty"`
+	NewEmail       string `json:"new_email,omitempty"`
 }
 
 // rewriteSnapshot captures the state of a repository's history for
