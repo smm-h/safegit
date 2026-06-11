@@ -2,16 +2,22 @@
 
 # Changelog
 
-## 0.18.3
+## 0.18.4
 
-Fix rewrite-author --quiet, add ScopeFilter to dry-run JSON, submodule-aware range scanning infrastructure.
+Fix commit --amend on root commits.
 
 <details>
 <summary>Context</summary>
 
-Loose ends from v0.18.2: rewrite-author summary had unconverted fmt.Printf calls, dry-run JSON lost the --scope glob value, and ScanObjectsInRangeWithDir was added for future submodule range-scoping.
+amend.go rejected root commits (no parent) even though reword and CommitTree already supported them. One-line fix matching the existing reword pattern.
 
 </details>
+
+### Fixes
+
+- **`commit --amend` now works on root commits.** Previously failed with 'is a root commit (no parent)'. The fix matches the existing pattern used by `reword`.
+
+## 0.18.3
 
 ### Features
 
