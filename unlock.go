@@ -12,7 +12,7 @@ import (
 )
 
 func runUnlock(flags globalFlags, ref string) int {
-	gitDir := mustGitDir(flags)
+	gitDir := mustGitDir(flags, "unlock")
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 4

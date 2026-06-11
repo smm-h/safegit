@@ -40,7 +40,7 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 		return 2
 	}
 
-	gitDir := mustGitDir(flags)
+	gitDir := mustGitDir(flags, cmd)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		die(flags, cmd, 4, err.Error())
 	}

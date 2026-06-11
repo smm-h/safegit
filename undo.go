@@ -25,7 +25,7 @@ var undoableOps = map[string]string{
 func runUndo(flags globalFlags, bypassSession bool) {
 	const cmd = "undo"
 
-	gitDir := mustGitDir(flags)
+	gitDir := mustGitDir(flags, cmd)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		die(flags, cmd, 4, err.Error())
 	}

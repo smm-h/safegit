@@ -82,7 +82,7 @@ func runScrubMatch(flags globalFlags, kwargs map[string]interface{}) int {
 	entireHistory := kwargs["entire_history"].(bool)
 
 	// Validation
-	gitDir := mustGitDir(flags)
+	gitDir := mustGitDir(flags, cmd)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		die(flags, cmd, 4, err.Error())
 	}

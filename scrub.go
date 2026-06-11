@@ -48,7 +48,7 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 	filePath := kwargs["file"].(string)
 
 	// Validation
-	gitDir := mustGitDir(flags)
+	gitDir := mustGitDir(flags, cmd)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		die(flags, cmd, 4, err.Error())
 	}

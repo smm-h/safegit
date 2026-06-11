@@ -22,6 +22,10 @@ import (
 // Falls back to the module version embedded by go install.
 var version = ""
 
+// jsonEmitted tracks whether emitJSON has been called, so die() knows
+// whether a JSON error envelope is still needed.
+var jsonEmitted bool
+
 func init() {
 	if version != "" {
 		version = strings.TrimPrefix(version, "v")
@@ -370,12 +374,11 @@ func loadConfig(flags globalFlags, gitDir string) (*repo.Config, error) {
 }
 
 // mustGitDir resolves the .git directory or exits with an error.
-func mustGitDir(flags globalFlags) string {
+func mustGitDir(flags globalFlags, cmd string) string {
 	ctx := context.Background()
 	gitDir, err := git.GitDir(ctx)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "not a git repository (or git is not installed)")
-		os.Exit(3)
+		die(flags, cmd, 3, "not a git repository (or git is not installed)")
 	}
 	// Resolve to absolute path
 	abs, err := filepath.Abs(gitDir)
@@ -406,6 +409,7 @@ func infof(flags globalFlags, format string, args ...interface{}) {
 
 // emitJSON marshals v as indented JSON to stdout. Exits on marshal error.
 func emitJSON(v interface{}) {
+	jsonEmitted = true
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: marshaling JSON: %v\n", err)
@@ -432,7 +436,14 @@ func commandHelp(cmd, usage string) {
 }
 
 // die prints an error for the given subcommand and exits with code.
+// When --json is active and no JSON has been emitted yet, it also writes
+// a JSON error envelope to stdout so callers always get structured output.
 func die(flags globalFlags, cmd string, code int, msg string) {
+	if flags.json && !jsonEmitted {
+		emitJSON(struct {
+			Error string `json:"error"`
+		}{Error: msg})
+	}
 	fmt.Fprintf(os.Stderr, "error: %s\n", msg)
 	os.Exit(code)
 }

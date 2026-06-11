@@ -15,7 +15,7 @@ import (
 func runRedo(flags globalFlags, bypassSession bool) {
 	const cmd = "redo"
 
-	gitDir := mustGitDir(flags)
+	gitDir := mustGitDir(flags, cmd)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		die(flags, cmd, 4, err.Error())
 	}

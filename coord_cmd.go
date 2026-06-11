@@ -44,7 +44,7 @@ func runCheckout(flags globalFlags, args []string) int {
 		commandHelp("checkout [git checkout args...]", "Checkout a ref (guarded: checks for uncommitted work).")
 	}
 
-	gitDir := mustGitDir(flags)
+	gitDir := mustGitDir(flags, "checkout")
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 4
@@ -99,7 +99,7 @@ const (
 )
 
 func runPull(flags globalFlags, mode pullMode, remote string, branch string) int {
-	gitDir := mustGitDir(flags)
+	gitDir := mustGitDir(flags, "pull")
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 4
@@ -163,7 +163,7 @@ func runMerge(flags globalFlags, args []string) int {
 		commandHelp("merge [git merge args...]", "Merge a branch (guarded: checks for uncommitted work).")
 	}
 
-	gitDir := mustGitDir(flags)
+	gitDir := mustGitDir(flags, "merge")
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 4
@@ -209,7 +209,7 @@ func runRebase(flags globalFlags, args []string) int {
 		commandHelp("rebase [git rebase args...]", "Rebase onto upstream (guarded: checks for uncommitted work).")
 	}
 
-	gitDir := mustGitDir(flags)
+	gitDir := mustGitDir(flags, "rebase")
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 4
@@ -253,7 +253,7 @@ func runReset(flags globalFlags, args []string) int {
 		commandHelp("reset [git reset args...]", "Reset HEAD (guarded for --hard).")
 	}
 
-	gitDir := mustGitDir(flags)
+	gitDir := mustGitDir(flags, "reset")
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 4
@@ -305,7 +305,7 @@ func runBisect(flags globalFlags, args []string) int {
 		commandHelp("bisect [git bisect args...]", "Bisect (guarded: checks for uncommitted work).")
 	}
 
-	gitDir := mustGitDir(flags)
+	gitDir := mustGitDir(flags, "bisect")
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 4
@@ -366,7 +366,7 @@ func runGuardedPassthrough(flags globalFlags, gitCmd string, args []string) int 
 		commandHelp(fmt.Sprintf("%s [git %s args...]", gitCmd, gitCmd), desc)
 	}
 
-	gitDir := mustGitDir(flags)
+	gitDir := mustGitDir(flags, gitCmd)
 	if err := repo.EnsureInitialized(gitDir); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 4
