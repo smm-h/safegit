@@ -120,10 +120,11 @@ func (p *Pipeline) tryAmend(
 		return nil, false, fmt.Errorf("resolving %s: %w", ref, err)
 	}
 
-	// Get parent of tip (ref^). Root commits cannot be amended.
+	// Get parent of tip (ref^). For root commits, parentSHA is empty;
+	// CommitTree handles this by omitting the -p flag.
 	parentSHA, err := git.RevParse(ctx, ref+"^")
 	if err != nil {
-		return nil, false, fmt.Errorf("cannot amend: %s is a root commit (no parent)", ref)
+		parentSHA = ""
 	}
 
 	// Determine message: use provided or reuse existing
