@@ -1,0 +1,8 @@
+# Version bump type: patch, minor, or major
+bump = "patch"
+# Short description of this release (required)
+description = "Fix commit --amend on root commits."
+# Optional context explaining why these changes were made
+context = "amend.go rejected root commits (no parent) even though reword and CommitTree already supported them. One-line fix matching the existing reword pattern."
+include = ["go", "docker"]
+exclude = []
