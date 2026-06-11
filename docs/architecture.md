@@ -10,7 +10,7 @@ This document captures safegit's design rationale and architectural specificatio
 
 ## Decision Record
 
-This section records WHY safegit exists in its current shape, rather than re-deriving it.
+This section records the key design decisions behind safegit and why alternatives were rejected. Each entry captures the option considered, its strengths, its disqualifying weaknesses, and the rationale for the chosen approach. The goal is to prevent re-derivation of decisions that were already explored and resolved during initial design.
 
 - **Why not Jujutsu (jj)**: jj eliminates the `.git/index` race architecturally (no index), but does not provide per-agent commit isolation -- multiple agents still share the working-copy commit `@` and must use `jj split` to separate their work. Adoption requires every agent and human to learn `jj` commands. jj's conflict format is binary in the git tree, unreadable by standard git tooling. Adopting jj imposes a new mental model and breaks teammate-side tools for a partial solution to our problem.
 
@@ -47,7 +47,7 @@ There is no `.safegit/` repo-tracked directory. All hooks live in `.git/hooks/` 
 
 ### Per-invocation tmp index
 
-There are no sessions and no session IDs. Each safegit invocation is a self-contained operation:
+Each safegit invocation creates an isolated temporary index file seeded from HEAD, performs all staging against that private index, and deletes it on exit. There are no persistent sessions, no session IDs, and no shared staging area between invocations. This isolation is the core mechanism that prevents concurrent agents from leaking files into each other's commits.
 
 1. Create `.git/safegit/tmp/<pid>-<random>/` where `<random>` is a short hex suffix (4 bytes) chosen to avoid PID-reuse races within the same second.
 2. Seed the tmp index from `HEAD`:
@@ -67,7 +67,7 @@ If the process is killed mid-invocation, the tmp directory leaks. `safegit docto
 
 ### Operation log schema
 
-`.git/safegit/log` is an append-only JSON-lines file. One line per mutating operation. It is the source of truth for `safegit doctor` and `safegit undo`.
+The operation log at `.git/safegit/log` is an append-only JSON-lines file recording every mutating operation safegit performs. Each line captures a timestamp, process ID, operation type, and operation-specific metadata such as ref names and commit SHAs. This log serves as the source of truth for `safegit undo`, `safegit redo`, and `safegit doctor`, enabling reliable rollback and bypass detection.
 
 ```json
 {"ts":"2026-04-26T11:39:42.123Z","pid":12345,"op":"commit","extra":{"ref":"refs/heads/main","tree":"<sha>","parent":"<sha>","sha":"<sha>","attempts":1}}
@@ -79,7 +79,7 @@ Required fields: `ts`, `pid`, `op`. Other fields are op-specific. Writes use `O_
 
 ### Lock file format
 
-Lock files (`locks/refs/heads/<branch>.lock`) are short text files created atomically via `O_CREAT|O_EXCL` (exclusive create):
+Lock files at `locks/refs/heads/<branch>.lock` are short text files created atomically via `O_CREAT|O_EXCL` (exclusive create) to serialize ref updates on a per-branch basis. Each lock file records the holder's PID, hostname, timestamp, and operation type, providing the information needed for liveness checks, stale lock recovery, and diagnostic inspection by `safegit doctor`.
 
 ```
 pid=12345
@@ -184,7 +184,7 @@ On each poll iteration, the lock file is checked for liveness: if the holder PID
 
 ### Hunk extraction
 
-For `<file>`, the canonical hunk list comes from:
+Hunk extraction produces a structured list of diff hunks between the tmp index and the working tree for a given file. The canonical hunk list is obtained by running `git diff` against the per-invocation temporary index, then parsing the output into header metadata and individual hunk objects with 1-based indices used for selective staging.
 
 ```
 GIT_INDEX_FILE=.git/safegit/tmp/<pid>-<random>/index \
@@ -212,7 +212,7 @@ type Hunk struct {
 
 ### Staging API surface
 
-The original design specified standalone `stage`/`unstage` commands. In practice, hunk selection is specified inline at commit time via `file:hunk-spec` syntax. The underlying mechanism is the same.
+Hunk-level staging is exposed inline at commit time via `file:hunk-spec` syntax rather than through standalone `stage`/`unstage` commands. The caller appends a colon and comma-separated 1-based hunk indices or ranges to the filename. The underlying mechanism -- extracting hunks, building a synthetic patch, and applying it to the tmp index -- is identical for all syntax forms.
 
 | Operation | Selects |
 |---|---|
@@ -222,7 +222,7 @@ The original design specified standalone `stage`/`unstage` commands. In practice
 
 ### Synthetic patch mechanism
 
-For all hunk-selecting variants:
+When a commit specifies individual hunks rather than whole files, safegit constructs a synthetic patch containing only the selected hunks and applies it to the temporary index via `git apply`. This reuses git's patch application logic, including three-way merge fallback, rather than implementing custom index manipulation. Line-number shifts from skipped hunks are handled via the `--recount` flag.
 
 1. Extract hunks as described above.
 2. Compute the selected-hunk subset.
@@ -246,7 +246,7 @@ For all hunk-selecting variants:
 
 ### Inverse: unstage
 
-Unstaging builds the same synthetic patch and applies it with `--reverse`. The "before" for the diff is the tmp index, the "after" is `HEAD`.
+Unstaging reverses the staging operation by building the same synthetic patch and applying it with the `--reverse` flag to the temporary index. The diff direction is inverted so that applying the patch in reverse removes previously staged changes. For whole-file unstaging, the simpler `git reset HEAD -- <file>` is used instead of patch reversal.
 
 ```
 git apply --cached --index --reverse --recount <synthetic-patch>
@@ -266,7 +266,7 @@ The only safegit-installed hook is `.git/hooks/pre-pre-push`, which is a wrapper
 
 ### Hook discovery
 
-Hooks are discovered in this order, all are run, the first non-zero exit aborts the push:
+safegit discovers pre-pre-push hooks from two locations: a single-file hook and a directory of hooks. All discovered hooks are executed in a deterministic order, and the first non-zero exit code aborts the push before any network connection is opened. Non-executable files in the directory are skipped with a warning that `safegit doctor` surfaces during health checks.
 
 1. `.git/hooks/pre-pre-push` (single file)
 2. `.git/hooks/pre-pre-push.d/*` (lexical order, `*` skips files starting with `.` or ending in `~`)
@@ -277,7 +277,7 @@ Standard git hooks (post-commit, prepare-commit-msg, etc.) live in `.git/hooks/`
 
 ### Stdin contract
 
-Identical to git's `pre-push` hook input. One line per ref being pushed:
+Pre-pre-push hooks receive their input on stdin in the same format as git's built-in `pre-push` hook, ensuring compatibility with existing hook scripts. Each line describes one ref being pushed, with four space-separated fields identifying the local ref, local SHA, remote ref, and remote SHA. This contract means hooks written for git's `pre-push` can be moved to `pre-pre-push` without modification.
 
 ```
 <local-ref> SP <local-sha> SP <remote-ref> SP <remote-sha> LF
@@ -287,7 +287,7 @@ Identical to git's `pre-push` hook input. One line per ref being pushed:
 
 ### Environment
 
-safegit sets the following env for hooks:
+safegit sets several environment variables before executing pre-pre-push hooks, providing context about the push operation that hooks can use for validation decisions. These variables identify the remote being pushed to, the configured timeout for self-monitoring, and the current execution phase. All other environment variables from the parent process are inherited, so hooks have access to PATH and any user-configured variables.
 
 | Var | Meaning |
 |---|---|
@@ -334,11 +334,11 @@ If both phases are needed, the user splits expensive checks (smoke tests) into `
 
 ### Bypass
 
-`safegit push --no-pre-pre-push` skips this phase. For agents we recommend disallowing this flag via Claude Code settings.
+The `safegit push --no-pre-pre-push` flag skips the entire pre-pre-push hook phase and proceeds directly to the git push. This escape hatch exists for human operators who need to push urgently when a hook is broken or misconfigured. For AI agent environments, this flag should be disallowed via Claude Code permission settings to prevent agents from routinely bypassing validation checks.
 
 ## Failure Modes
 
-For each failure mode, the design specifies both detection AND recovery. Recovery is automatic unless explicitly noted.
+This section catalogs every known failure mode in safegit's operation, covering process crashes, concurrent access races, network failures, disk exhaustion, and cross-machine usage. For each failure mode the design specifies the observable symptom, the detection mechanism, and the recovery procedure. Recovery is automatic unless explicitly noted as manual or out of scope.
 
 ### Process crashes mid-stage
 
