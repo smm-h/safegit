@@ -181,7 +181,7 @@ func runScrubFile(flags globalFlags, kwargs map[string]interface{}) int {
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("listing commits: %v", err))
 	}
-	shas := append([]string{fromSHA}, splitNonEmpty(out)...)
+	shas := append([]string{fromSHA}, git.SplitNonEmpty(out)...)
 
 	// Track old blob SHAs that get replaced, for post-cleanup verification.
 	oldBlobSHAs := make(map[string]bool)
@@ -394,14 +394,14 @@ func runScrubFileInSubmodule(
 			os.Chdir(parentDir)
 			die(flags, cmd, 1, fmt.Sprintf("submodule: listing commits: %v", err))
 		}
-		subSHAs = splitNonEmpty(out)
+		subSHAs = git.SplitNonEmpty(out)
 	} else {
 		out, _, err := git.Run(ctx, "rev-list", "--topo-order", "--reverse", subFromSHA+"..HEAD")
 		if err != nil {
 			os.Chdir(parentDir)
 			die(flags, cmd, 1, fmt.Sprintf("submodule: listing commits: %v", err))
 		}
-		subSHAs = append([]string{subFromSHA}, splitNonEmpty(out)...)
+		subSHAs = append([]string{subFromSHA}, git.SplitNonEmpty(out)...)
 	}
 
 	subCommitCount := len(subSHAs)
@@ -530,7 +530,7 @@ func runScrubFileInSubmodule(
 	if err != nil {
 		die(flags, cmd, 1, fmt.Sprintf("listing parent commits: %v", err))
 	}
-	parentSHAs := splitNonEmpty(out)
+	parentSHAs := git.SplitNonEmpty(out)
 
 	infof(flags, "Rewriting %d parent commits (gitlink updates)...\n", len(parentSHAs))
 

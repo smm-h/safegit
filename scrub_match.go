@@ -642,7 +642,7 @@ func scrubMatchExecute(
 				os.Chdir(parentDir)
 				die(flags, cmd, 1, fmt.Sprintf("submodule %s: listing commits: %v", si.sub.RelativePath, err))
 			}
-			subSHAs = splitNonEmpty(out)
+			subSHAs = git.SplitNonEmpty(out)
 		} else {
 			// For submodules with --from, use entire history since we don't know
 			// the corresponding commit boundary in the submodule.
@@ -651,7 +651,7 @@ func scrubMatchExecute(
 				os.Chdir(parentDir)
 				die(flags, cmd, 1, fmt.Sprintf("submodule %s: listing commits: %v", si.sub.RelativePath, err))
 			}
-			subSHAs = splitNonEmpty(out)
+			subSHAs = git.SplitNonEmpty(out)
 		}
 
 		subMessagesModified := 0
@@ -760,13 +760,13 @@ func scrubMatchExecute(
 		if err != nil {
 			die(flags, cmd, 1, fmt.Sprintf("listing commits: %v", err))
 		}
-		shas = splitNonEmpty(out)
+		shas = git.SplitNonEmpty(out)
 	} else {
 		out, _, err := git.Run(ctx, "rev-list", "--topo-order", "--reverse", fromSHA+"..HEAD")
 		if err != nil {
 			die(flags, cmd, 1, fmt.Sprintf("listing commits: %v", err))
 		}
-		shas = append([]string{fromSHA}, splitNonEmpty(out)...)
+		shas = append([]string{fromSHA}, git.SplitNonEmpty(out)...)
 	}
 
 	commitCount := len(shas)
@@ -1153,7 +1153,7 @@ func rewriteTagAnnotations(ctx context.Context, flags globalFlags, cmd string, c
 
 	var tagRewrites []TagRewrite
 	tagsRewritten := 0
-	lines := splitNonEmpty(out)
+	lines := git.SplitNonEmpty(out)
 	for _, line := range lines {
 		parts := strings.SplitN(line, " ", 3)
 		if len(parts) != 3 {

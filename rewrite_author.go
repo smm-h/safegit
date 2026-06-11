@@ -70,7 +70,7 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 		if err != nil {
 			die(flags, cmd, 1, fmt.Sprintf("listing commits: %v", err))
 		}
-		shas := splitNonEmpty(out)
+		shas := git.SplitNonEmpty(out)
 
 		var affected []string
 		for _, sha := range shas {
@@ -123,7 +123,7 @@ func runRewriteAuthor(flags globalFlags, kwargs map[string]interface{}) int {
 		if err != nil {
 			die(flags, cmd, 1, fmt.Sprintf("listing commits: %v", err))
 		}
-		total := len(splitNonEmpty(out))
+		total := len(git.SplitNonEmpty(out))
 
 		if !confirmOrAbort(flags, "About to rewrite %d commits. This cannot be undone. Proceed?", total) {
 			fmt.Println("Aborted.")
@@ -351,28 +351,12 @@ func logLines(ctx context.Context, format string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return splitNonEmpty(out), nil
-}
-
-// splitNonEmpty splits on newlines and drops empty entries.
-func splitNonEmpty(s string) []string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil
-	}
-	lines := strings.Split(s, "\n")
-	result := make([]string, 0, len(lines))
-	for _, l := range lines {
-		if l != "" {
-			result = append(result, l)
-		}
-	}
-	return result
+	return git.SplitNonEmpty(out), nil
 }
 
 // splitSorted splits on newlines, drops empties, and sorts the result.
 func splitSorted(s string) []string {
-	lines := splitNonEmpty(s)
+	lines := git.SplitNonEmpty(s)
 	sort.Strings(lines)
 	return lines
 }
@@ -588,7 +572,7 @@ func rewriteCommits(ctx context.Context, oldName, newName, oldEmail, newEmail st
 		return nil, 0, fmt.Errorf("listing commits: %w", err)
 	}
 
-	shas := splitNonEmpty(out)
+	shas := git.SplitNonEmpty(out)
 	nameChanged := 0
 
 	shaMap, _, err := walkAndRewrite(ctx, shas, func(ctx context.Context, sha string, info git.CommitInfo, remappedParents []string) (CommitTransform, error) {
@@ -653,7 +637,7 @@ func updateRefs(ctx context.Context, shaMap map[string]string, oldName, newName,
 	}
 
 	var tagRewrites []TagRewrite
-	lines := splitNonEmpty(out)
+	lines := git.SplitNonEmpty(out)
 	for _, line := range lines {
 		parts := strings.SplitN(line, " ", 3)
 		if len(parts) != 3 {

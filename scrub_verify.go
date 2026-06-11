@@ -192,7 +192,7 @@ func verifyScrub(ctx context.Context, shaMap map[string]string, filePath string,
 	if err != nil {
 		failures = append(failures, fmt.Sprintf("check 6 (tag names): failed to list tags: %v", err))
 	} else {
-		tagLines := splitNonEmpty(tagOut)
+		tagLines := git.SplitNonEmpty(tagOut)
 		for _, line := range tagLines {
 			parts := strings.Fields(line)
 			if len(parts) < 3 {
@@ -238,7 +238,7 @@ func verifyScrub(ctx context.Context, shaMap map[string]string, filePath string,
 	if err != nil {
 		failures = append(failures, fmt.Sprintf("check 7 (branch refs): failed to list branches: %v", err))
 	} else {
-		branchLines := splitNonEmpty(branchOut)
+		branchLines := git.SplitNonEmpty(branchOut)
 		for _, line := range branchLines {
 			parts := strings.Fields(line)
 			if len(parts) != 2 {
