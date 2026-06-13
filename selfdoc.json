@@ -1,5 +1,6 @@
 {
   "version": "0.18.4",
+  "version_source": "VERSION",
   "source": [
     {
       "path": ".",
