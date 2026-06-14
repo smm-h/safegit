@@ -1,17 +1,17 @@
 {
   "commands": {
     "bisect": {
-      "help": "bisect (guarded)",
+      "help": "binary search through commits to find a bug, with safety guards",
       "name": "bisect",
       "passthrough": true
     },
     "checkout": {
-      "help": "checkout a ref (guarded)",
+      "help": "checkout a branch or ref with working-tree safety guards",
       "name": "checkout",
       "passthrough": true
     },
     "cherry-pick": {
-      "help": "cherry-pick commits (guarded)",
+      "help": "cherry-pick one or more commits onto HEAD with safety guards",
       "name": "cherry-pick",
       "passthrough": true
     },
@@ -27,89 +27,89 @@
       "flags": [
         {
           "default": [],
-          "help": "commit message (repeatable)",
+          "help": "commit message line; can be repeated to build multi-line messages",
           "name": "m",
           "repeatable": true,
           "short": "m",
           "type": "str"
         },
         {
-          "help": "read commit message from file",
+          "help": "read the full commit message body from a file instead of --m flags",
           "name": "F",
           "short": "F",
           "type": "str"
         },
         {
-          "help": "commit to a different branch",
+          "help": "commit the staged files onto a different branch without switching to it",
           "name": "branch",
           "type": "str"
         },
         {
           "default": false,
-          "help": "amend the current HEAD commit",
+          "help": "amend the current HEAD commit by replacing it with updated content",
           "name": "amend",
           "negatable": true,
           "type": "bool"
         },
         {
           "default": false,
-          "help": "allow commits with no file changes",
+          "help": "allow creating a commit even when no files have been changed",
           "name": "allow-empty",
           "negatable": true,
           "type": "bool"
         },
         {
           "default": [],
-          "help": "add a trailer (repeatable)",
+          "help": "add a key-value trailer line to the commit message (repeatable)",
           "name": "trailer",
           "repeatable": true,
           "type": "str"
         }
       ],
-      "help": "stage and commit files atomically",
+      "help": "stage and commit specified files in a single atomic operation",
       "name": "commit"
     },
     "doctor": {
       "flags": [
         {
           "default": false,
-          "help": "run health checks without fixing",
+          "help": "run all health checks and report results without fixing any issues",
           "name": "diagnose",
           "negatable": true,
           "type": "bool"
         },
         {
           "default": false,
-          "help": "run health checks and fix issues",
+          "help": "run all health checks and automatically repair any issues found",
           "name": "fix",
           "negatable": true,
           "type": "bool"
         },
         {
           "default": false,
-          "help": "remove safegit from this repository",
+          "help": "remove all safegit hooks and metadata from this repository entirely",
           "name": "uninstall",
           "negatable": true,
           "type": "bool"
         }
       ],
-      "help": "health checks and repair",
+      "help": "run diagnostic health checks on the repository and optionally repair issues",
       "name": "doctor"
     },
     "merge": {
-      "help": "merge a branch (guarded)",
+      "help": "merge a branch into HEAD with working-tree safety guards",
       "name": "merge",
       "passthrough": true
     },
     "pull": {
       "args": [
         {
-          "help": "remote name",
+          "help": "name of the remote repository to pull from (defaults to origin)",
           "name": "remote",
           "required": false
         },
         {
-          "help": "branch to pull",
+          "help": "name of the remote branch to fetch and merge into the current branch",
           "name": "branch",
           "required": false
         }
@@ -117,64 +117,86 @@
       "flags": [
         {
           "default": false,
-          "help": "fast-forward only (fail if not possible)",
+          "help": "fast-forward only; abort with an error if a merge commit is required",
           "name": "ff-only",
           "negatable": true,
           "type": "bool"
         },
         {
           "default": false,
-          "help": "fast-forward if possible, merge commit otherwise",
+          "help": "fast-forward when possible, otherwise create a merge commit automatically",
           "name": "ff",
           "negatable": true,
           "type": "bool"
         },
         {
           "default": false,
-          "help": "always create a merge commit",
+          "help": "always create a merge commit even when fast-forward is possible",
           "name": "no-ff",
           "negatable": true,
           "type": "bool"
         }
       ],
-      "help": "fetch and merge (default --ff-only)",
+      "help": "fetch from remote and merge, defaulting to fast-forward-only mode",
       "name": "pull"
     },
     "push": {
       "args": [
         {
-          "help": "remote name",
+          "help": "name of the remote repository to push to (defaults to origin)",
           "name": "remote",
           "required": false
-        },
-        {
-          "help": "refs to push",
-          "name": "refspecs",
-          "required": false,
-          "variadic": true
         }
       ],
       "flags": [
         {
           "default": false,
-          "help": "skip pre-pre-push hooks",
+          "help": "skip running pre-pre-push hook scripts before pushing to remote",
           "name": "no-pre-pre-push",
           "negatable": true,
           "type": "bool"
         },
         {
           "default": false,
-          "help": "force push to remote",
-          "name": "force-push",
+          "help": "force push using --force-with-lease to prevent overwriting others' work",
+          "name": "force-with-lease",
+          "negatable": true,
+          "type": "bool"
+        },
+        {
+          "default": false,
+          "help": "push only the current HEAD branch to the remote, ignoring other refs",
+          "name": "only-head",
+          "negatable": true,
+          "type": "bool"
+        },
+        {
+          "default": false,
+          "help": "push all local branches to the remote, ignoring tags and other refs",
+          "name": "only-branches",
+          "negatable": true,
+          "type": "bool"
+        },
+        {
+          "default": false,
+          "help": "push all local tags to the remote without pushing any branches",
+          "name": "only-tags",
+          "negatable": true,
+          "type": "bool"
+        },
+        {
+          "default": false,
+          "help": "push all local branches and all tags to the remote in one operation",
+          "name": "both-branches-and-tags",
           "negatable": true,
           "type": "bool"
         }
       ],
-      "help": "push with pre-hooks and retry",
+      "help": "push refs to remote with pre-pre-push hooks and automatic retry",
       "name": "push"
     },
     "rebase": {
-      "help": "rebase onto upstream (guarded)",
+      "help": "rebase current branch onto upstream with safety guards",
       "name": "rebase",
       "passthrough": true
     },
@@ -182,83 +204,76 @@
       "flags": [
         {
           "default": false,
-          "help": "redo across all sessions, ignoring session ID",
+          "help": "redo across all sessions by ignoring the session ID ownership check",
           "name": "bypass-session",
           "negatable": true,
           "type": "bool"
         }
       ],
-      "help": "restore what undo removed (one-shot)",
+      "help": "restore the commit that undo removed, as a one-shot counterpart to undo",
       "name": "redo"
     },
     "reset": {
-      "help": "reset HEAD (guarded for --hard)",
+      "help": "reset HEAD with guards that prevent accidental --hard data loss",
       "name": "reset",
       "passthrough": true
     },
     "revert": {
-      "help": "revert commits (guarded)",
+      "help": "revert one or more commits creating inverse patches, with safety guards",
       "name": "revert",
       "passthrough": true
     },
     "rewrite-author": {
       "flags": [
         {
-          "help": "current author/committer name to match",
+          "help": "current author or committer display name to search for and replace",
           "name": "old-name",
           "type": "str"
         },
         {
-          "help": "replacement name",
+          "help": "new display name to substitute wherever the old name is found in history",
           "name": "new-name",
           "type": "str"
         },
         {
-          "help": "current author/committer email to match",
+          "help": "current author or committer email address to search for and replace",
           "name": "old-email",
           "type": "str"
         },
         {
-          "help": "replacement email",
+          "help": "new email address to substitute wherever the old email is found in history",
           "name": "new-email",
           "type": "str"
-        },
-        {
-          "default": false,
-          "help": "force-push after rewriting",
-          "name": "push",
-          "negatable": true,
-          "type": "bool"
         }
       ],
-      "help": "rewrite author/committer across history",
+      "help": "rewrite author and committer name or email across all commit history",
       "name": "rewrite-author"
     },
     "undo": {
       "flags": [
         {
           "default": false,
-          "help": "undo across all sessions, ignoring session ID",
+          "help": "undo across all sessions by ignoring the session ID ownership check",
           "name": "bypass-session",
           "negatable": true,
           "type": "bool"
         }
       ],
-      "help": "reverse last commit/amend/reword via oplog",
+      "help": "reverse the last commit, amend, or reword operation using the oplog",
       "name": "undo"
     },
     "unlock": {
       "args": [
         {
-          "help": "the ref name to unlock",
+          "help": "the ref name (e.g. refs/heads/main) whose stale .lock file to remove",
           "name": "ref"
         }
       ],
-      "help": "release a stale ref lock",
+      "help": "release a stale .lock file left behind by a crashed git process",
       "name": "unlock"
     },
     "version": {
-      "help": "print version and build info",
+      "help": "print safegit version, Go runtime version, and git version",
       "name": "version"
     }
   },
@@ -298,7 +313,7 @@
   "global_flags": [
     {
       "default": false,
-      "help": "suppress non-essential output",
+      "help": "suppress all informational output, only showing errors and results",
       "name": "quiet",
       "negatable": true,
       "short": "q",
@@ -306,14 +321,14 @@
     },
     {
       "default": false,
-      "help": "verbose output",
+      "help": "enable verbose output with detailed progress and diagnostic info",
       "name": "verbose",
       "negatable": true,
       "type": "bool"
     },
     {
       "default": false,
-      "help": "preview changes without writing",
+      "help": "preview what would happen without writing any changes to disk",
       "name": "dry-run",
       "negatable": true,
       "short": "n",
@@ -321,17 +336,24 @@
     },
     {
       "default": false,
-      "help": "force operation",
-      "name": "force",
+      "help": "automatically confirm all interactive prompts without asking",
+      "name": "yes",
       "negatable": true,
-      "short": "f",
+      "short": "y",
       "type": "bool"
     },
     {
       "default": "",
-      "help": "config file path",
+      "help": "path to a custom safegit config file instead of the default location",
       "name": "config",
       "type": "str"
+    },
+    {
+      "default": false,
+      "help": "emit machine-readable JSON output to stdout instead of human text",
+      "name": "json",
+      "negatable": true,
+      "type": "bool"
     }
   ],
   "groups": {
@@ -340,7 +362,7 @@
         "get": {
           "args": [
             {
-              "help": "configuration key",
+              "help": "the configuration key whose current value should be retrieved",
               "name": "key"
             }
           ],
@@ -350,11 +372,11 @@
         "set": {
           "args": [
             {
-              "help": "configuration key",
+              "help": "the configuration key to set to the specified value in config.json",
               "name": "key"
             },
             {
-              "help": "configuration value",
+              "help": "the new value to assign to the specified configuration key",
               "name": "value"
             }
           ],
@@ -366,7 +388,7 @@
           "name": "show"
         }
       },
-      "help": "show or set configuration values",
+      "help": "show, get, or set safegit configuration key-value pairs",
       "name": "config"
     },
     "hook": {
@@ -374,7 +396,7 @@
         "install": {
           "args": [
             {
-              "help": "path to hook script",
+              "help": "filesystem path to the hook script file to install into safegit",
               "name": "path"
             }
           ],
@@ -388,7 +410,7 @@
         "run": {
           "args": [
             {
-              "help": "hook name to run",
+              "help": "name of a specific hook to run; omit to run all installed hooks",
               "name": "name",
               "required": false
             }
@@ -397,7 +419,7 @@
           "name": "run"
         }
       },
-      "help": "manage pre-pre-push hooks",
+      "help": "manage pre-pre-push hook scripts that run before every push",
       "name": "hook"
     },
     "scrub": {
@@ -405,18 +427,18 @@
         "file": {
           "args": [
             {
-              "help": "repo-relative file path to scrub",
+              "help": "repository-relative path to the file that should be scrubbed from history",
               "name": "file"
             }
           ],
           "flags": [
             {
-              "help": "first commit to include in the rewrite",
+              "help": "first commit hash to include when rewriting history (default: root commit)",
               "name": "from",
               "type": "str"
             },
             {
-              "help": "audit trail explaining why the scrub is needed",
+              "help": "mandatory audit trail message explaining why this scrub operation is needed",
               "name": "reason",
               "type": "str"
             }
@@ -427,17 +449,12 @@
         "match": {
           "flags": [
             {
-              "help": "regex pattern to search for",
+              "help": "regular expression pattern to search for across all blobs in history",
               "name": "pattern",
               "type": "str"
             },
             {
-              "help": "replacement string",
-              "name": "replace",
-              "type": "str"
-            },
-            {
-              "help": "audit trail explaining why the scrub is needed",
+              "help": "mandatory audit trail message explaining why this scrub operation is needed",
               "name": "reason",
               "type": "str"
             },
@@ -447,13 +464,25 @@
               "type": "str"
             },
             {
-              "help": "first commit to include in the rewrite",
+              "help": "literal string to substitute for each regex match found in history",
+              "name": "replace",
+              "type": "str"
+            },
+            {
+              "default": false,
+              "help": "replace matches with random printable ASCII of same length",
+              "name": "mangle",
+              "negatable": true,
+              "type": "bool"
+            },
+            {
+              "help": "first commit hash to include when rewriting history (default: root commit)",
               "name": "from",
               "type": "str"
             },
             {
               "default": false,
-              "help": "rewrite all commits",
+              "help": "rewrite all commits from the root of the repository to HEAD",
               "name": "entire-history",
               "negatable": true,
               "type": "bool"
@@ -470,5 +499,5 @@
   "help": "concurrency-safe git for multi-agent use",
   "name": "safegit",
   "project_id": "github.com/smm-h/safegit",
-  "version": "0.14.1+dirty"
+  "version": "dev"
 }
